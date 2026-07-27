@@ -21,7 +21,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V6 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V7 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
@@ -94,11 +94,11 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Initial administrator claim | TODO | |
-| Multi-user CRUD and password reset | TODO | |
-| Roles and authorization | TODO | |
-| Library restrictions | TODO | |
-| Age and sharing-label restrictions | TODO | |
+| Initial administrator claim | PARTIAL | Atomic single-winner claim lifecycle, durable persistence, all-role assignment, and BCrypt hashing tests; public REST endpoint pending |
+| Multi-user CRUD and password reset | PARTIAL | Case-insensitive identity, default roles, create/authenticate lifecycle, and atomic relation persistence tests; REST CRUD and password reset pending |
+| Roles and authorization | PARTIAL | Komga role model and durable assignment tests; HTTP authorization pending |
+| Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
+| Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, and persistence tests; catalog query enforcement pending |
 | Sessions and remember-me | TODO | |
 | Basic authentication | TODO | |
 | API keys | TODO | |
