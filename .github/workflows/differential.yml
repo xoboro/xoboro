@@ -123,6 +123,7 @@ jobs:
                 --data-binary @- >/dev/null
           done
 
+          catalog_ready=false
           for attempt in $(seq 1 120); do
             reference_status="$(
               curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
@@ -136,13 +137,33 @@ jobs:
             )"
             if [ "${reference_status}" = "READY" ] &&
               [ "${candidate_status}" = "READY" ]; then
-              exit 0
+              catalog_ready=true
+              break
             fi
             sleep 1
           done
-          exit 1
+          if [ "${catalog_ready}" != "true" ]; then
+            exit 1
+          fi
 
-      - name: Compare authenticated synthetic catalog
+          reference_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output '.content[0].id'
+          )"
+          candidate_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output '.content[0].id'
+          )"
+          printf 'KOMGA_REFERENCE_BOOK_ID=%s\n' "${reference_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_BOOK_ID=%s\n' "${candidate_book_id}" \
+            >>"${GITHUB_ENV}"
+
+      - name: Compare authenticated synthetic catalog and media
         env:
           SYNTHETIC_EMAIL: admin@example.invalid
           SYNTHETIC_PASSWORD: xoboro-differential-only
@@ -158,6 +179,10 @@ jobs:
           --reference http://127.0.0.1:25610 \
           --candidate http://127.0.0.1:25611 \
           --suite compatibility/komga-differential/suites/komga-1.25.0-catalog.json"
+          ./gradlew :compatibility:komga-differential:run --args="\
+          --reference http://127.0.0.1:25610 \
+          --candidate http://127.0.0.1:25611 \
+          --suite compatibility/komga-differential/suites/komga-1.25.0-media.json"
 
       - name: Show server logs after failure
         if: failure()

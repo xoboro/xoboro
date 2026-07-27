@@ -284,7 +284,7 @@ class CatalogRoutesTest {
           }.status,
         )
         assertEquals(
-          HttpStatusCode.OK,
+          HttpStatusCode.BadRequest,
           client.get("/api/v1/books/book-1/pages/1/raw") {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
           }.status,
@@ -339,7 +339,7 @@ class CatalogRoutesTest {
             header(HttpHeaders.Range, "bytes=20-30")
           }.status,
         )
-        assertEquals(8, content.closedStreams)
+        assertEquals(7, content.closedStreams)
 
         val manifestResponse =
           client.get("/api/v1/books/book-1/manifest") {

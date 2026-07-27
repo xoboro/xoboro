@@ -32,7 +32,6 @@ import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadingDirection
 import java.time.Instant
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -158,7 +157,6 @@ fun Route.komgaWebPubRoutes(
 
 @Serializable
 data class WPPublicationDto(
-  @SerialName("@context")
   val context: String,
   val metadata: WPMetadataDto,
   val links: List<WPLinkDto>,
@@ -179,6 +177,7 @@ data class WPLinkDto(
   val templated: Boolean? = null,
   val width: Int? = null,
   val height: Int? = null,
+  val alternate: List<WPLinkDto> = emptyList(),
   val properties: Map<String, Map<String, String>> = emptyMap(),
   val children: List<WPLinkDto> = emptyList(),
 )
@@ -187,7 +186,6 @@ data class WPLinkDto(
 data class WPMetadataDto(
   val title: String,
   val identifier: String? = null,
-  @SerialName("@type")
   val type: String? = null,
   val conformsTo: String,
   val sortAs: String? = null,
@@ -195,36 +193,36 @@ data class WPMetadataDto(
   val modified: String,
   val published: String? = null,
   val language: String? = null,
-  val author: List<String>,
-  val translator: List<String>,
-  val editor: List<String>,
-  val artist: List<String>,
-  val illustrator: List<String>,
-  val letterer: List<String>,
-  val penciler: List<String>,
-  val colorist: List<String>,
-  val inker: List<String>,
-  val contributor: List<String>,
-  val publisher: List<String>,
-  val subject: List<String>,
+  val author: List<String> = emptyList(),
+  val translator: List<String> = emptyList(),
+  val editor: List<String> = emptyList(),
+  val artist: List<String> = emptyList(),
+  val illustrator: List<String> = emptyList(),
+  val letterer: List<String> = emptyList(),
+  val penciler: List<String> = emptyList(),
+  val colorist: List<String> = emptyList(),
+  val inker: List<String> = emptyList(),
+  val contributor: List<String> = emptyList(),
+  val publisher: List<String> = emptyList(),
+  val subject: List<String> = emptyList(),
   val readingProgression: String? = null,
   val description: String? = null,
   val numberOfPages: Int,
   val belongsTo: WPBelongsToDto,
-  val rendition: Map<String, String>,
+  val rendition: Map<String, String> = emptyMap(),
 )
 
 @Serializable
 data class WPBelongsToDto(
   val series: List<WPContributorDto>,
-  val collection: List<WPContributorDto>,
+  val collection: List<WPContributorDto> = emptyList(),
 )
 
 @Serializable
 data class WPContributorDto(
   val name: String,
   val position: Float? = null,
-  val links: List<WPLinkDto>,
+  val links: List<WPLinkDto> = emptyList(),
 )
 
 @Serializable
@@ -493,7 +491,7 @@ private fun CatalogBook.toDivinaManifest(apiBaseUrl: String): WPPublicationDto {
         WPLinkDto(
           rel = "http://opds-spec.org/acquisition",
           href = "$apiBaseUrl/books/${book.id.value}/file",
-          type = analyzed.mediaType,
+          type = analyzed.mediaType.toKomgaExportMediaType(),
           properties = emptyProperties,
         ),
       ),
@@ -596,6 +594,13 @@ private fun CatalogBook.readingProgression(): String? =
     ReadingDirection.RIGHT_TO_LEFT -> "rtl"
     ReadingDirection.VERTICAL, ReadingDirection.WEBTOON -> "ttb"
     null -> null
+  }
+
+internal fun String?.toKomgaExportMediaType(): String =
+  when {
+    this == "application/zip" -> "application/vnd.comicbook+zip"
+    this?.startsWith("application/x-rar-compressed") == true -> "application/vnd.comicbook-rar"
+    else -> orEmpty()
   }
 
 private fun ApplicationCall.apiBaseUrl(): String {
