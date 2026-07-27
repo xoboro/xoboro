@@ -21,6 +21,7 @@ import io.xoboro.server.persistence.XoboroDatabase
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
@@ -144,6 +145,40 @@ class LibraryMaintenanceTaskTest {
       assertEquals("REFRESH_SERIES_METADATA_series-1", seriesTask.task.id)
       assertEquals(RefreshSeriesMetadataTaskHandler.TASK_TYPE, seriesTask.task.type)
       assertEquals(SERIES_ID.value, seriesTask.task.groupId)
+    }
+  }
+
+  @Test
+  fun `catalog requester emits target scoped durable work and clears only queued work`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("catalog-maintenance.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val queue = JooqDurableTaskQueue(database)
+      val requester =
+        DurableCatalogMaintenanceRequester(
+          analysis =
+            AnalyzeBookTaskEmitter(
+              JooqBookRepository(database),
+              queue,
+              currentTimeMillis = { 400 },
+            ),
+          metadata =
+            RefreshMetadataTaskEmitter(
+              JooqBookRepository(database),
+              JooqSeriesRepository(database),
+              queue,
+              currentTimeMillis = { 400 },
+            ),
+          queue = queue,
+        )
+
+      assertTrue(requester.analyzeBook(BookId("book-active")))
+      assertFalse(requester.analyzeBook(BookId("missing")))
+      assertEquals(1, requester.analyzeSeries(SERIES_ID))
+      assertEquals(2, requester.refreshSeriesMetadata(SERIES_ID))
+      assertFalse(requester.refreshBookMetadata(BookId("book-deleted")))
+      assertEquals(3, requester.clearUnclaimedTasks())
+      assertEquals(0, queue.counts().pending)
     }
   }
 

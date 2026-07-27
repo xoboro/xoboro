@@ -6,6 +6,7 @@ import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.SeriesId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -21,12 +22,37 @@ class AnalyzeBookTaskEmitter(
   fun analyzeLibrary(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
+  ): Int =
+    enqueueBooks(
+      books.findAllByLibraryId(libraryId).asSequence(),
+      priority,
+    )
+
+  fun analyzeBook(
+    bookId: BookId,
+    priority: Int = TaskPriority.HIGH,
+  ): Boolean =
+    books.findByIdOrNull(bookId)
+      ?.takeIf { it.deletedAtMillis == null }
+      ?.let { enqueueBooks(sequenceOf(it), priority) == 1 }
+      ?: false
+
+  fun analyzeSeries(
+    seriesId: SeriesId,
+    priority: Int = TaskPriority.HIGH,
+  ): Int =
+    enqueueBooks(
+      books.findAllBySeriesId(seriesId).asSequence(),
+      priority,
+    )
+
+  private fun enqueueBooks(
+    candidates: Sequence<io.xoboro.core.domain.Book>,
+    priority: Int,
   ): Int {
     val nowMillis = currentTimeMillis()
     require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
-    return books
-      .findAllByLibraryId(libraryId)
-      .asSequence()
+    return candidates
       .filter { it.deletedAtMillis == null }
       .count { book ->
         queue.enqueue(
