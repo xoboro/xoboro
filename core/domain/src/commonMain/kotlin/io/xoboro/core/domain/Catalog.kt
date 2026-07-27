@@ -62,6 +62,10 @@ sealed interface SeriesMediaItem : MediaItem {
   val oneshot: Boolean
 }
 
+sealed interface TimelineMediaItem : MediaItem {
+  val durationMillis: Long?
+}
+
 data class MediaItemCore(
   override val id: MediaItemId,
   override val libraryId: LibraryId,
@@ -196,8 +200,8 @@ data class Novel(
 
 data class Video(
   val core: MediaItemCore,
-  val durationMillis: Long? = null,
-) : MediaItem,
+  override val durationMillis: Long? = null,
+) : TimelineMediaItem,
   MediaItemCommon by core {
   init {
     require(durationMillis == null || durationMillis >= 0) {
@@ -220,8 +224,8 @@ data class Video(
 
 data class Audio(
   val core: MediaItemCore,
-  val durationMillis: Long? = null,
-) : MediaItem,
+  override val durationMillis: Long? = null,
+) : TimelineMediaItem,
   MediaItemCommon by core {
   init {
     require(durationMillis == null || durationMillis >= 0) {
@@ -249,6 +253,14 @@ interface MediaItemRepository {
   fun findByIdOrNull(id: MediaItemId): MediaItem?
 
   fun findAllByLibraryId(libraryId: LibraryId): List<MediaItem>
+}
+
+interface TimelineMediaItemRepository {
+  fun insert(item: TimelineMediaItem)
+
+  fun update(item: TimelineMediaItem)
+
+  fun delete(id: MediaItemId): Boolean
 }
 
 interface SeriesRepository {
