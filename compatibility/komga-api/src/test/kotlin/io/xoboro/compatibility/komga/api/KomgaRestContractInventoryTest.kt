@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(15, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(18, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(150, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(147, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -61,8 +61,11 @@ class KomgaRestContractInventoryTest {
     val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete", "head", "options")
     val PARTIALLY_IMPLEMENTED_ENDPOINTS =
       setOf(
+        RestEndpoint("GET", "/api/logout"),
+        RestEndpoint("POST", "/api/logout"),
         RestEndpoint("GET", "/api/v1/claim"),
         RestEndpoint("POST", "/api/v1/claim"),
+        RestEndpoint("GET", "/api/v1/login/set-cookie"),
         RestEndpoint("GET", "/api/v2/users"),
         RestEndpoint("POST", "/api/v2/users"),
         RestEndpoint("GET", "/api/v2/users/authentication-activity"),
