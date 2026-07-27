@@ -60,7 +60,7 @@ Status:
 |---|---|---|
 | Library CRUD and non-overlapping roots | PARTIAL | Komga v1 list/get/create/PATCH/deprecated PUT/delete routes, full settings DTO, selected-library visibility, administrator-only root disclosure and mutation, durable lifecycle wiring, local path validation, duplicate/overlap rejection, and contract tests; non-local source administration and differential tests pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
-| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, library and target-scoped analysis/metadata REST triggers, bounded local inventory/reconciliation, and real-runtime execution tests; differential tests pending |
+| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, library and target-scoped analysis/metadata REST triggers, bounded metadata-only inventory, prepared-batch staging, indexed set-based reconciliation/task emission, 5,000-item regression coverage, and real-runtime execution tests; differential tests pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, restart tests, SQL-level unchanged-file suppression, and successful-analysis chaining to one Book plus one Series metadata refresh; non-local sources pending |
 | Unavailable storage handling | PARTIAL | Source-level unavailable boundary aborts reconciliation before deletion, records the first outage timestamp, suppresses duplicate transitions, clears on recovery, publishes `LibraryChanged`, and has detached/re-attached local-root integration coverage; remote source adapters pending |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
@@ -145,16 +145,16 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Read-only Komga 1.25.0 database importer | PARTIAL | Exact Flyway schema and integrity validation, SQLite read-only/query-only snapshot, empty-target guard, atomic replacement, source immutability test, and synthetic 1.25 fixture; production snapshot comparison pending |
+| Read-only Komga 1.25.0 database importer | COMPLETE | Exact Flyway schema and integrity validation, SQLite read-only/query-only snapshot, empty-target guard, bounded batched copy, zero-to-one-based page conversion, atomic replacement, source immutability test, synthetic 1.25 fixture, and isolated production-snapshot comparison |
 | Users and restrictions migration | PARTIAL | Password hashes, roles, library grants, sharing labels, API keys, authentication activity, user client settings, and announcement reads migrate with synthetic restart-safe verification; live authentication comparison pending |
-| Metadata and locks migration | PARTIAL | Series/book fields, locks, relations, media/page/file indexes, embedded artwork, page-hash policy, history, and full-text index rebuild migrate in one transaction; external artwork is intentionally rediscovered and production comparison is pending |
+| Metadata and locks migration | COMPLETE | Series/book fields, locks, relations, media/page/file indexes, embedded artwork, page-hash policy, history, and full-text index rebuild migrate in one transaction; external artwork is intentionally rediscovered, and source/target production-snapshot cardinalities match |
 | Progress migration | PARTIAL | Per-book and per-series progress plus bounded gzip locator conversion migrate with synthetic verification; differential reader and sync-client comparison pending |
 | Collections and read-list migration | PARTIAL | Collection/read-list identity, metadata, ordering, and membership migrate with synthetic verification; production snapshot comparison pending |
-| Docker amd64 and arm64 | PARTIAL | Pinned Temurin 26 multi-stage, non-root, health-checked image and GHCR buildx workflow with amd64/arm64 manifest, SBOM, and provenance; registry publication verification pending |
-| Compose deployment | PARTIAL | Plain `docker compose up -d`, persistent configuration volume, read-only media bind, read-only root filesystem, bounded tmpfs, dropped capabilities, graceful shutdown, and context-aware health check; Linux CI smoke and rollback drill pending |
+| Docker amd64 and arm64 | COMPLETE | Pinned Temurin 26 multi-stage, non-root, health-checked image and verified GHCR buildx publication with amd64/arm64 manifest, SBOM, and provenance |
+| Compose deployment | COMPLETE | Plain `docker compose up -d`, persistent configuration volume, read-only media bind, read-only root filesystem, bounded executable tmpfs, dropped capabilities, graceful shutdown, context-aware health check, CI smoke test, and isolated deployment drill |
 | Reverse-proxy and base-path support | PARTIAL | Restart-applied, database- or environment-configured base path mounts all current routes; forwarded-header trust policy and proxy integration tests pending |
-| Mac mini production comparison | TODO | |
-| Rollback verification | TODO | |
+| Mac mini production comparison | COMPLETE | A read-only, consistency-checked Komga snapshot imported into an isolated volume; source/target cardinalities, page-number transformation, foreign keys, and both database integrity checks passed without reading catalog names |
+| Rollback verification | COMPLETE | The disposable target volume, image, and snapshot were removed after the comparison; the live Komga database and media were never mounted writable, and the existing service remained healthy before and after the drill |
 
 ## UI gate
 

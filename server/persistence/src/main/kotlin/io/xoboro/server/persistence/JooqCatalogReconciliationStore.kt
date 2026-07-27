@@ -42,29 +42,27 @@ class JooqCatalogReconciliationStore(
     if (candidates.isEmpty()) return
     requireSessionIsStaging(sessionId)
     database.transaction { transaction ->
-      candidates.forEach { candidate ->
-        transaction.execute(
-          """
-          INSERT INTO catalog_scan_candidate (
-            session_id, relative_path, source_item_id, source_identity, name,
-            media_kind, file_size, file_modified_ms, series_relative_path,
-            series_source_item_id, series_name, oneshot
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          """.trimIndent(),
-          sessionId.value,
-          candidate.relativePath,
-          candidate.sourceItemId,
-          candidate.sourceIdentity,
-          candidate.name,
-          candidate.mediaKind.name,
-          candidate.fileSize,
-          candidate.fileModifiedAtMillis,
-          candidate.seriesRelativePath,
-          candidate.seriesSourceItemId,
-          candidate.seriesName,
-          candidate.oneshot.toSqliteInt(),
-        )
-      }
+      transaction.batch(
+        STAGE_CANDIDATE_SQL,
+        *candidates
+          .map { candidate ->
+            arrayOf<Any?>(
+              sessionId.value,
+              candidate.relativePath,
+              candidate.sourceItemId,
+              candidate.sourceIdentity,
+              candidate.name,
+              candidate.mediaKind.name,
+              candidate.fileSize,
+              candidate.fileModifiedAtMillis,
+              candidate.seriesRelativePath,
+              candidate.seriesSourceItemId,
+              candidate.seriesName,
+              candidate.oneshot.toSqliteInt(),
+            )
+          }
+          .toTypedArray(),
+      ).execute()
     }
   }
 
@@ -213,38 +211,24 @@ class JooqCatalogReconciliationStore(
     execute(
       """
       UPDATE catalog_scan_candidate AS candidate SET
-        matched_book_id = (
-          SELECT book.id FROM book
-          WHERE book.library_id = ? AND book.relative_uri = candidate.relative_path
-        ),
-        was_deleted = coalesce((
-          SELECT book.deleted_at_ms IS NOT NULL FROM book
-          WHERE book.library_id = ? AND book.relative_uri = candidate.relative_path
-        ), 0),
-        change_type = (
-          SELECT CASE
-            WHEN book.file_size <> candidate.file_size
-              OR book.file_modified_ms <> candidate.file_modified_ms
-              OR book.media_kind <> candidate.media_kind
-              OR book.source_item_id <> candidate.source_item_id
-              OR coalesce(book.source_identity, '') <> coalesce(candidate.source_identity, '')
-              OR book.name <> candidate.name
-              OR book.oneshot <> candidate.oneshot
-            THEN 'CHANGED'
-            ELSE 'UNCHANGED'
-          END
-          FROM book
-          WHERE book.library_id = ? AND book.relative_uri = candidate.relative_path
-        )
+        matched_book_id = book.id,
+        was_deleted = book.deleted_at_ms IS NOT NULL,
+        change_type = CASE
+          WHEN book.file_size <> candidate.file_size
+            OR book.file_modified_ms <> candidate.file_modified_ms
+            OR book.media_kind <> candidate.media_kind
+            OR book.source_item_id <> candidate.source_item_id
+            OR coalesce(book.source_identity, '') <> coalesce(candidate.source_identity, '')
+            OR book.name <> candidate.name
+            OR book.oneshot <> candidate.oneshot
+          THEN 'CHANGED'
+          ELSE 'UNCHANGED'
+        END
+      FROM book
       WHERE candidate.session_id = ?
-        AND EXISTS (
-          SELECT 1 FROM book
-          WHERE book.library_id = ? AND book.relative_uri = candidate.relative_path
-        )
+        AND book.library_id = ?
+        AND book.relative_uri = candidate.relative_path
       """.trimIndent(),
-      libraryId,
-      libraryId,
-      libraryId,
       sessionId.value,
       libraryId,
     )
@@ -254,34 +238,67 @@ class JooqCatalogReconciliationStore(
     sessionId: ScanSessionId,
     libraryId: String,
   ) {
+    val hasUnmatchedIdentity =
+      fetchOne(
+        """
+        SELECT 1
+        FROM catalog_scan_candidate
+        WHERE session_id = ? AND matched_book_id IS NULL AND source_identity IS NOT NULL
+        LIMIT 1
+        """.trimIndent(),
+        sessionId.value,
+      ) != null
+    val hasCatalogIdentity =
+      fetchOne(
+        """
+        SELECT 1
+        FROM book
+        WHERE library_id = ? AND source_identity IS NOT NULL
+        LIMIT 1
+        """.trimIndent(),
+        libraryId,
+      ) != null
+    if (!hasUnmatchedIdentity || !hasCatalogIdentity) return
+
     execute(
       """
+      WITH
+        unique_candidate_identity AS (
+          SELECT source_identity
+          FROM catalog_scan_candidate
+          WHERE session_id = ? AND source_identity IS NOT NULL
+          GROUP BY source_identity
+          HAVING count(*) = 1
+        ),
+        unique_book_identity AS (
+          SELECT source_identity
+          FROM book
+          WHERE library_id = ? AND source_identity IS NOT NULL
+          GROUP BY source_identity
+          HAVING count(*) = 1
+        )
       UPDATE catalog_scan_candidate AS candidate SET
         matched_book_id = book.id,
         was_deleted = book.deleted_at_ms IS NOT NULL,
         change_type = 'MOVED'
       FROM book
+      JOIN unique_candidate_identity candidate_identity
+        ON candidate_identity.source_identity = book.source_identity
+      JOIN unique_book_identity book_identity
+        ON book_identity.source_identity = book.source_identity
       WHERE candidate.session_id = ?
         AND candidate.matched_book_id IS NULL
         AND candidate.source_identity IS NOT NULL
         AND book.library_id = ?
         AND book.source_identity = candidate.source_identity
-        AND (
-          SELECT count(*) FROM catalog_scan_candidate duplicate_candidate
-          WHERE duplicate_candidate.session_id = candidate.session_id
-            AND duplicate_candidate.source_identity = candidate.source_identity
-        ) = 1
-        AND (
-          SELECT count(*) FROM book duplicate_book
-          WHERE duplicate_book.library_id = book.library_id
-            AND duplicate_book.source_identity = book.source_identity
-        ) = 1
         AND NOT EXISTS (
           SELECT 1 FROM catalog_scan_candidate already_matched
           WHERE already_matched.session_id = candidate.session_id
             AND already_matched.matched_book_id = book.id
         )
       """.trimIndent(),
+      sessionId.value,
+      libraryId,
       sessionId.value,
       libraryId,
     )
@@ -447,6 +464,7 @@ class JooqCatalogReconciliationStore(
       WHERE target.library_id = ?
         AND candidate.session_id = ?
         AND candidate.matched_book_id = target.id
+        AND (candidate.change_type <> 'UNCHANGED' OR candidate.was_deleted = 1)
       """.trimIndent(),
       nowMillis,
       libraryId,
@@ -659,4 +677,15 @@ class JooqCatalogReconciliationStore(
     } ?: 0L
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private companion object {
+    val STAGE_CANDIDATE_SQL =
+      """
+      INSERT INTO catalog_scan_candidate (
+        session_id, relative_path, source_item_id, source_identity, name,
+        media_kind, file_size, file_modified_ms, series_relative_path,
+        series_source_item_id, series_name, oneshot
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      """.trimIndent()
+  }
 }

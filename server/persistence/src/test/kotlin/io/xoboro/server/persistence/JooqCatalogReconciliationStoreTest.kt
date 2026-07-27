@@ -49,6 +49,32 @@ class JooqCatalogReconciliationStoreTest {
   }
 
   @Test
+  fun `bulk scan stages and reconciles a large synthetic inventory`() {
+    withStore("bulk") { fixture ->
+      val candidates =
+        (1..5_000).map { number ->
+          candidate(
+            relativePath = "Series-${number / 100}/item-$number.cbz",
+            identity = "identity-$number",
+          )
+        }
+
+      val initial = fixture.scan(candidates)
+      assertEquals(5_000L, initial.addedBooks)
+      assertEquals(51L, initial.addedSeries)
+      assertEquals(5_000L, fixture.taskCount())
+      fixture.clearTasks()
+
+      val repeated = fixture.scan(candidates)
+      assertEquals(0L, repeated.addedBooks)
+      assertEquals(0L, repeated.changedBooks)
+      assertEquals(0L, repeated.movedBooks)
+      assertEquals(0L, fixture.taskCount())
+      assertTrue(fixture.candidateTableIsEmpty())
+    }
+  }
+
+  @Test
   fun `identical repeated scan is idempotent and preserves IDs`() {
     withStore("idempotent") { fixture ->
       val files =
