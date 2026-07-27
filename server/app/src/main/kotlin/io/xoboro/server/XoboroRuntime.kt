@@ -20,6 +20,7 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataRefreshLifecycle
+import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
@@ -32,6 +33,8 @@ import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.MediaItemRepository
+import io.xoboro.core.domain.ReadListRepository
+import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.ZipMediaAnalyzer
@@ -50,8 +53,10 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
+import io.xoboro.server.persistence.JooqReadListRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
+import io.xoboro.server.persistence.JooqSeriesCollectionRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
@@ -111,6 +116,9 @@ class XoboroRuntime private constructor(
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
   val bookContentAccess: BookContentAccess,
+  val organizationLifecycle: OrganizationLifecycle,
+  val seriesCollectionRepository: SeriesCollectionRepository,
+  val readListRepository: ReadListRepository,
   val readProgressLifecycle: ReadProgressLifecycle,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
@@ -172,6 +180,18 @@ class XoboroRuntime private constructor(
         val mediaItems = JooqMediaItemRepository(database, books)
         val media = JooqBookMediaRepository(database)
         val readProgresses = JooqReadProgressRepository(database)
+        val collections = JooqSeriesCollectionRepository(database)
+        val readLists = JooqReadListRepository(database)
+        val organizationLifecycle =
+          OrganizationLifecycle(
+            collections = collections,
+            readLists = readLists,
+            series = series,
+            books = books,
+            collectionIdFactory = { TsidCreator.getTsid256().toString() },
+            readListIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val catalogReads =
           JooqCatalogReadRepository(
             database = database,
@@ -495,6 +515,9 @@ class XoboroRuntime private constructor(
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
           bookContentAccess = bookContentAccess,
+          organizationLifecycle = organizationLifecycle,
+          seriesCollectionRepository = collections,
+          readListRepository = readLists,
           readProgressLifecycle = readProgressLifecycle,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,

@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Sixty-five operations are partially implemented and none are yet
+167 schemas. Eighty-one operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V15 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V16 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -94,8 +94,8 @@ Status:
 | Full-text search | TODO | |
 | Filtering, sorting, and alphabetical groups | PARTIAL | Allowlisted SQL sorting, escaped full-text matching, legacy library/publisher/language/genre/tag filters, stable pagination, and both alphabetical-group routes with tests; recursive search conditions and referential filters pending |
 | Latest, new, updated, on-deck, keep-reading | PARTIAL | Book latest/on-deck and Series latest/new/updated use explicit database sorts, access filtering, and durable per-series progress aggregates; keep-reading pending |
-| Collections and manual ordering | TODO | |
-| Read lists and manual ordering | TODO | |
+| Collections and manual ordering | PARTIAL | Durable ordered membership, case-insensitive unique names, transactional CRUD, access-filtered list/detail/reverse-membership routes, filtered indicators, member pagination, cascade behavior, and REST integration tests; thumbnails, metadata import, and differential filters pending |
+| Read lists and manual ordering | PARTIAL | Durable ordered membership and summaries, transactional CRUD, access-filtered list/detail/book/sibling/reverse-membership routes, filtered indicators, cascade behavior, and REST integration tests; archive download, progress adapters, ComicRack import, and differential filters pending |
 | ComicRack CBL import | TODO | |
 | Referential authors, genres, tags, languages, publishers | TODO | |
 
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, and production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, sixteen collection/read-list operations, and production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

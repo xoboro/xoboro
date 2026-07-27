@@ -3,6 +3,7 @@ package io.xoboro.server
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
 import io.xoboro.compatibility.komga.api.komgaMediaRoutes
+import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
@@ -22,6 +23,7 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
@@ -29,6 +31,8 @@ import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.ReadListRepository
+import io.xoboro.core.domain.SeriesCollectionRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -79,6 +83,9 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
     bookContentAccess = runtime.bookContentAccess,
+    organizationLifecycle = runtime.organizationLifecycle,
+    seriesCollectionRepository = runtime.seriesCollectionRepository,
+    readListRepository = runtime.readListRepository,
     readProgressLifecycle = runtime.readProgressLifecycle,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
@@ -102,6 +109,9 @@ fun Application.xoboroModule(
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
   bookContentAccess: BookContentAccess? = null,
+  organizationLifecycle: OrganizationLifecycle? = null,
+  seriesCollectionRepository: SeriesCollectionRepository? = null,
+  readListRepository: ReadListRepository? = null,
   readProgressLifecycle: ReadProgressLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
@@ -176,6 +186,19 @@ fun Application.xoboroModule(
       catalogReadRepository?.let(::komgaCatalogRoutes)
       if (catalogReadRepository != null && bookContentAccess != null) {
         komgaMediaRoutes(catalogReadRepository, bookContentAccess)
+      }
+      if (
+        catalogReadRepository != null &&
+        organizationLifecycle != null &&
+        seriesCollectionRepository != null &&
+        readListRepository != null
+      ) {
+        komgaOrganizationRoutes(
+          collections = seriesCollectionRepository,
+          readLists = readListRepository,
+          lifecycle = organizationLifecycle,
+          catalog = catalogReadRepository,
+        )
       }
       if (catalogReadRepository != null && readProgressLifecycle != null) {
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)

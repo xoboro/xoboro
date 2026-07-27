@@ -66,7 +66,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(15, database.migrationResult.migrationsExecuted)
+      assertEquals(16, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -155,7 +155,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(14, database.migrationResult.migrationsExecuted)
+      assertEquals(15, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
