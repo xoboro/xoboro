@@ -20,6 +20,7 @@ import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
 import io.xoboro.core.application.LibraryLifecycle
+import io.xoboro.core.application.LocalArtworkRefreshLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryScanRequester
@@ -103,11 +104,13 @@ import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.metadata.ComicInfoMetadataProvider
+import io.xoboro.server.metadata.EpubMetadataProvider
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
 import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
+import io.xoboro.server.sources.local.LocalSourceArtworkAccess
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
@@ -617,6 +620,8 @@ class XoboroRuntime private constructor(
           )
         val comicInfoMetadataProvider =
           ComicInfoMetadataProvider(listOf(localMediaAccess))
+        val epubMetadataProvider =
+          EpubMetadataProvider(listOf(localMediaAccess))
         val metadataRefreshLifecycle =
           MetadataRefreshLifecycle(
             libraries = libraries,
@@ -624,13 +629,22 @@ class XoboroRuntime private constructor(
             series = series,
             bookMetadata = bookMetadata,
             seriesMetadata = seriesMetadata,
-            bookProviders = listOf(comicInfoMetadataProvider),
+            bookProviders = listOf(comicInfoMetadataProvider, epubMetadataProvider),
             seriesProviders =
               listOf(
                 comicInfoMetadataProvider,
+                epubMetadataProvider,
                 MylarSeriesMetadataProvider(listOf(LocalSourceSidecarAccess())),
               ),
             currentTimeMillis = System::currentTimeMillis,
+          )
+        val localArtworkRefreshLifecycle =
+          LocalArtworkRefreshLifecycle(
+            libraries = libraries,
+            books = books,
+            series = series,
+            artwork = artworkLifecycle,
+            accesses = listOf(LocalSourceArtworkAccess()),
           )
         val refreshMetadataTaskEmitter =
           RefreshMetadataTaskEmitter(
@@ -723,10 +737,22 @@ class XoboroRuntime private constructor(
                   analyzeBook = { bookId ->
                     analyzeBook.execute(bookId)
                   },
+                  afterAnalyze = { bookId ->
+                    refreshMetadataTaskEmitter.refreshBook(bookId)
+                    books.findByIdOrNull(bookId)?.let { book ->
+                      refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+                    }
+                  },
                 ),
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
-                RefreshBookMetadataTaskHandler(metadataRefreshLifecycle),
-                RefreshSeriesMetadataTaskHandler(metadataRefreshLifecycle),
+                RefreshBookMetadataTaskHandler(
+                  metadataRefreshLifecycle,
+                  afterRefresh = { localArtworkRefreshLifecycle.refreshBook(it) },
+                ),
+                RefreshSeriesMetadataTaskHandler(
+                  metadataRefreshLifecycle,
+                  afterRefresh = { localArtworkRefreshLifecycle.refreshSeries(it) },
+                ),
                 DeleteBookFileTaskHandler(catalogSourceFileLifecycle),
                 DeleteSeriesFileTaskHandler(catalogSourceFileLifecycle),
                 ImportBookTaskHandler(catalogSourceFileLifecycle),

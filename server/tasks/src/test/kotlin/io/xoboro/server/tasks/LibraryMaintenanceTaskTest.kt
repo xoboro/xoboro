@@ -149,6 +149,46 @@ class LibraryMaintenanceTaskTest {
   }
 
   @Test
+  fun `incremental series metadata refresh queues only the series`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("series-metadata.sqlite"))).use {
+        database ->
+      val queue = JooqDurableTaskQueue(database)
+      insertCatalog(database)
+      val emitter =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 350 },
+        )
+
+      assertTrue(emitter.refreshSeriesMetadata(SERIES_ID))
+      val claimed =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-1",
+            leaseToken = "lease-series",
+            nowMillis = 350,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+      assertEquals("REFRESH_SERIES_METADATA_series-1", claimed.task.id)
+      assertEquals(RefreshSeriesMetadataTaskHandler.TASK_TYPE, claimed.task.type)
+      assertEquals(SERIES_ID.value, claimed.task.groupId)
+      assertTrue(queue.complete(claimed.task.id, "lease-series"))
+      assertEquals(
+        null,
+        queue.claimNext(
+          workerId = "worker-1",
+          leaseToken = "lease-none",
+          nowMillis = 350,
+          leaseDurationMillis = 1_000,
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `catalog requester emits target scoped durable work and clears only queued work`() {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("catalog-maintenance.sqlite"))).use {
         database ->
