@@ -18,12 +18,14 @@ class UserLifecycleTest {
     val repository = InMemoryUserRepository()
     val lifecycle = lifecycle(repository)
 
+    assertEquals(false, lifecycle.isClaimed())
     val claimed =
       lifecycle.claimInitialAdministrator(
         email = "admin@example.invalid",
         rawPassword = "synthetic-password",
       )
 
+    assertTrue(lifecycle.isClaimed())
     assertEquals(UserRole.entries.toSet(), claimed.roles)
     assertEquals("hashed:synthetic-password", claimed.passwordHash)
     assertEquals(100, claimed.createdAtMillis)

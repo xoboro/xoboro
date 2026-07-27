@@ -20,10 +20,12 @@ application {
 }
 
 dependencies {
+  implementation(project(":compatibility:komga-api"))
   implementation(project(":core:application"))
   implementation(project(":core:domain"))
   implementation(project(":server:media"))
   implementation(project(":server:persistence"))
+  implementation(project(":server:security"))
   implementation(project(":server:sources:local"))
   implementation(project(":server:tasks"))
   implementation(libs.ktor.server.core)
@@ -32,6 +34,7 @@ dependencies {
   implementation(libs.ktor.server.content.negotiation)
   implementation(libs.ktor.server.status.pages)
   implementation(libs.ktor.serialization.kotlinx.json)
+  implementation(libs.tsid.creator)
   runtimeOnly(libs.logback.classic)
 
   testImplementation(kotlin("test-junit5"))
