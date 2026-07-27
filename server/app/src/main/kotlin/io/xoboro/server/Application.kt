@@ -30,6 +30,7 @@ import io.xoboro.compatibility.komga.api.komgaTachiyomiProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
 import io.xoboro.compatibility.komga.api.komgaServerResourceRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
+import io.xoboro.compatibility.komga.api.installKomgaCors
 import io.xoboro.compatibility.komga.api.installKomgaSecurityHeaders
 import io.xoboro.compatibility.komga.api.installKomgaShallowEtag
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
@@ -221,6 +222,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
+    corsAllowedOrigins = runtime.corsAllowedOrigins,
     trustedProxyHosts = runtime.trustedProxyHosts,
     metricsToken = runtime.metricsToken,
     taskQueueSize = { runtime.sseTaskStatusProvider.snapshot().count },
@@ -271,6 +273,7 @@ fun Application.xoboroModule(
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
+  corsAllowedOrigins: Set<String> = emptySet(),
   trustedProxyHosts: Set<String> = emptySet(),
   metricsToken: String? = null,
   taskQueueSize: () -> Int = { 0 },
@@ -295,6 +298,7 @@ fun Application.xoboroModule(
   }
   installKomgaShallowEtag()
   installKomgaSecurityHeaders()
+  installKomgaCors(corsAllowedOrigins)
   userLifecycle?.let {
     installKomgaBasicAuthentication(
       users = it,
