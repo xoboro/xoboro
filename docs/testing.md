@@ -21,6 +21,8 @@ change.
 - Tests write only to isolated temporary directories.
 - No personal names, credentials, library paths, scraped descriptions, covers,
   or copyrighted media are committed.
+- Real publication, series, episode, and character names are prohibited even
+  when only used as labels; catalog fixtures use explicit synthetic names.
 - Archive generators produce the smallest content necessary for the behavior.
 - Golden payloads are reviewed for private or environment-specific values.
 
@@ -35,4 +37,3 @@ Code is not considered complete when only the happy path passes. Tests cover:
 - concurrent access where applicable;
 - serialization and error compatibility;
 - migration from the supported Komga baseline.
-
