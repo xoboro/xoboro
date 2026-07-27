@@ -173,6 +173,9 @@ class XoboroRuntimeTest {
           <Series>Synthetic embedded series</Series>
           <Number>1</Number>
           <Summary>Synthetic chapter summary</Summary>
+          <AlternateSeries>Synthetic chronology</AlternateSeries>
+          <AlternateNumber>3</AlternateNumber>
+          <SeriesGroup>Synthetic shelf</SeriesGroup>
         </ComicInfo>
         """.trimIndent().encodeToByteArray(),
       )
@@ -238,7 +241,31 @@ class XoboroRuntimeTest {
         idColumn = "series_id",
         expected = "Synthetic sidecar series",
       )
+      awaitCondition("ComicInfo read-list import") {
+        runtime.readListRepository
+          .findByNameIgnoreCaseOrNull("Synthetic chronology")
+          ?.bookIds
+          ?.size == 1
+      }
+      awaitCondition("ComicInfo collection import") {
+        runtime.seriesCollectionRepository
+          .findByNameIgnoreCaseOrNull("Synthetic shelf")
+          ?.seriesIds
+          ?.size == 1
+      }
     }
+  }
+
+  private fun awaitCondition(
+    description: String,
+    condition: () -> Boolean,
+  ) {
+    val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+    while (System.nanoTime() < deadline) {
+      if (condition()) return
+      Thread.sleep(20)
+    }
+    throw AssertionError("Timed out waiting for $description")
   }
 
   private fun awaitBookCount(

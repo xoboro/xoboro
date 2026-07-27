@@ -45,6 +45,11 @@ class ComicInfoMetadataProviderTest {
         <Publisher>Synthetic publisher</Publisher>
         <Genre>Action, Drama</Genre>
         <Tags>First, Second</Tags>
+        <AlternateSeries>Synthetic chronology</AlternateSeries>
+        <AlternateNumber>4</AlternateNumber>
+        <StoryArc>Opening arc, Final arc</StoryArc>
+        <StoryArcNumber>1, 9</StoryArcNumber>
+        <SeriesGroup>Synthetic group, Shared group</SeriesGroup>
         <Web>https://example.invalid/item https://reference.invalid/item</Web>
         <LanguageISO>ko-KR</LanguageISO>
         <Manga>YesAndRightToLeft</Manga>
@@ -64,9 +69,17 @@ class ComicInfoMetadataProviderTest {
       listOf("writer", "writer", "penciller"),
       bookPatch.authors?.map { it.normalizedRole },
     )
-    assertEquals(setOf("First", "Second"), bookPatch.tags)
+    assertEquals(setOf("first", "second"), bookPatch.tags)
     assertEquals("9780306406157", bookPatch.isbn)
     assertEquals(2, bookPatch.links?.size)
+    assertEquals(
+      listOf(
+        "Synthetic chronology" to 4,
+        "Opening arc" to 1,
+        "Final arc" to 9,
+      ),
+      bookPatch.readLists.map { it.name to it.number },
+    )
 
     val seriesPatch = requireNotNull(provider.provide(library(), series(), listOf(book())))
     assertEquals("Synthetic series (2)", seriesPatch.title)
@@ -76,6 +89,44 @@ class ComicInfoMetadataProviderTest {
     assertEquals("ko-KR", seriesPatch.language)
     assertEquals(setOf("Action", "Drama"), seriesPatch.genres)
     assertEquals(12, seriesPatch.totalBookCount)
+    assertEquals(setOf("Synthetic group", "Shared group"), seriesPatch.collections)
+  }
+
+  @Test
+  fun `imports organization metadata independently from bibliographic metadata`() {
+    val archive = tempDirectory.resolve("organization.cbz")
+    archive.writeComicInfo(
+      """
+      <ComicInfo>
+        <Title>Ignored title</Title>
+        <Series>Ignored series</Series>
+        <AlternateSeries>Synthetic order</AlternateSeries>
+        <StoryArc>Arc without number</StoryArc>
+        <SeriesGroup>Synthetic shelf</SeriesGroup>
+      </ComicInfo>
+      """.trimIndent(),
+    )
+    val provider = ComicInfoMetadataProvider(listOf(FixedMediaAccess(archive)))
+    val library =
+      library().copy(
+        settings =
+          LibrarySettings(
+            importComicInfoBook = false,
+            importComicInfoSeries = false,
+            importComicInfoReadList = true,
+            importComicInfoCollection = true,
+          ),
+      )
+
+    val bookPatch = requireNotNull(provider.provide(library, book()))
+    assertEquals(false, provider.shouldApplyBookMetadata(library))
+    assertEquals(
+      listOf("Synthetic order", "Arc without number"),
+      bookPatch.readLists.map { it.name },
+    )
+    val seriesPatch = requireNotNull(provider.provide(library, series(), listOf(book())))
+    assertEquals(false, provider.shouldApplySeriesMetadata(library))
+    assertEquals(setOf("Synthetic shelf"), seriesPatch.collections)
   }
 
   @Test

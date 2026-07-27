@@ -134,6 +134,83 @@ class MetadataRefreshLifecycleTest {
     assertNull(lifecycle.refreshSeries(SERIES_ID))
   }
 
+  @Test
+  fun `writes organization patches without mutating disabled bibliographic metadata`() {
+    val repositories = Repositories()
+    val events = mutableListOf<CatalogMutationEvent>()
+    val organization = RecordingOrganizationWriter()
+    repositories.bookMetadata.upsert(
+      BookMetadata(
+        bookId = BOOK_ID,
+        title = "Existing book",
+        number = "1",
+        numberSort = 1F,
+        createdAtMillis = 1,
+        updatedAtMillis = 5,
+      ),
+    )
+    repositories.seriesMetadata.upsert(
+      SeriesMetadata(
+        seriesId = SERIES_ID,
+        title = "Existing series",
+        createdAtMillis = 1,
+        updatedAtMillis = 5,
+      ),
+    )
+    val lifecycle =
+      MetadataRefreshLifecycle(
+        libraries = repositories.libraries,
+        books = repositories.books,
+        series = repositories.series,
+        bookMetadata = repositories.bookMetadata,
+        seriesMetadata = repositories.seriesMetadata,
+        bookProviders =
+          listOf(
+            object : BookMetadataProvider {
+              override fun provide(
+                library: Library,
+                book: Book,
+              ): BookMetadataPatch =
+                BookMetadataPatch(
+                  title = "Ignored book",
+                  readLists = listOf(ReadListMetadataEntry("Synthetic order", 8)),
+                )
+
+              override fun shouldApplyBookMetadata(library: Library): Boolean = false
+            },
+          ),
+        seriesProviders =
+          listOf(
+            object : SeriesMetadataProvider {
+              override fun provide(
+                library: Library,
+                series: Series,
+                books: List<Book>,
+              ): SeriesMetadataPatch =
+                SeriesMetadataPatch(
+                  title = "Ignored series",
+                  collections = setOf("Synthetic shelf"),
+                )
+
+              override fun shouldApplySeriesMetadata(library: Library): Boolean = false
+            },
+          ),
+        currentTimeMillis = { 100 },
+        eventPublisher = events::add,
+        organizationWriter = organization,
+      )
+
+    assertEquals("Existing book", requireNotNull(lifecycle.refreshBook(BOOK_ID)).title)
+    assertEquals(5, repositories.bookMetadata.findByBookIdOrNull(BOOK_ID)?.updatedAtMillis)
+    assertEquals("Existing series", requireNotNull(lifecycle.refreshSeries(SERIES_ID)).title)
+    assertEquals(5, repositories.seriesMetadata.findBySeriesIdOrNull(SERIES_ID)?.updatedAtMillis)
+    assertEquals(listOf("Synthetic order"), organization.readLists.map { it.first })
+    assertEquals(listOf(BOOK_ID), organization.readLists.map { it.second })
+    assertEquals(listOf<Int?>(8), organization.readLists.map { it.third })
+    assertEquals(listOf("Synthetic shelf" to SERIES_ID), organization.collections)
+    assertEquals(emptyList<CatalogMutationEvent>(), events)
+  }
+
   private class Repositories {
     val library =
       Library(
@@ -281,6 +358,26 @@ class MetadataRefreshLifecycleTest {
 
     override fun upsert(metadata: SeriesMetadata) {
       values[metadata.seriesId] = metadata
+    }
+  }
+
+  private class RecordingOrganizationWriter : MetadataOrganizationWriter {
+    val readLists = mutableListOf<Triple<String, BookId, Int?>>()
+    val collections = mutableListOf<Pair<String, SeriesId>>()
+
+    override fun addBookToReadList(
+      name: String,
+      bookId: BookId,
+      number: Int?,
+    ) {
+      readLists += Triple(name, bookId, number)
+    }
+
+    override fun addSeriesToCollection(
+      name: String,
+      seriesId: SeriesId,
+    ) {
+      collections += name to seriesId
     }
   }
 
