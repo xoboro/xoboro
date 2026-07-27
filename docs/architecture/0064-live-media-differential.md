@@ -38,5 +38,6 @@ Seven authenticated media cases now exercise real bytes against the
 digest-pinned Komga 1.25.0 reference without storing generated IDs or
 credentials. Original and converted content is SHA-256 compared, while
 manifest exclusions are limited to generated URLs and modification time.
-Conditional ETag handling, PDF content negotiation, EPUB resources, and range
-error details remain separate certification work.
+PDF content negotiation, EPUB resources, and range error details remain
+separate certification work. Conditional page revalidation is certified in
+ADR 0065.

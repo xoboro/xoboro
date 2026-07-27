@@ -28,6 +28,8 @@ Authenticated suites receive authorization through
 `KOMGA_DIFFERENTIAL_AUTHORIZATION`, or the reference/candidate-specific
 `KOMGA_REFERENCE_AUTHORIZATION` and `XOBORO_CANDIDATE_AUTHORIZATION`
 environment variables. Never put credentials in suite files or CLI arguments.
+The differential workflow also reuses the independent validators returned by
+each server and requires authenticated media requests to return `304`.
 
 ## Fixture policy
 
