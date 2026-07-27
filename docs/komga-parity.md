@@ -81,7 +81,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Series, books, and one-shots | TODO | |
+| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities and transactional repository tests; lifecycle/metadata pending |
 | Full-text search | TODO | |
 | Filtering, sorting, and alphabetical groups | TODO | |
 | Latest, new, updated, on-deck, keep-reading | TODO | |

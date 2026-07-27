@@ -79,6 +79,7 @@ class LocalSourceInventory(
             onFile(
               SourceFile(
                 itemId = file.toAbsolutePath().normalize().toUri().toString(),
+                identity = attrs.fileKey()?.toString(),
                 relativePath = relativePath,
                 name = name,
                 extension = name.substringAfterLast('.', missingDelimiterValue = "").lowercase(),
