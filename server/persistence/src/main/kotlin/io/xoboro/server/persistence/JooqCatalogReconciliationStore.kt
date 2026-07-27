@@ -414,6 +414,19 @@ class JooqCatalogReconciliationStore(
         source_identity = candidate.source_identity,
         name = candidate.name,
         media_kind = candidate.media_kind,
+        media_item_type = CASE
+          WHEN target.media_item_type = CASE target.media_kind
+            WHEN 'COMIC_ARCHIVE' THEN 'COMIC'
+            WHEN 'EPUB' THEN 'NOVEL'
+            ELSE 'BOOK'
+          END
+          THEN CASE candidate.media_kind
+            WHEN 'COMIC_ARCHIVE' THEN 'COMIC'
+            WHEN 'EPUB' THEN 'NOVEL'
+            ELSE 'BOOK'
+          END
+          ELSE target.media_item_type
+        END,
         file_hash = CASE
           WHEN candidate.file_size = target.file_size
             AND candidate.file_modified_ms = target.file_modified_ms
@@ -451,13 +464,20 @@ class JooqCatalogReconciliationStore(
       """
       INSERT INTO book (
         id, library_id, series_id, relative_uri, source_item_id, source_identity,
-        name, media_kind, file_size, file_modified_ms, file_hash, file_hash_koreader,
-        number, deleted_at_ms, oneshot, created_at_ms, updated_at_ms
+        name, media_kind, media_item_type, file_size, file_modified_ms,
+        file_hash, file_hash_koreader, number, deleted_at_ms, oneshot,
+        created_at_ms, updated_at_ms
       )
       SELECT
         lower(hex(randomblob(16))), ?, series.id, candidate.relative_path,
         candidate.source_item_id, candidate.source_identity, candidate.name,
-        candidate.media_kind, candidate.file_size, candidate.file_modified_ms,
+        candidate.media_kind,
+        CASE candidate.media_kind
+          WHEN 'COMIC_ARCHIVE' THEN 'COMIC'
+          WHEN 'EPUB' THEN 'NOVEL'
+          ELSE 'BOOK'
+        END,
+        candidate.file_size, candidate.file_modified_ms,
         '', '', 0, NULL, candidate.oneshot, ?, ?
       FROM catalog_scan_candidate candidate
       JOIN series ON series.library_id = ?

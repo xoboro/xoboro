@@ -5,6 +5,7 @@ import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaItemType
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -69,7 +70,7 @@ class JooqCatalogRepositoryTest {
 
   @Test
   fun `updates every mutable scan field`() {
-    withCatalog("update") { seriesRepository, bookRepository, _ ->
+    withCatalog("update") { seriesRepository, bookRepository, database ->
       val series = seriesFixture()
       val book = bookFixture()
       seriesRepository.insert(series)
@@ -108,6 +109,12 @@ class JooqCatalogRepositoryTest {
 
       assertEquals(updatedSeries, seriesRepository.findByIdOrNull(series.id))
       assertEquals(updatedBook, bookRepository.findByIdOrNull(book.id))
+      assertEquals(
+        "BOOK",
+        database.dsl
+          .fetchOne("SELECT media_item_type FROM book WHERE id = ?", book.id.value)
+          ?.get(0, String::class.java),
+      )
     }
   }
 
@@ -168,6 +175,62 @@ class JooqCatalogRepositoryTest {
 
       assertNull(seriesRepository.findByIdOrNull(series.id))
       assertNull(bookRepository.findByIdOrNull(BookId("book-1")))
+    }
+  }
+
+  @Test
+  fun `exposes persisted catalog rows through the media item hierarchy`() {
+    withCatalog("media-items") { seriesRepository, bookRepository, database ->
+      val series = seriesFixture()
+      seriesRepository.insert(series)
+      bookRepository.insertAll(
+        listOf(
+          bookFixture(id = "comic-1"),
+          bookFixture(
+            id = "novel-1",
+            relativePath = "series/novel.epub",
+            sourceItemId = "file:///synthetic/series/novel.epub",
+          ).copy(mediaKind = MediaKind.EPUB),
+          bookFixture(
+            id = "book-1",
+            relativePath = "series/book.pdf",
+            sourceItemId = "file:///synthetic/series/book.pdf",
+          ).copy(mediaKind = MediaKind.PDF),
+        ),
+      )
+      val mediaItems = JooqMediaItemRepository(database, bookRepository)
+
+      assertEquals(
+        setOf(MediaItemType.COMIC, MediaItemType.NOVEL, MediaItemType.BOOK),
+        mediaItems.findAllByLibraryId(LIBRARY_ID).mapTo(linkedSetOf()) { it.type },
+      )
+      database.dsl.execute(
+        "UPDATE book SET media_item_type = 'VIDEO' WHERE id = ?",
+        "book-1",
+      )
+      assertEquals(
+        MediaItemType.VIDEO,
+        mediaItems.findByIdOrNull(BookId("book-1"))?.type,
+      )
+      val stored = requireNotNull(bookRepository.findByIdOrNull(BookId("book-1")))
+      bookRepository.update(
+        stored.copy(
+          name = "Updated semantic video",
+          updatedAtMillis = stored.updatedAtMillis + 1,
+        ),
+      )
+      assertEquals(
+        MediaItemType.VIDEO,
+        mediaItems.findByIdOrNull(BookId("book-1"))?.type,
+      )
+      database.dsl.execute(
+        "UPDATE book SET media_item_type = 'AUDIO' WHERE id = ?",
+        "book-1",
+      )
+      assertEquals(
+        MediaItemType.AUDIO,
+        mediaItems.findByIdOrNull(BookId("book-1"))?.type,
+      )
     }
   }
 
