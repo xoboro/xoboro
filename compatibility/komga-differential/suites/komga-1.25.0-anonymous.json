@@ -1,0 +1,28 @@
+{
+  "version": "1.25.0",
+  "cases": [
+    {
+      "name": "claim status",
+      "path": "/api/v1/claim"
+    },
+    {
+      "name": "OAuth2 providers",
+      "path": "/api/v1/oauth2/providers",
+      "comparison": {
+        "bodyMode": "JSON",
+        "compareContentType": true
+      }
+    },
+    {
+      "name": "OpenAPI contract",
+      "path": "/v3/api-docs",
+      "comparison": {
+        "bodyMode": "JSON",
+        "compareContentType": true,
+        "ignoreJsonPaths": [
+          "/servers"
+        ]
+      }
+    }
+  ]
+}
