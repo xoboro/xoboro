@@ -24,6 +24,8 @@ import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataRefreshLifecycle
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.PageHashLifecycle
+import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
@@ -59,6 +61,7 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
 import io.xoboro.server.persistence.JooqMetadataFacetRepository
+import io.xoboro.server.persistence.JooqPageHashRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
 import io.xoboro.server.persistence.JooqReadListRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
@@ -127,6 +130,8 @@ class XoboroRuntime private constructor(
   val catalogMaintenanceRequester: CatalogMaintenanceRequester,
   val metadataEditingLifecycle: MetadataEditingLifecycle,
   val metadataFacetRepository: MetadataFacetRepository,
+  val pageHashRepository: PageHashRepository,
+  val pageHashLifecycle: PageHashLifecycle,
   val bookContentAccess: BookContentAccess,
   val organizationLifecycle: OrganizationLifecycle,
   val seriesCollectionRepository: SeriesCollectionRepository,
@@ -230,6 +235,12 @@ class XoboroRuntime private constructor(
             currentTimeMillis = System::currentTimeMillis,
           )
         val metadataFacets = JooqMetadataFacetRepository(database)
+        val pageHashes = JooqPageHashRepository(database)
+        val pageHashLifecycle =
+          PageHashLifecycle(
+            hashes = pageHashes,
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val readProgressLifecycle =
           ReadProgressLifecycle(
             books = books,
@@ -552,6 +563,8 @@ class XoboroRuntime private constructor(
           catalogMaintenanceRequester = catalogMaintenanceRequester,
           metadataEditingLifecycle = metadataEditing,
           metadataFacetRepository = metadataFacets,
+          pageHashRepository = pageHashes,
+          pageHashLifecycle = pageHashLifecycle,
           bookContentAccess = bookContentAccess,
           organizationLifecycle = organizationLifecycle,
           seriesCollectionRepository = collections,

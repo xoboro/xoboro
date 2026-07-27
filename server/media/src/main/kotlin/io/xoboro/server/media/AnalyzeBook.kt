@@ -14,6 +14,7 @@ class AnalyzeBook(
   accesses: Collection<SourceMediaAccess>,
   private val media: BookMediaRepository,
   private val zipAnalyzer: ZipMediaAnalyzer,
+  private val contentHasher: Xxh3ContentHasher = Xxh3ContentHasher(),
   private val currentTimeMillis: () -> Long,
 ) {
   private val accessesBySourceId = accesses.associateBy(SourceMediaAccess::sourceId)
@@ -37,10 +38,14 @@ class AnalyzeBook(
             accessesBySourceId[library.root.sourceId]
               ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
           access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
+            if (library.settings.hashFiles && book.fileHash.isBlank()) {
+              books.update(book.copy(fileHash = contentHasher.hash(materialized.path)))
+            }
             zipAnalyzer.analyze(
               bookId = bookId,
               path = materialized.path,
               analyzeDimensions = library.settings.analyzeDimensions,
+              hashPages = library.settings.hashPages,
               createdAtMillis = createdAtMillis,
               updatedAtMillis = nowMillis,
             )
@@ -55,7 +60,24 @@ class AnalyzeBook(
             updatedAtMillis = nowMillis,
           )
       }
-    media.upsert(result)
-    return result
+    val restored = result.restorePageHashesFrom(previous)
+    media.upsert(restored)
+    return restored
   }
+}
+
+private fun BookMedia.restorePageHashesFrom(previous: BookMedia?): BookMedia {
+  if (previous == null || pages.none { it.fileHash.isBlank() }) return this
+  val previousByIdentity =
+    previous.pages
+      .filter { it.fileHash.isNotBlank() }
+      .associateBy { Triple(it.fileName, it.mediaType, it.fileSize) }
+  return copy(
+    pages =
+      pages.map { page ->
+        previousByIdentity[Triple(page.fileName, page.mediaType, page.fileSize)]
+          ?.let { page.copy(fileHash = it.fileHash) }
+          ?: page
+      },
+  )
 }

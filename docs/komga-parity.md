@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V17 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V18 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -64,11 +64,11 @@ Status:
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
-| File, page, and KOReader hashes | TODO | |
+| File, page, and KOReader hashes | PARTIAL | Komga-compatible seeded XXH3-128 whole-file hashes reuse source materialization; optional first/last-three page hashes persist during Comic analysis, JPEG pixels are normalized before hashing, and non-empty hashes are indexed; KOReader hash and differential fixtures pending |
 | Book and series lifecycle | TODO | |
 | File import, upgrade, and deletion | TODO | |
-| Duplicate file detection | TODO | |
-| Duplicate page detection and removal | TODO | |
+| Duplicate file detection | PARTIAL | Administrator Book route groups non-empty equal file hashes and sizes in SQLite with stable paging and Komga DTO projection; differential sorting pending |
+| Duplicate page detection and removal | PARTIAL | Known/unknown/match queries, action updates, live bounded thumbnails, SQL aggregation/paging, restart persistence, and administrator routes are implemented; atomic source mutation and automatic deletion remain pending |
 
 ## Metadata
 
