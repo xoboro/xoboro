@@ -37,6 +37,10 @@ sealed interface TaskRunResult {
   ) : TaskRunResult
 }
 
+fun interface TaskRunner {
+  fun runOnce(workerId: String): TaskRunResult
+}
+
 class DurableTaskWorker(
   private val queue: DurableTaskQueue,
   handlers: Collection<TaskHandler>,
@@ -44,7 +48,7 @@ class DurableTaskWorker(
   private val currentTimeMillis: () -> Long,
   private val leaseTokenFactory: () -> String,
   private val policy: TaskWorkerPolicy = TaskWorkerPolicy(),
-) {
+) : TaskRunner {
   private val handlersByType = handlers.associateBy(TaskHandler::taskType)
 
   init {
@@ -52,7 +56,7 @@ class DurableTaskWorker(
     require(handlersByType.size == handlers.size) { "Task handler types must be unique" }
   }
 
-  fun runOnce(workerId: String): TaskRunResult {
+  override fun runOnce(workerId: String): TaskRunResult {
     require(workerId.isNotBlank()) { "Worker ID must not be blank" }
     val leaseToken = leaseTokenFactory()
     require(leaseToken.isNotBlank()) { "Lease token must not be blank" }

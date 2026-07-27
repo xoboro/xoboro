@@ -36,6 +36,11 @@ class XoboroDatabase private constructor(
       block(DSL.using(configuration))
     }
 
+  fun isAvailable(): Boolean =
+    runCatching {
+      dsl.fetchValue("SELECT 1", Int::class.java) == 1
+    }.getOrDefault(false)
+
   override fun close() {
     hikariDataSource.close()
   }
