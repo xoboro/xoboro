@@ -93,6 +93,10 @@ editing source:
 Malformed or out-of-range overrides fail startup instead of silently falling
 back to another value.
 
+At startup, Xoboro enqueues scans for libraries with `scanOnStartup` enabled
+and registers each non-disabled `scanInterval`. Filesystem work runs through
+the durable leased worker queue rather than on the scheduler thread.
+
 ## Compatibility status
 
 The auditable compatibility ledger is maintained in
