@@ -84,6 +84,11 @@ interface ArtworkRepository {
 
   fun replaceGenerated(content: ArtworkContent)
 
+  fun replaceSidecars(
+    owner: ArtworkOwner,
+    contents: List<ArtworkContent>,
+  )
+
   fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,

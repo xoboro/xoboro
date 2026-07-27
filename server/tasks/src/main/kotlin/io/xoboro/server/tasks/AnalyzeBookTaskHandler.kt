@@ -80,6 +80,7 @@ class AnalyzeBookTaskEmitter(
 
 class AnalyzeBookTaskHandler(
   private val analyzeBook: (BookId) -> Unit,
+  private val afterAnalyze: (BookId) -> Unit = {},
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -94,7 +95,10 @@ class AnalyzeBookTaskHandler(
         ?.contentOrNull
         ?.takeIf(String::isNotBlank)
         ?: throw IllegalArgumentException("ANALYZE_BOOK payload must contain a non-blank bookId")
-    analyzeBook(BookId(bookId))
+    BookId(bookId).also { id ->
+      analyzeBook(id)
+      afterAnalyze(id)
+    }
   }
 
   companion object {

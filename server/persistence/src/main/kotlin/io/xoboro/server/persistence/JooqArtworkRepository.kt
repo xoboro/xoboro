@@ -152,6 +152,93 @@ class JooqArtworkRepository(
     }
   }
 
+  override fun replaceSidecars(
+    owner: ArtworkOwner,
+    contents: List<ArtworkContent>,
+  ) {
+    require(contents.all { it.artwork.owner == owner }) {
+      "Sidecar artwork owners must match"
+    }
+    require(contents.all { it.artwork.type == ArtworkType.SIDECAR }) {
+      "Replacement artwork must be sidecar artwork"
+    }
+    require(contents.count { it.artwork.selected } <= 1) {
+      "At most one sidecar artwork can be selected"
+    }
+    database.transaction { transaction ->
+      transaction.execute(
+        """
+        DELETE FROM artwork_thumbnail
+        WHERE owner_kind = ? AND owner_id = ? AND artwork_type = ?
+        """.trimIndent(),
+        owner.kind.name,
+        owner.id,
+        ArtworkType.SIDECAR.name,
+      )
+      if (contents.any { it.artwork.selected }) {
+        val changedAt = contents.first().artwork.updatedAtMillis
+        transaction.execute(
+          """
+          UPDATE artwork_thumbnail SET selected = 0, updated_at_ms = ?
+          WHERE owner_kind = ? AND owner_id = ? AND selected = 1
+          """.trimIndent(),
+          changedAt,
+          owner.kind.name,
+          owner.id,
+        )
+      }
+      contents.forEach { content ->
+        val item = content.artwork
+        transaction.execute(
+          """
+          INSERT INTO artwork_thumbnail (
+            id, owner_kind, owner_id, artwork_type, selected, media_type,
+            file_size, width, height, content, created_at_ms, updated_at_ms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          """.trimIndent(),
+          item.id.value,
+          owner.kind.name,
+          owner.id,
+          item.type.name,
+          item.selected.toSqliteInt(),
+          item.mediaType,
+          item.fileSize,
+          item.width,
+          item.height,
+          content.bytes,
+          item.createdAtMillis,
+          item.updatedAtMillis,
+        )
+      }
+      val selectedExists =
+        transaction.fetchExists(
+          transaction
+            .selectOne()
+            .from("artwork_thumbnail")
+            .where("owner_kind = ? AND owner_id = ? AND selected = 1", owner.kind.name, owner.id),
+        )
+      if (!selectedExists) {
+        transaction.execute(
+          """
+          UPDATE artwork_thumbnail SET selected = 1
+          WHERE id = (
+            SELECT id FROM artwork_thumbnail
+            WHERE owner_kind = ? AND owner_id = ?
+            ORDER BY CASE artwork_type
+              WHEN 'USER_UPLOADED' THEN 0
+              WHEN 'SIDECAR' THEN 1
+              ELSE 2
+            END, created_at_ms, id
+            LIMIT 1
+          )
+          """.trimIndent(),
+          owner.kind.name,
+          owner.id,
+        )
+      }
+    }
+  }
+
   override fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,
