@@ -16,6 +16,7 @@ import io.ktor.server.response.respond
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.AuthenticationRequestDetails
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ApiKey
@@ -26,6 +27,8 @@ fun Application.installKomgaBasicAuthentication(
   apiKeys: ApiKeyLifecycle? = null,
   authenticationActivities: AuthenticationActivityLifecycle? = null,
   sessions: UserSessionLifecycle? = null,
+  rememberMe: RememberMeTokenService? = null,
+  rememberMeMaxAgeSeconds: Int? = null,
 ) {
   install(Authentication) {
     basic(KOMGA_BASIC_AUTHENTICATION) {
@@ -47,6 +50,7 @@ fun Application.installKomgaBasicAuthentication(
             details = authenticationRequestDetails(),
           )
           sessions?.let { issueSession(principal.user, it) }
+          issueRememberMeIfRequested(principal.user, rememberMe, rememberMeMaxAgeSeconds)
         }
         principal
       }
@@ -81,6 +85,11 @@ fun Application.installKomgaBasicAuthentication(
                 apiKey = principal.apiKey,
               )
               sessions?.let { context.call.issueSession(principal.user, it) }
+              context.call.issueRememberMeIfRequested(
+                principal.user,
+                rememberMe,
+                rememberMeMaxAgeSeconds,
+              )
               context.principal(
                 KOMGA_API_KEY_AUTHENTICATION,
                 KomgaPrincipal(principal.user, principal.apiKey),
@@ -113,7 +122,77 @@ fun Application.installKomgaBasicAuthentication(
         }
       }
     }
+    provider(KOMGA_REMEMBER_ME_AUTHENTICATION) {
+      authenticate { context ->
+        val rawToken = context.call.request.cookies[KOMGA_REMEMBER_ME_COOKIE]
+        when {
+          rawToken == null ->
+            context.error(
+              KOMGA_REMEMBER_ME_AUTHENTICATION,
+              AuthenticationFailedCause.NoCredentials,
+            )
+          else -> {
+            val user = rememberMe?.authenticate(rawToken)
+            if (user == null) {
+              context.challenge(
+                KOMGA_REMEMBER_ME_AUTHENTICATION,
+                AuthenticationFailedCause.InvalidCredentials,
+              ) { challenge, call ->
+                call.expireRememberMeCookie()
+                call.respond(HttpStatusCode.Unauthorized)
+                challenge.complete()
+              }
+            } else {
+              authenticationActivities?.recordSuccess(
+                user = user,
+                source = AUTHENTICATION_SOURCE_REMEMBER_ME,
+                details = context.call.authenticationRequestDetails(),
+              )
+              sessions?.let { context.call.issueSession(user, it) }
+              context.principal(
+                KOMGA_REMEMBER_ME_AUTHENTICATION,
+                KomgaPrincipal(user),
+              )
+            }
+          }
+        }
+      }
+    }
   }
+}
+
+private fun ApplicationCall.issueRememberMeIfRequested(
+  user: User,
+  rememberMe: RememberMeTokenService?,
+  maxAgeSeconds: Int?,
+) {
+  if (request.queryParameters["remember-me"]?.toBooleanStrictOrNull() != true) return
+  if (rememberMe == null || maxAgeSeconds == null) return
+  response.cookies.append(
+    Cookie(
+      name = KOMGA_REMEMBER_ME_COOKIE,
+      value = rememberMe.issue(user),
+      path = "/",
+      maxAge = maxAgeSeconds,
+      httpOnly = true,
+      secure = request.local.scheme == "https",
+      extensions = mapOf("SameSite" to "Lax"),
+    ),
+  )
+}
+
+internal fun ApplicationCall.expireRememberMeCookie() {
+  response.cookies.append(
+    Cookie(
+      name = KOMGA_REMEMBER_ME_COOKIE,
+      value = "",
+      path = "/",
+      maxAge = 0,
+      httpOnly = true,
+      secure = request.local.scheme == "https",
+      extensions = mapOf("SameSite" to "Lax"),
+    ),
+  )
 }
 
 internal fun ApplicationCall.sessionTokenOrNull(): String? =
@@ -177,7 +256,10 @@ const val KOMGA_BASIC_REALM: String = "Realm"
 const val KOMGA_SESSION_AUTHENTICATION: String = "komga-session"
 const val KOMGA_SESSION_COOKIE: String = "KOMGA-SESSION"
 const val KOMGA_SESSION_HEADER: String = "X-Auth-Token"
+const val KOMGA_REMEMBER_ME_AUTHENTICATION: String = "komga-remember-me"
+const val KOMGA_REMEMBER_ME_COOKIE: String = "komga-remember-me"
 const val AUTHENTICATION_SOURCE_API_KEY: String = "ApiKey"
 const val AUTHENTICATION_SOURCE_PASSWORD: String = "Password"
+const val AUTHENTICATION_SOURCE_REMEMBER_ME: String = "RememberMe"
 private const val BAD_CREDENTIALS_ERROR: String = "Bad credentials"
 private val ISSUED_SESSION_TOKEN = AttributeKey<String>("xoboro-issued-session-token")

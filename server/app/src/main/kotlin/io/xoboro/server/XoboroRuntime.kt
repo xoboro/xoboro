@@ -4,6 +4,7 @@ import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -17,11 +18,13 @@ import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
 import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.Sha512TokenEncoder
+import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
@@ -48,6 +51,7 @@ class XoboroRuntime private constructor(
   val apiKeyLifecycle: ApiKeyLifecycle,
   val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
   val userSessionLifecycle: UserSessionLifecycle,
+  val rememberMeTokenService: RememberMeTokenService,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -80,6 +84,9 @@ class XoboroRuntime private constructor(
   companion object {
     private val logger = Logger.getLogger(XoboroRuntime::class.java.name)
     const val DEFAULT_SESSION_TIMEOUT_MILLIS: Long = 7L * 24 * 60 * 60 * 1_000
+    const val DEFAULT_REMEMBER_ME_TIMEOUT_MILLIS: Long = 365L * 24 * 60 * 60 * 1_000
+    const val DEFAULT_REMEMBER_ME_MAX_AGE_SECONDS: Int = 365 * 24 * 60 * 60
+    private const val REMEMBER_ME_KEY_SETTING: String = "REMEMBER_ME_KEY"
 
     fun open(config: ServerConfig): XoboroRuntime {
       val database =
@@ -100,6 +107,7 @@ class XoboroRuntime private constructor(
         val userRepository = JooqUserRepository(database)
         val tokenEncoder = Sha512TokenEncoder()
         val sessionRepository = InMemoryUserSessionRepository()
+        val settings = JooqServerSettingRepository(database)
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
@@ -125,6 +133,16 @@ class XoboroRuntime private constructor(
             plainTokenFactory = { UUID.randomUUID().toString().replace("-", "") },
             currentTimeMillis = System::currentTimeMillis,
             inactivityTimeoutMillis = DEFAULT_SESSION_TIMEOUT_MILLIS,
+          )
+        val rememberMeTokenService =
+          SpringCompatibleRememberMeTokenService(
+            users = userRepository,
+            secretKey =
+              settings.findOrCreate(REMEMBER_ME_KEY_SETTING) {
+                UUID.randomUUID().toString().replace("-", "")
+              },
+            currentTimeMillis = System::currentTimeMillis,
+            tokenValidityMillis = DEFAULT_REMEMBER_ME_TIMEOUT_MILLIS,
           )
         val authenticationActivityLifecycle =
           AuthenticationActivityLifecycle(
@@ -210,6 +228,7 @@ class XoboroRuntime private constructor(
           apiKeyLifecycle = apiKeyLifecycle,
           authenticationActivityLifecycle = authenticationActivityLifecycle,
           userSessionLifecycle = userSessionLifecycle,
+          rememberMeTokenService = rememberMeTokenService,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()

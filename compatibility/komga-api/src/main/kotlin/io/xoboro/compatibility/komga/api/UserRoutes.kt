@@ -43,6 +43,7 @@ fun Route.komgaAuthenticatedUserRoutes(
     KOMGA_BASIC_AUTHENTICATION,
     KOMGA_API_KEY_AUTHENTICATION,
     KOMGA_SESSION_AUTHENTICATION,
+    KOMGA_REMEMBER_ME_AUTHENTICATION,
     strategy = AuthenticationStrategy.FirstSuccessful,
   ) {
     route("/api/v2/users") {
