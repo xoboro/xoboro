@@ -1,5 +1,7 @@
 package io.xoboro.server
 
+import io.xoboro.compatibility.komga.api.komgaClaimRoutes
+import io.xoboro.core.application.UserLifecycle
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -14,6 +16,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 fun main() {
   val config = ServerConfig.fromEnvironment()
@@ -23,25 +26,35 @@ fun main() {
       host = "0.0.0.0",
       port = config.port,
       module = {
-        xoboroModule(
-          readiness = runtime::isReady,
-          onStop = runtime::close,
-        )
+        xoboroModule(runtime)
       },
     ).start(wait = true)
   }
 }
 
+fun Application.xoboroModule(runtime: XoboroRuntime) {
+  xoboroModule(
+    readiness = runtime::isReady,
+    onStop = runtime::close,
+    userLifecycle = runtime.userLifecycle,
+  )
+}
+
 fun Application.xoboroModule(
   readiness: () -> Boolean = { true },
   onStop: () -> Unit = {},
+  userLifecycle: UserLifecycle? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
     onStop()
   }
   install(CallLogging)
   install(ContentNegotiation) {
-    json()
+    json(
+      Json {
+        explicitNulls = false
+      },
+    )
   }
   install(StatusPages) {
     exception<Throwable> { call, cause ->
@@ -63,6 +76,9 @@ fun Application.xoboroModule(
         status = if (ready) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable,
         message = HealthResponse(status = if (ready) "UP" else "DOWN"),
       )
+    }
+    userLifecycle?.let {
+      komgaClaimRoutes(it)
     }
   }
 }

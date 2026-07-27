@@ -94,7 +94,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Initial administrator claim | PARTIAL | Atomic single-winner claim lifecycle, durable persistence, all-role assignment, and BCrypt hashing tests; public REST endpoint pending |
+| Initial administrator claim | PARTIAL | Anonymous GET status and header-based POST claim contracts, atomic single-winner persistence, all-role DTO, TSID identity, BCrypt hashing, null omission, validation, and real-runtime restart tests; automated initial-user configuration pending |
 | Multi-user CRUD and password reset | PARTIAL | Case-insensitive identity, default roles, create/authenticate lifecycle, and atomic relation persistence tests; REST CRUD and password reset pending |
 | Roles and authorization | PARTIAL | Komga role model and durable assignment tests; HTTP authorization pending |
 | Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
@@ -121,7 +121,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | TODO | |
+| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` GET/POST compatibility tests and production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | TODO | |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

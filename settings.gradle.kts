@@ -16,6 +16,7 @@ rootProject.name = "xoboro"
 
 include(":core:domain")
 include(":core:application")
+include(":compatibility:komga-api")
 include(":server:app")
 include(":server:media")
 include(":server:persistence")
