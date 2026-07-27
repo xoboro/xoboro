@@ -21,6 +21,8 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.BookContentAccess
+import io.xoboro.core.application.CatalogPage
+import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.OrganizationEvent
@@ -63,7 +65,9 @@ import java.io.ByteArrayInputStream
 import java.util.zip.ZipInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.put
@@ -72,6 +76,42 @@ import org.junit.jupiter.api.io.TempDir
 class CatalogRoutesTest {
   @TempDir
   lateinit var tempDirectory: Path
+
+  @Test
+  fun `reports requested sorting and explicit null catalog fields`() {
+    val unsorted =
+      CatalogPage(content = listOf("item"), page = 0, size = 20, totalElements = 1)
+        .toPageDto(listOf("item"))
+    assertTrue(unsorted.sort.empty)
+    assertFalse(unsorted.sort.sorted)
+    assertTrue(unsorted.sort.unsorted)
+
+    val sorted =
+      CatalogPage(
+        content = listOf("item"),
+        page = 0,
+        size = 20,
+        totalElements = 1,
+        sorts = listOf(CatalogSort("title")),
+      ).toPageDto(listOf("item"))
+    assertFalse(sorted.sort.empty)
+    assertTrue(sorted.sort.sorted)
+    assertFalse(sorted.sort.unsorted)
+
+    val wire =
+      KOMGA_CATALOG_RESPONSE_JSON.encodeToString(
+        KomgaBookMetadataAggregationDto(
+          authors = emptyList(),
+          tags = emptySet(),
+          releaseDate = null,
+          summary = "",
+          summaryNumber = "",
+          created = "2030-01-01T00:00:00Z",
+          lastModified = "2030-01-01T00:00:00Z",
+        ),
+      )
+    assertTrue(wire.contains("\"releaseDate\":null"))
+  }
 
   @Test
   fun `serves paged catalog detail siblings and series groups`() {
@@ -639,7 +679,13 @@ class CatalogRoutesTest {
         assertEquals(1, books.content.size)
         assertEquals("book-2", books.content.single().id)
         assertEquals("Synthetic catalog", books.content.single().seriesTitle)
+        assertEquals(
+          "/synthetic/synthetic-catalog/chapter-2.cbz",
+          books.content.single().url,
+        )
         assertEquals("READY", books.content.single().media.status)
+        assertTrue(books.content.single().media.epubDivinaCompatible)
+        assertTrue(books.content.single().media.epubIsKepub)
 
         val previous =
           client
@@ -659,6 +705,7 @@ class CatalogRoutesTest {
             .get("/api/v1/series/series-1") {
               basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
             }.body<KomgaSeriesDto>()
+        assertEquals("/synthetic/synthetic-catalog", series.url)
         assertEquals("Synthetic catalog", series.metadata.title)
         assertEquals(2, series.booksCount)
 
@@ -676,8 +723,8 @@ class CatalogRoutesTest {
             }.body<List<KomgaGroupCountDto>>()
         assertEquals(
           listOf(
-            KomgaGroupCountDto("R", 1),
-            KomgaGroupCountDto("S", 1),
+            KomgaGroupCountDto("r", 1),
+            KomgaGroupCountDto("s", 1),
           ),
           groups,
         )
@@ -866,6 +913,8 @@ class CatalogRoutesTest {
               ),
             ),
           pageCount = 2,
+          epubDivinaCompatible = index == 1,
+          epubIsKepub = index == 1,
           createdAtMillis = 1,
         ),
       )

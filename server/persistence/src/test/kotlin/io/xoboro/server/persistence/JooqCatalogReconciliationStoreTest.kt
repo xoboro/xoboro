@@ -50,6 +50,63 @@ class JooqCatalogReconciliationStoreTest {
   }
 
   @Test
+  fun `renumbers scanned series naturally while preserving metadata locks`() {
+    withStore("natural-numbering") { fixture ->
+      val original =
+        listOf(
+          candidate("Series/Chapter 10.cbz", "identity-10"),
+          candidate("Series/chapter 2.cbz", "identity-2"),
+          candidate("Series/Chápter   1.cbz", "identity-1"),
+        )
+      fixture.scan(original)
+
+      assertEquals(
+        listOf(
+          "Chápter   1" to "1",
+          "chapter 2" to "2",
+          "Chapter 10" to "3",
+        ),
+        fixture.numberedBooks(),
+      )
+      val lockedId =
+        requireNotNull(
+          fixture.books
+            .findAllByLibraryId(LIBRARY_ID)
+            .firstOrNull { it.name == "chapter 2" },
+        ).id.value
+      fixture.database.dsl.execute(
+        """
+        UPDATE book_metadata SET
+          number = '42',
+          number_sort = 42,
+          number_lock = 1,
+          number_sort_lock = 1
+        WHERE book_id = ?
+        """.trimIndent(),
+        lockedId,
+      )
+
+      fixture.scan(
+        original + candidate("Series/Chapter 0.cbz", "identity-0"),
+      )
+
+      assertEquals(
+        listOf(
+          "Chapter 0" to "1",
+          "Chápter   1" to "2",
+          "chapter 2" to "42",
+          "Chapter 10" to "4",
+        ),
+        fixture.numberedBooks(),
+      )
+      assertEquals(
+        3,
+        fixture.books.findByIdOrNull(io.xoboro.core.domain.BookId(lockedId))?.number,
+      )
+    }
+  }
+
+  @Test
   fun `bulk scan stages and reconciles a large synthetic inventory`() {
     withStore("bulk") { fixture ->
       val candidates =
@@ -471,6 +528,22 @@ class JooqCatalogReconciliationStoreTest {
           }
         "$entity:${it.kind}"
       }.sorted()
+
+    fun numberedBooks(): List<Pair<String, String>> =
+      database.dsl
+        .fetch(
+          """
+          SELECT book.name, metadata.number
+          FROM book
+          JOIN book_metadata metadata ON metadata.book_id = book.id
+          WHERE book.library_id = ?
+          ORDER BY book.number
+          """.trimIndent(),
+          LIBRARY_ID.value,
+        ).map {
+          requireNotNull(it.get("name", String::class.java)) to
+            requireNotNull(it.get("number", String::class.java))
+        }
   }
 
   private fun candidate(
