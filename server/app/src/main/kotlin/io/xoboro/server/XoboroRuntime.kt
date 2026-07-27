@@ -201,6 +201,8 @@ class XoboroRuntime private constructor(
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
   val effectiveServerContextPath: String?,
+  val trustedProxyHosts: Set<String>,
+  val metricsToken: String?,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
 
@@ -882,6 +884,8 @@ class XoboroRuntime private constructor(
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,
           effectiveServerContextPath = effectiveServerContextPath,
+          trustedProxyHosts = config.trustedProxyHosts,
+          metricsToken = config.metricsToken,
         ).also {
           createdWorkerPool.start()
           createdLibraryScanScheduler.start()

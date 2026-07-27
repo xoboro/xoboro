@@ -35,6 +35,7 @@ dependencies {
   implementation(libs.ktor.server.content.negotiation)
   implementation(libs.ktor.server.status.pages)
   implementation(libs.ktor.server.sse)
+  implementation(libs.ktor.server.forwarded.header)
   implementation(libs.ktor.serialization.kotlinx.json)
   implementation(libs.ktor.client.cio)
   implementation(libs.ktor.client.content.negotiation)

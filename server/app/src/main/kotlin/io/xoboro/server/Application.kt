@@ -217,6 +217,10 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
+    trustedProxyHosts = runtime.trustedProxyHosts,
+    metricsToken = runtime.metricsToken,
+    taskQueueSize = { runtime.sseTaskStatusProvider.snapshot().count },
+    workerCount = runtime::taskWorkerCount,
   )
 }
 
@@ -263,10 +267,15 @@ fun Application.xoboroModule(
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
+  trustedProxyHosts: Set<String> = emptySet(),
+  metricsToken: String? = null,
+  taskQueueSize: () -> Int = { 0 },
+  workerCount: () -> Int = { 0 },
 ) {
   monitor.subscribe(ApplicationStopped) {
     onStop()
   }
+  val operationalMetrics = metricsToken?.let { OperationalMetrics() }
   install(CallLogging)
   install(ContentNegotiation) {
     json(
@@ -294,11 +303,22 @@ fun Application.xoboroModule(
     }
   }
   install(SSE)
+  installTrustedProxyHeaders(trustedProxyHosts)
+  operationalMetrics?.let(::installOperationalMetrics)
 
   routing {
     val routes: Route.() -> Unit = {
       get("/health") {
         call.respond(HealthResponse())
+      }
+      metricsToken?.let { token ->
+        operationalMetricsRoute(
+          token = token,
+          metrics = requireNotNull(operationalMetrics),
+          readiness = readiness,
+          taskQueueSize = taskQueueSize,
+          workerCount = workerCount,
+        )
       }
       komgaOpenApiRoutes()
       get("/ready") {

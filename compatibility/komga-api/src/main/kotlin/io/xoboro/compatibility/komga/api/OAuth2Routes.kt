@@ -4,6 +4,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Cookie
 import io.ktor.http.encodeURLQueryComponent
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -113,11 +114,11 @@ private fun io.ktor.server.application.ApplicationCall.contextPrefix(): String {
 }
 
 private fun io.ktor.server.application.ApplicationCall.absoluteUri(path: String): String {
-  val scheme = request.local.scheme
-  val host = request.local.serverHost
+  val scheme = request.origin.scheme
+  val host = request.origin.serverHost
   val formattedHost =
     if (':' in host && !host.startsWith('[')) "[$host]" else host
-  val port = request.local.serverPort
+  val port = request.origin.serverPort
   val authority =
     if ((scheme == "http" && port == 80) || (scheme == "https" && port == 443)) {
       formattedHost
@@ -141,7 +142,7 @@ private fun OAuth2LoginLifecycle.authenticationSource(registrationId: String): S
 private fun io.ktor.server.application.ApplicationCall.authenticationRequestDetails():
   AuthenticationRequestDetails =
   AuthenticationRequestDetails(
-    ip = request.local.remoteHost,
+    ip = request.origin.remoteHost,
     userAgent = request.header(HttpHeaders.UserAgent),
   )
 
@@ -153,7 +154,7 @@ private fun io.ktor.server.application.ApplicationCall.appendOAuth2BindingCookie
       path = "${contextPrefix()}/login/oauth2/code",
       maxAge = OAUTH2_BINDING_MAX_AGE_SECONDS,
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )
@@ -167,7 +168,7 @@ private fun io.ktor.server.application.ApplicationCall.expireOAuth2BindingCookie
       path = "${contextPrefix()}/login/oauth2/code",
       maxAge = 0,
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )

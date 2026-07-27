@@ -117,6 +117,9 @@ editing source:
 | `XOBORO_TASK_FAILURE_POLL_MILLIS` | `1000` |
 | `XOBORO_TASK_LEASE_MILLIS` | `600000` |
 | `XOBORO_SHUTDOWN_TIMEOUT_MILLIS` | `30000` |
+| `XOBORO_CONTEXT_PATH` | unset |
+| `XOBORO_TRUSTED_PROXIES` | unset |
+| `XOBORO_METRICS_TOKEN` | unset |
 | `KOMGA_OAUTH2_ACCOUNT_CREATION` | `false` |
 | `KOMGA_OIDC_EMAIL_VERIFICATION` | `true` |
 
@@ -129,6 +132,19 @@ OAuth2 clients use Spring Security's environment naming, for example
 `SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_<ID>_AUTHORIZATION_URI`, `TOKEN_URI`,
 and `USER_INFO_URI`; OIDC providers additionally set `ISSUER_URI` and
 `JWK_SET_URI`. Secrets are read at startup and are never returned by an API.
+
+Reverse-proxy headers are rejected by default. Set `XOBORO_TRUSTED_PROXIES`
+to the comma-separated physical peer hosts or addresses that connect directly
+to Xoboro. Only those peers may supply RFC `Forwarded` or `X-Forwarded-*`
+headers; authenticated IPs, secure cookies, absolute links, and OAuth callback
+URIs then use the verified origin. Do not add public client ranges.
+
+Setting a random `XOBORO_METRICS_TOKEN` of at least 32 characters enables the
+context-relative `/metrics` Prometheus endpoint. Scrape it with
+`Authorization: Bearer <token>`. Metrics use bounded method and status-class
+labels and expose request counts/durations, active requests, readiness, durable
+queue size, worker count, and uptime. Request paths, catalog identifiers, user
+data, and tokens are never labels or metric values.
 
 At startup, Xoboro enqueues scans for libraries with `scanOnStartup` enabled
 and registers each non-disabled `scanInterval`. Filesystem work runs through
