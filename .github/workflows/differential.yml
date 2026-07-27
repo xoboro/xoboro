@@ -77,6 +77,28 @@ jobs:
           --candidate http://127.0.0.1:25611 \
           --suite compatibility/komga-differential/suites/komga-1.25.0-anonymous.json"
 
+      - name: Verify anonymous shallow revalidation
+        run: |
+          for endpoint in api/v1/claim api/v1/oauth2/providers; do
+            for port in 25610 25611; do
+              url="http://127.0.0.1:${port}/${endpoint}"
+              etag="$(
+                curl --fail --silent --show-error \
+                  --dump-header - --output /dev/null "${url}" |
+                  awk -F': ' 'tolower($1) == "etag" {
+                    sub("\r$", "", $2)
+                    print $2
+                  }'
+              )"
+              test -n "${etag}"
+              http_status="$(
+                curl --silent --output /dev/null --write-out '%{http_code}' \
+                  --header "If-None-Match: ${etag}" "${url}"
+              )"
+              test "${http_status}" = "304"
+            done
+          done
+
       - name: Create synthetic catalog
         env:
           SYNTHETIC_EMAIL: admin@example.invalid
