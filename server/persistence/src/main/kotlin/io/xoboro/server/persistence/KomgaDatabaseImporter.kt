@@ -15,6 +15,8 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeFormatterBuilder
+import java.time.temporal.ChronoField
 import java.util.Locale
 import java.util.zip.GZIPInputStream
 import org.jooq.DSLContext
@@ -1207,12 +1209,18 @@ private val TIMESTAMP_PARSERS: List<(String) -> Long> =
     },
     {
       LocalDateTime
-        .parse(it, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]"))
+        .parse(it, KOMGA_SQLITE_TIMESTAMP)
         .toInstant(ZoneOffset.UTC)
         .toEpochMilli()
     },
     { LocalDate.parse(it).atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli() },
   )
+
+private val KOMGA_SQLITE_TIMESTAMP: DateTimeFormatter =
+  DateTimeFormatterBuilder()
+    .appendPattern("yyyy-MM-dd HH:mm:ss")
+    .appendFraction(ChronoField.NANO_OF_SECOND, 0, 9, true)
+    .toFormatter()
 
 private fun relativePath(
   root: String,

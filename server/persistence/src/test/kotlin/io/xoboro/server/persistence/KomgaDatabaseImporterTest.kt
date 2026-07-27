@@ -152,7 +152,7 @@ class KomgaDatabaseImporterTest {
         """
         INSERT INTO BOOK VALUES (
           'book-1', '2026-07-27 10:00:00', '2026-07-27 10:03:00',
-          '2026-07-27 09:30:00', 'Synthetic item',
+          '2026-07-27 09:30:00.123456789', 'Synthetic item',
           'file:///synthetic/library/series/item.cbz', 'series-1', 1234, 1,
           'library-1', 'file-hash', NULL, 0, 'koreader-hash'
         )
