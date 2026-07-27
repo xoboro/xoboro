@@ -36,6 +36,27 @@ class MediaRoutesTest {
   }
 
   @Test
+  fun `negotiates raw PDF pages with Komga quality and specificity rules`() {
+    val cases =
+      listOf(
+        emptyList<String>() to false,
+        listOf("application/pdf") to true,
+        listOf("application/pdf", "image/*") to true,
+        listOf("image/*") to false,
+        listOf("image/avif") to false,
+        listOf("application/atom+xml") to false,
+        listOf("*/*") to true,
+        listOf("image/jpeg, application/pdf") to false,
+        listOf("application/pdf;q=0.5, image/jpeg") to false,
+        listOf("image/jpeg;q=0.5, application/pdf;q=0.8") to true,
+      )
+
+    cases.forEach { (accept, expected) ->
+      assertEquals(expected, prefersRawPdfPage(accept), accept.joinToString())
+    }
+  }
+
+  @Test
   fun `serves conditional cache validators with HTTP precedence`() =
     testApplication {
       val modified = Instant.parse("2030-01-02T03:04:05.678Z").toEpochMilli()
