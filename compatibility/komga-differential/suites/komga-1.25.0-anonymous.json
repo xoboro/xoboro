@@ -3,14 +3,19 @@
   "cases": [
     {
       "name": "claim status",
-      "path": "/api/v1/claim"
+      "path": "/api/v1/claim",
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": ["Cache-Control", "Content-Length", "ETag"]
+      }
     },
     {
       "name": "OAuth2 providers",
       "path": "/api/v1/oauth2/providers",
       "comparison": {
         "bodyMode": "JSON",
-        "compareContentType": true
+        "compareContentType": true,
+        "headers": ["Cache-Control", "Content-Length", "ETag"]
       }
     },
     {
