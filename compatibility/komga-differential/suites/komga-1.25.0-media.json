@@ -25,6 +25,19 @@
       }
     },
     {
+      "name": "synthetic selected book artwork",
+      "path": "/api/v1/books/{BOOK_ID}/thumbnail",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Cache-Control",
+          "Content-Length",
+          "ETag"
+        ]
+      }
+    },
+    {
       "name": "synthetic archive download",
       "path": "/api/v1/books/{BOOK_ID}/file",
       "pathVariables": ["BOOK_ID"],

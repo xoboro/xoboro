@@ -27,7 +27,6 @@ import io.xoboro.core.domain.UserRole
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.ByteArrayOutputStream
 
 fun Route.komgaMediaRoutes(
   catalog: CatalogReadRepository,
@@ -189,7 +188,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   }
   opened.useForResponse {
     val type = runCatching { ContentType.parse(it.mediaType) }.getOrDefault(ContentType.Application.OctetStream)
-    val body = it.readCachedBody()
+    val body = it.readKomgaCachedBody()
     if (respondNotModified(body, lastModified)) return@useForResponse
     if (deliveryRequest == null) {
       response.header(
@@ -393,22 +392,6 @@ private suspend inline fun MediaContentStream.useForResponse(
   }
 }
 
-private fun MediaContentStream.readCachedBody(): KomgaCachedBody {
-  val initialCapacity =
-    contentLength
-      ?.coerceIn(0, MAXIMUM_EAGER_ALLOCATION.toLong())
-      ?.toInt()
-      ?: STREAM_BUFFER_SIZE
-  val output = ByteArrayOutputStream(initialCapacity)
-  val buffer = ByteArray(STREAM_BUFFER_SIZE)
-  while (true) {
-    val read = read(buffer)
-    if (read < 0) break
-    if (read > 0) output.write(buffer, 0, read)
-  }
-  return output.toByteArray().komgaCachedBody()
-}
-
 private fun User.mediaAccess(): CatalogAccess =
   CatalogAccess(
     userId = id,
@@ -431,7 +414,6 @@ private fun formatPageSize(bytes: Long): String =
   if (bytes < 1_024) "$bytes B" else "${bytes / 1_024} KiB"
 
 private const val STREAM_BUFFER_SIZE = 8 * 1_024
-private const val MAXIMUM_EAGER_ALLOCATION = 1024 * 1_024
 private const val PAGE_THUMBNAIL_MAXIMUM_DIMENSION = 300
 private const val RFC_5987_SAFE = "!#$&+-.^_`|~"
 private const val HEX = "0123456789ABCDEF"
