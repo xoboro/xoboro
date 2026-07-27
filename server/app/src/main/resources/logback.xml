@@ -1,7 +1,8 @@
 <configuration>
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder>
-      <pattern>%date{ISO8601} %-5level [%thread] %logger{36} - %message%n</pattern>
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"xoboro"}</customFields>
+      <includeMdc>true</includeMdc>
     </encoder>
   </appender>
 
@@ -11,4 +12,3 @@
     <appender-ref ref="STDOUT" />
   </root>
 </configuration>
-

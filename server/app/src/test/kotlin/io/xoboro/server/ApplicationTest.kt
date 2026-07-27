@@ -7,10 +7,15 @@ import io.ktor.client.request.basicAuth
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.plugins.origin
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
+import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.compatibility.komga.api.ClaimStatusDto
 import io.xoboro.compatibility.komga.api.LibraryCreationDto
@@ -76,6 +81,94 @@ class ApplicationTest {
       assertEquals(HttpStatusCode.NotFound, client.get("/health").status)
       assertEquals(HttpStatusCode.OK, client.get("/reader/health").status)
       assertEquals(HttpStatusCode.OK, client.get("/reader/ready").status)
+    }
+
+  @Test
+  fun `rejects spoofed forwarding headers from a direct client`() =
+    testApplication {
+      application {
+        xoboroModule()
+      }
+
+      val response =
+        client.get("/health") {
+          header(HttpHeaders.XForwardedFor, "198.51.100.20")
+        }
+
+      assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+  @Test
+  fun `uses forwarding headers only when the physical peer is trusted`() =
+    testApplication {
+      application {
+        installTrustedProxyHeaders(setOf("localhost"))
+        routing {
+          get("/origin") {
+            val origin = call.request.origin
+            call.respondText("${origin.scheme}|${origin.serverHost}|${origin.remoteHost}")
+          }
+        }
+      }
+
+      val response =
+        client.get("/origin") {
+          header(
+            HttpHeaders.Forwarded,
+            "for=198.51.100.21;proto=https;host=reader.example",
+          )
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals("https|reader.example|198.51.100.21", response.bodyAsText())
+
+      val xForwardedResponse =
+        client.get("/origin") {
+          header(HttpHeaders.XForwardedFor, "198.51.100.22")
+          header(HttpHeaders.XForwardedProto, "https")
+          header(HttpHeaders.XForwardedHost, "reader-x.example")
+        }
+      assertEquals(HttpStatusCode.OK, xForwardedResponse.status)
+      assertEquals("https|reader-x.example|198.51.100.22", xForwardedResponse.bodyAsText())
+    }
+
+  @Test
+  fun `protects bounded Prometheus metrics with a dedicated token`() =
+    testApplication {
+      application {
+        xoboroModule(
+          readiness = { false },
+          metricsToken = "synthetic-metrics-token-000000000",
+          taskQueueSize = { 7 },
+          workerCount = { 3 },
+        )
+      }
+
+      assertEquals(HttpStatusCode.Unauthorized, client.get("/metrics").status)
+      val response =
+        client.get("/metrics") {
+          header(HttpHeaders.Authorization, "Bearer synthetic-metrics-token-000000000")
+        }
+      val body = response.bodyAsText()
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertTrue(response.headers[HttpHeaders.ContentType]?.startsWith("text/plain") == true)
+      assertTrue(body.contains("xoboro_http_requests_total{method=\"GET\",status=\"4xx\"} 1"))
+      assertTrue(body.contains("xoboro_ready 0"))
+      assertTrue(body.contains("xoboro_task_queue_size 7"))
+      assertTrue(body.contains("xoboro_task_workers 3"))
+      assertFalse(body.contains("/metrics"))
+      assertFalse(body.contains("synthetic-metrics-token"))
+    }
+
+  @Test
+  fun `does not expose a metrics route without an explicit token`() =
+    testApplication {
+      application {
+        xoboroModule()
+      }
+
+      assertEquals(HttpStatusCode.NotFound, client.get("/metrics").status)
     }
 
   @Test

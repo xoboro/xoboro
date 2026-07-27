@@ -17,6 +17,8 @@ data class ServerConfig(
   val oauth2AccountCreation: Boolean = false,
   val oidcEmailVerification: Boolean = true,
   val fontsDirectory: Path = Path.of("config/fonts"),
+  val trustedProxyHosts: Set<String> = emptySet(),
+  val metricsToken: String? = null,
 ) {
   init {
     require(port in 1..65_535) { "Server port must be between 1 and 65535" }
@@ -30,6 +32,14 @@ data class ServerConfig(
     }
     configuredContextPath?.let {
       require(CONTEXT_PATH_PATTERN.matches(it)) { "Configured server context path is invalid" }
+    }
+    require(trustedProxyHosts.all(PROXY_HOST_PATTERN::matches)) {
+      "Trusted proxy hosts must be plain host names or IP addresses"
+    }
+    metricsToken?.let {
+      require(it.length >= MINIMUM_METRICS_TOKEN_LENGTH) {
+        "Metrics token must contain at least $MINIMUM_METRICS_TOKEN_LENGTH characters"
+      }
     }
   }
 
@@ -97,6 +107,16 @@ data class ServerConfig(
               ?.let(Path::of)
               ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
             ?: normalizedWorkingDirectory.resolve("config/fonts"),
+        trustedProxyHosts =
+          environment["XOBORO_TRUSTED_PROXIES"]
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.toSet()
+            .orEmpty(),
+        metricsToken =
+          environment["XOBORO_METRICS_TOKEN"]
+            ?.takeIf(String::isNotBlank),
       )
     }
 
@@ -126,5 +146,6 @@ data class ServerConfig(
         ?: if (containsKey(key)) error("$key must be true or false") else default
 
     private val CONTEXT_PATH_PATTERN = Regex("^/[\\w-/]*[a-zA-Z0-9]$")
+    private val PROXY_HOST_PATTERN = Regex("^[\\[\\]A-Za-z0-9._:%-]+$")
   }
 }

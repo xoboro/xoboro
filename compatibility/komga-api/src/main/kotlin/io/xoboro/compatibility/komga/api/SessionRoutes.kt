@@ -4,6 +4,7 @@ import io.ktor.http.Cookie
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
+import io.ktor.server.plugins.origin
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -50,7 +51,7 @@ private fun io.ktor.server.application.ApplicationCall.expireSession(
       path = "/",
       maxAge = 0,
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )

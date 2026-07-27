@@ -11,6 +11,7 @@ import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.AuthenticationFailedCause
 import io.ktor.server.auth.UserPasswordCredential
 import io.ktor.server.auth.basic
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.response.respond
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -193,7 +194,7 @@ private fun ApplicationCall.issueRememberMeIfRequested(
       path = "/",
       maxAge = rememberMe.maxAgeSeconds(),
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )
@@ -207,7 +208,7 @@ internal fun ApplicationCall.expireRememberMeCookie() {
       path = "/",
       maxAge = 0,
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )
@@ -244,7 +245,7 @@ internal fun ApplicationCall.appendSessionCookie(token: String) {
       value = token,
       path = "/",
       httpOnly = true,
-      secure = request.local.scheme == "https",
+      secure = request.origin.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )
@@ -252,7 +253,7 @@ internal fun ApplicationCall.appendSessionCookie(token: String) {
 
 private fun ApplicationCall.authenticationRequestDetails(): AuthenticationRequestDetails =
   AuthenticationRequestDetails(
-    ip = request.local.remoteHost,
+    ip = request.origin.remoteHost,
     userAgent = request.header(HttpHeaders.UserAgent),
   )
 

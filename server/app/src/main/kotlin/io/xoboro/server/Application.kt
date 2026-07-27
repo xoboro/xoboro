@@ -86,6 +86,8 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import io.ktor.server.sse.SSE
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -217,6 +219,10 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
+    trustedProxyHosts = runtime.trustedProxyHosts,
+    metricsToken = runtime.metricsToken,
+    taskQueueSize = { runtime.sseTaskStatusProvider.snapshot().count },
+    workerCount = runtime::taskWorkerCount,
   )
 }
 
@@ -263,11 +269,21 @@ fun Application.xoboroModule(
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
+  trustedProxyHosts: Set<String> = emptySet(),
+  metricsToken: String? = null,
+  taskQueueSize: () -> Int = { 0 },
+  workerCount: () -> Int = { 0 },
 ) {
   monitor.subscribe(ApplicationStopped) {
     onStop()
   }
-  install(CallLogging)
+  val operationalMetrics = metricsToken?.let { OperationalMetrics() }
+  install(CallLogging) {
+    format { call ->
+      val status = call.response.status()?.value ?: 0
+      "${call.request.httpMethod.value} ${call.request.path()} $status"
+    }
+  }
   install(ContentNegotiation) {
     json(
       Json {
@@ -294,11 +310,22 @@ fun Application.xoboroModule(
     }
   }
   install(SSE)
+  installTrustedProxyHeaders(trustedProxyHosts)
+  operationalMetrics?.let(::installOperationalMetrics)
 
   routing {
     val routes: Route.() -> Unit = {
       get("/health") {
         call.respond(HealthResponse())
+      }
+      metricsToken?.let { token ->
+        operationalMetricsRoute(
+          token = token,
+          metrics = requireNotNull(operationalMetrics),
+          readiness = readiness,
+          taskQueueSize = taskQueueSize,
+          workerCount = workerCount,
+        )
       }
       komgaOpenApiRoutes()
       get("/ready") {

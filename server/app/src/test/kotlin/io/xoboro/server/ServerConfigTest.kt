@@ -23,6 +23,8 @@ class ServerConfigTest {
     assertEquals(workingDirectory.resolve("config/xoboro.sqlite"), config.databasePath)
     assertEquals(workingDirectory.resolve("config/fonts"), config.fontsDirectory)
     assertEquals(4, config.workerCount)
+    assertEquals(emptySet(), config.trustedProxyHosts)
+    assertEquals(null, config.metricsToken)
   }
 
   @Test
@@ -42,6 +44,8 @@ class ServerConfigTest {
             "XOBORO_TASK_LEASE_MILLIS" to "1000",
             "XOBORO_SHUTDOWN_TIMEOUT_MILLIS" to "2000",
             "XOBORO_FONTS_PATH" to "assets/fonts",
+            "XOBORO_TRUSTED_PROXIES" to "127.0.0.1, proxy.internal,127.0.0.1",
+            "XOBORO_METRICS_TOKEN" to "synthetic-metrics-token-000000000",
           ),
         workingDirectory = workingDirectory,
       )
@@ -56,6 +60,8 @@ class ServerConfigTest {
     assertEquals(1_000L, config.taskLeaseMillis)
     assertEquals(2_000L, config.shutdownTimeoutMillis)
     assertEquals(workingDirectory.resolve("assets/fonts"), config.fontsDirectory)
+    assertEquals(setOf("127.0.0.1", "proxy.internal"), config.trustedProxyHosts)
+    assertEquals("synthetic-metrics-token-000000000", config.metricsToken)
   }
 
   @Test
@@ -74,6 +80,12 @@ class ServerConfigTest {
     }
     assertFailsWith<IllegalArgumentException> {
       ServerConfig.fromEnvironment(mapOf("XOBORO_TASK_LEASE_MILLIS" to "2"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      ServerConfig.fromEnvironment(mapOf("XOBORO_TRUSTED_PROXIES" to "proxy/unsafe"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      ServerConfig.fromEnvironment(mapOf("XOBORO_METRICS_TOKEN" to "too-short"))
     }
   }
 }
