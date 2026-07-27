@@ -7,12 +7,15 @@ import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
+import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
+import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
@@ -64,6 +67,8 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     clientSettingsLifecycle = runtime.clientSettingsLifecycle,
     announcementLifecycle = runtime.announcementLifecycle,
     serverSettingsLifecycle = runtime.serverSettingsLifecycle,
+    libraryAdministrationLifecycle = runtime.libraryAdministrationLifecycle,
+    libraryScanRequester = runtime.libraryScanRequester,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
   )
@@ -81,6 +86,8 @@ fun Application.xoboroModule(
   clientSettingsLifecycle: ClientSettingsLifecycle? = null,
   announcementLifecycle: AnnouncementLifecycle? = null,
   serverSettingsLifecycle: ServerSettingsLifecycle? = null,
+  libraryAdministrationLifecycle: LibraryAdministrationLifecycle? = null,
+  libraryScanRequester: LibraryScanRequester? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
 ) {
@@ -144,6 +151,12 @@ fun Application.xoboroModule(
       clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
       announcementLifecycle?.let(::komgaAnnouncementRoutes)
       serverSettingsLifecycle?.let(::komgaServerSettingsRoutes)
+      libraryAdministrationLifecycle?.let { libraries ->
+        komgaLibraryRoutes(
+          libraries = libraries,
+          scanRequester = requireNotNull(libraryScanRequester),
+        )
+      }
       oauth2LoginLifecycle?.let { oauth2 ->
         komgaOAuth2Routes(
           oauth2 = oauth2,
