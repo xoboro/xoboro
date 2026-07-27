@@ -18,6 +18,8 @@ class ServerConfigTest {
       )
 
     assertEquals(ServerConfig.DEFAULT_PORT, config.port)
+    assertEquals(null, config.configuredPort)
+    assertEquals(null, config.configuredContextPath)
     assertEquals(workingDirectory.resolve("config/xoboro.sqlite"), config.databasePath)
     assertEquals(4, config.workerCount)
   }
@@ -31,6 +33,7 @@ class ServerConfigTest {
         environment =
           mapOf(
             "XOBORO_PORT" to "28000",
+            "XOBORO_CONTEXT_PATH" to "/reader",
             "XOBORO_DATABASE_PATH" to "state/catalog.sqlite",
             "XOBORO_WORKER_COUNT" to "2",
             "XOBORO_TASK_POLL_MILLIS" to "25",
@@ -42,6 +45,8 @@ class ServerConfigTest {
       )
 
     assertEquals(28_000, config.port)
+    assertEquals(28_000, config.configuredPort)
+    assertEquals("/reader", config.configuredContextPath)
     assertEquals(workingDirectory.resolve("state/catalog.sqlite"), config.databasePath)
     assertEquals(2, config.workerCount)
     assertEquals(25L, config.taskPollMillis)
@@ -60,6 +65,9 @@ class ServerConfigTest {
     }
     assertFailsWith<IllegalArgumentException> {
       ServerConfig.fromEnvironment(mapOf("XOBORO_WORKER_COUNT" to "0"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      ServerConfig.fromEnvironment(mapOf("XOBORO_CONTEXT_PATH" to "reader"))
     }
     assertFailsWith<IllegalArgumentException> {
       ServerConfig.fromEnvironment(mapOf("XOBORO_TASK_LEASE_MILLIS" to "2"))

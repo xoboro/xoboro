@@ -9,18 +9,27 @@ import java.util.Base64
 
 class SpringCompatibleRememberMeTokenService(
   private val users: UserRepository,
-  private val secretKey: String,
+  private val secretKeyProvider: () -> String,
   private val currentTimeMillis: () -> Long,
-  val tokenValidityMillis: Long,
+  private val tokenValidityMillisProvider: () -> Long,
 ) : RememberMeTokenService {
-  init {
-    require(secretKey.isNotBlank()) { "Remember-me secret must not be blank" }
-    require(tokenValidityMillis > 0) { "Remember-me validity must be positive" }
-  }
+  constructor(
+    users: UserRepository,
+    secretKey: String,
+    currentTimeMillis: () -> Long,
+    tokenValidityMillis: Long,
+  ) : this(
+    users = users,
+    secretKeyProvider = { secretKey },
+    currentTimeMillis = currentTimeMillis,
+    tokenValidityMillisProvider = { tokenValidityMillis },
+  )
 
   override fun issue(user: User): String {
-    val expiry = now() + tokenValidityMillis
-    val signature = signature(user, expiry)
+    val validity = validityMillis()
+    val key = secretKey()
+    val expiry = now(validity) + validity
+    val signature = signature(user, expiry, key)
     return Base64.getEncoder().encodeToString(
       "${user.email}:$expiry:$ALGORITHM_NAME:$signature"
         .toByteArray(StandardCharsets.UTF_8),
@@ -36,9 +45,9 @@ class SpringCompatibleRememberMeTokenService(
       }.getOrNull() ?: return null
     if (parts.size != 4 || parts[2] != ALGORITHM_NAME) return null
     val expiry = parts[1].toLongOrNull() ?: return null
-    if (expiry < now()) return null
+    if (expiry < now(validityMillis())) return null
     val user = users.findByEmailIgnoreCaseOrNull(parts[0]) ?: return null
-    val expected = signature(user, expiry)
+    val expected = signature(user, expiry, secretKey())
     return user.takeIf {
       MessageDigest.isEqual(
         expected.toByteArray(StandardCharsets.US_ASCII),
@@ -47,9 +56,16 @@ class SpringCompatibleRememberMeTokenService(
     }
   }
 
+  override fun maxAgeSeconds(): Int {
+    val seconds = validityMillis() / 1_000
+    require(seconds <= Int.MAX_VALUE) { "Remember-me validity exceeds cookie maximum" }
+    return seconds.toInt()
+  }
+
   private fun signature(
     user: User,
     expiry: Long,
+    secretKey: String,
   ): String =
     MessageDigest
       .getInstance("SHA-256")
@@ -58,12 +74,22 @@ class SpringCompatibleRememberMeTokenService(
           .toByteArray(StandardCharsets.UTF_8),
       ).joinToString("") { byte -> "%02x".format(byte) }
 
-  private fun now(): Long =
+  private fun now(validityMillis: Long): Long =
     currentTimeMillis().also {
       require(it >= 0) { "Remember-me timestamp must not be negative" }
-      require(it <= Long.MAX_VALUE - tokenValidityMillis) {
+      require(it <= Long.MAX_VALUE - validityMillis) {
         "Remember-me expiry timestamp overflow"
       }
+    }
+
+  private fun secretKey(): String =
+    secretKeyProvider().also {
+      require(it.isNotBlank()) { "Remember-me secret must not be blank" }
+    }
+
+  private fun validityMillis(): Long =
+    tokenValidityMillisProvider().also {
+      require(it > 0) { "Remember-me validity must be positive" }
     }
 
   companion object {
