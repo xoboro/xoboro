@@ -82,6 +82,7 @@ import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
+import io.xoboro.server.persistence.JooqMetadataOrganizationWriter
 import io.xoboro.server.persistence.JooqMediaItemFingerprintIndex
 import io.xoboro.server.persistence.JooqMediaSyncSnapshotRepository
 import io.xoboro.server.persistence.JooqMetadataFacetRepository
@@ -617,6 +618,14 @@ class XoboroRuntime private constructor(
               ),
             currentTimeMillis = System::currentTimeMillis,
             eventPublisher = sseBridge::publish,
+            organizationWriter =
+              JooqMetadataOrganizationWriter(
+                database = database,
+                collectionIdFactory = { TsidCreator.getTsid256().toString() },
+                readListIdFactory = { TsidCreator.getTsid256().toString() },
+                currentTimeMillis = System::currentTimeMillis,
+                eventPublisher = sseBridge::publish,
+              ),
           )
         val localArtworkRefreshLifecycle =
           LocalArtworkRefreshLifecycle(
