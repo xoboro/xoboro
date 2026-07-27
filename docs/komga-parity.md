@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. One hundred twenty-six operations are partially implemented and none are yet
+167 schemas. One hundred thirty-seven operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -121,7 +121,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Page-based progress | PARTIAL | Durable per-user page/completed/read-date/device rows, transactional series aggregates, page-bound validation, Book DTO projection, and REST integration tests; device mutation, SSE, and differential tests pending |
-| R2 locator and EPUB progression | TODO | |
+| R2 locator and EPUB progression | PARTIAL | Durable per-user Readium locator/device/timestamp state, stale-write conflict rejection, authenticated GET/PUT contracts, and DiViNa locator integration tests; EPUB/PDF positions and differential fixtures pending |
 | Mark read and unread by book or series | PARTIAL | Book PATCH/DELETE and set-based Series POST/DELETE routes enforce catalog access and update durable aggregates; bulk and protocol adapters pending |
 | Previous and next book semantics | PARTIAL | Stable metadata number, relative-path, and ID tie-breaking in SQL with access checks and boundary tests; differential and read-state semantics pending |
 | Sync points and conflict behavior | TODO | |
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, sixteen collection/read-list operations, three metadata mutations, thirteen referential reads, twenty-four artwork operations, four target maintenance operations, active-lease-safe task clearing, and production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, DiViNa manifest and Readium progression contracts, sixteen collection/read-list operations, three metadata mutations, thirteen referential reads, twenty-four artwork operations, four target maintenance operations, active-lease-safe task clearing, and production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

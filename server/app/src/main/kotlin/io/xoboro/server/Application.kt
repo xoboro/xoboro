@@ -8,6 +8,7 @@ import io.xoboro.compatibility.komga.api.komgaPageHashRoutes
 import io.xoboro.compatibility.komga.api.komgaMetadataRoutes
 import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
+import io.xoboro.compatibility.komga.api.komgaWebPubRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaArtworkRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
@@ -254,6 +255,7 @@ fun Application.xoboroModule(
       }
       if (catalogReadRepository != null && readProgressLifecycle != null) {
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
+        komgaWebPubRoutes(catalogReadRepository, readProgressLifecycle)
       }
       oauth2LoginLifecycle?.let { oauth2 ->
         komgaOAuth2Routes(

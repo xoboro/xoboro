@@ -68,6 +68,55 @@ class ReadProgressLifecycle(
     return true
   }
 
+  fun findBook(
+    bookId: BookId,
+    userId: UserId,
+  ): ReadProgress? =
+    books.findByIdOrNull(bookId)
+      ?.takeIf { it.deletedAtMillis == null }
+      ?.let { progresses.findByBookIdAndUserIdOrNull(it.id, userId) }
+
+  fun updateBookProgression(
+    bookId: BookId,
+    userId: UserId,
+    page: Int,
+    modifiedAtMillis: Long,
+    deviceId: String,
+    deviceName: String,
+    locatorJson: String,
+  ): ReadProgress? {
+    val book = books.findByIdOrNull(bookId) ?: return null
+    require(book.deletedAtMillis == null) { "Cannot update progress for a deleted book" }
+    require(modifiedAtMillis >= 0) { "Progression timestamp must not be negative" }
+    require(locatorJson.isNotBlank()) { "Progression locator must not be blank" }
+    val analyzed =
+      media.findByBookIdOrNull(book.id)
+        ?: throw IllegalArgumentException("Book media is not ready")
+    require(page in 1..analyzed.pageCount) {
+      "Page argument ($page) must be within 1 and book page count (${analyzed.pageCount})"
+    }
+    val existing = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
+    check(existing == null || modifiedAtMillis > existing.readAtMillis) {
+      "Progression is older than existing"
+    }
+    val now = now()
+    progresses.upsert(
+      ReadProgress(
+        bookId = book.id,
+        userId = userId,
+        page = page,
+        completed = page == analyzed.pageCount,
+        readAtMillis = modifiedAtMillis,
+        deviceId = deviceId,
+        deviceName = deviceName,
+        locatorJson = locatorJson,
+        createdAtMillis = existing?.createdAtMillis ?: now,
+        updatedAtMillis = now,
+      ),
+    )
+    return progresses.findByBookIdAndUserIdOrNull(book.id, userId)
+  }
+
   fun markSeriesCompleted(
     seriesId: SeriesId,
     userId: UserId,
