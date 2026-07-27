@@ -95,7 +95,7 @@ data class KomgaErrorResponse(
   val path: String,
 )
 
-private fun User.toDto(): UserDto =
+internal fun User.toDto(): UserDto =
   UserDto(
     id = id.value,
     email = email,
