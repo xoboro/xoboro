@@ -22,6 +22,8 @@ import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
+import io.xoboro.core.domain.User
+import io.xoboro.core.domain.UserId
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -199,6 +201,118 @@ class JooqCatalogReadRepositoryTest {
 
       assertEquals(2, duplicates.totalElements)
       assertEquals(setOf("book-1", "book-2"), duplicates.content.map { it.book.id.value }.toSet())
+    }
+  }
+
+  @Test
+  fun `pages keep reading entirely in SQL beyond the former memory boundary`() {
+    withCatalog("keep-reading") { database ->
+      val userId = UserId("reader-1")
+      JooqUserRepository(database).insert(
+        User(
+          id = userId,
+          email = "reader@example.invalid",
+          passwordHash = "synthetic-password-hash",
+          createdAtMillis = 1,
+        ),
+      )
+      database.transaction { transaction ->
+        transaction.execute("CREATE TEMP TABLE synthetic_number (number INTEGER PRIMARY KEY)")
+        transaction.execute(
+          """
+          INSERT INTO synthetic_number (number)
+          WITH digits(value) AS (
+            VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)
+          )
+          SELECT
+            ones.value + tens.value * 10 + hundreds.value * 100 +
+              thousands.value * 1000 + ten_thousands.value * 10000 + 1
+          FROM digits ones
+          CROSS JOIN digits tens
+          CROSS JOIN digits hundreds
+          CROSS JOIN digits thousands
+          CROSS JOIN digits ten_thousands
+          WHERE ones.value + tens.value * 10 + hundreds.value * 100 +
+            thousands.value * 1000 + ten_thousands.value * 10000 < 10001
+          """.trimIndent(),
+        )
+        transaction.execute(
+          """
+          INSERT INTO book (
+            id, library_id, series_id, relative_uri, source_item_id, source_identity,
+            name, media_kind, media_item_type, file_size, file_modified_ms,
+            file_hash, file_hash_koreader, number, deleted_at_ms, oneshot,
+            created_at_ms, updated_at_ms
+          )
+          SELECT
+            printf('keep-%05d', number), 'library-1', 'series-a',
+            printf('series-a/keep-%05d.cbz', number),
+            printf('file:///synthetic/series-a/keep-%05d.cbz', number),
+            NULL, printf('Synthetic keep item %05d', number),
+            'COMIC_ARCHIVE', 'COMIC', 1, number, '', '', number, NULL, 0, number, number
+          FROM synthetic_number
+          """.trimIndent(),
+        )
+        transaction.execute(
+          """
+          INSERT INTO media (book_id, status, page_count, created_at_ms, updated_at_ms)
+          SELECT printf('keep-%05d', number), 'READY', 1, number, number
+          FROM synthetic_number
+          """.trimIndent(),
+        )
+        transaction.execute(
+          """
+          INSERT INTO read_progress (
+            book_id, user_id, page, completed, read_at_ms,
+            created_at_ms, updated_at_ms
+          )
+          SELECT printf('keep-%05d', number), 'reader-1', 1, 0, number, number, number
+          FROM synthetic_number
+          """.trimIndent(),
+        )
+        transaction.execute(
+          """
+          INSERT INTO media (book_id, status, page_count, created_at_ms, updated_at_ms)
+          VALUES ('book-1', 'ERROR', 1, 1, 1), ('book-2', 'READY', 1, 1, 1)
+          """.trimIndent(),
+        )
+        transaction.execute(
+          """
+          INSERT INTO read_progress (
+            book_id, user_id, page, completed, read_at_ms,
+            created_at_ms, updated_at_ms
+          ) VALUES
+            ('book-1', 'reader-1', 1, 0, 20000, 1, 1),
+            ('book-2', 'reader-1', 1, 1, 20001, 1, 1)
+          """.trimIndent(),
+        )
+      }
+      val catalog = JooqCatalogReadRepository(database)
+      val access = CatalogAccess(userId = userId)
+
+      val first =
+        catalog.findBooks(
+          BookCatalogQuery(keepReading = true),
+          access,
+          CatalogPageRequest(size = 2),
+        )
+      val last =
+        catalog.findBooks(
+          BookCatalogQuery(keepReading = true),
+          access,
+          CatalogPageRequest(page = 5_000, size = 2),
+        )
+      val anonymous =
+        catalog.findBooks(
+          BookCatalogQuery(keepReading = true),
+          CatalogAccess(),
+          CatalogPageRequest(size = 2),
+        )
+
+      assertEquals(10_001, first.totalElements)
+      assertEquals(listOf("keep-10001", "keep-10000"), first.content.map { it.book.id.value })
+      assertEquals(listOf("keep-00001"), last.content.map { it.book.id.value })
+      assertEquals(0, anonymous.totalElements)
     }
   }
 
