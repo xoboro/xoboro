@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(81, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(97, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(84, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(68, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -68,11 +68,17 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/claim"),
         RestEndpoint("POST", "/api/v1/claim"),
         RestEndpoint("GET", "/api/v1/login/set-cookie"),
+        RestEndpoint("GET", "/api/v1/age-ratings"),
+        RestEndpoint("GET", "/api/v1/authors"),
+        RestEndpoint("GET", "/api/v1/authors/names"),
+        RestEndpoint("GET", "/api/v1/authors/roles"),
         RestEndpoint("GET", "/api/v1/books"),
+        RestEndpoint("PATCH", "/api/v1/books/metadata"),
         RestEndpoint("GET", "/api/v1/books/latest"),
         RestEndpoint("POST", "/api/v1/books/list"),
         RestEndpoint("GET", "/api/v1/books/ondeck"),
         RestEndpoint("GET", "/api/v1/books/{bookId}"),
+        RestEndpoint("PATCH", "/api/v1/books/{bookId}/metadata"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file/*"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/next"),
@@ -90,6 +96,8 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/collections/{id}"),
         RestEndpoint("PATCH", "/api/v1/collections/{id}"),
         RestEndpoint("GET", "/api/v1/collections/{id}/series"),
+        RestEndpoint("GET", "/api/v1/genres"),
+        RestEndpoint("GET", "/api/v1/languages"),
         RestEndpoint("GET", "/api/v1/libraries"),
         RestEndpoint("POST", "/api/v1/libraries"),
         RestEndpoint("GET", "/api/v1/libraries/{libraryId}"),
@@ -101,6 +109,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/metadata/refresh"),
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/scan"),
         RestEndpoint("GET", "/api/v1/oauth2/providers"),
+        RestEndpoint("GET", "/api/v1/publishers"),
         RestEndpoint("GET", "/api/v1/readlists"),
         RestEndpoint("POST", "/api/v1/readlists"),
         RestEndpoint("DELETE", "/api/v1/readlists/{id}"),
@@ -112,6 +121,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/series"),
         RestEndpoint("GET", "/api/v1/series/alphabetical-groups"),
         RestEndpoint("GET", "/api/v1/series/latest"),
+        RestEndpoint("GET", "/api/v1/series/release-dates"),
         RestEndpoint("POST", "/api/v1/series/list"),
         RestEndpoint("POST", "/api/v1/series/list/alphabetical-groups"),
         RestEndpoint("GET", "/api/v1/series/new"),
@@ -119,10 +129,15 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/series/{seriesId}"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/books"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/collections"),
+        RestEndpoint("PATCH", "/api/v1/series/{seriesId}/metadata"),
         RestEndpoint("DELETE", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("POST", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("GET", "/api/v1/settings"),
         RestEndpoint("PATCH", "/api/v1/settings"),
+        RestEndpoint("GET", "/api/v1/sharing-labels"),
+        RestEndpoint("GET", "/api/v1/tags"),
+        RestEndpoint("GET", "/api/v1/tags/book"),
+        RestEndpoint("GET", "/api/v1/tags/series"),
         RestEndpoint("DELETE", "/api/v1/client-settings/global"),
         RestEndpoint("PATCH", "/api/v1/client-settings/global"),
         RestEndpoint("GET", "/api/v1/client-settings/global/list"),
@@ -130,6 +145,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("PATCH", "/api/v1/client-settings/user"),
         RestEndpoint("GET", "/api/v1/client-settings/user/list"),
         RestEndpoint("GET", "/api/v2/users"),
+        RestEndpoint("GET", "/api/v2/authors"),
         RestEndpoint("POST", "/api/v2/users"),
         RestEndpoint("GET", "/api/v2/users/authentication-activity"),
         RestEndpoint("GET", "/api/v2/users/me"),

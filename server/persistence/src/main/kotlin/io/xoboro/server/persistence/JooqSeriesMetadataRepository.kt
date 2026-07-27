@@ -238,11 +238,11 @@ class JooqSeriesMetadataRepository(
       readingDirection =
         get("reading_direction", String::class.java)?.let(ReadingDirection::valueOf),
       publisher = requiredString("publisher"),
-      ageRating = get("age_rating", Int::class.java),
+      ageRating = get("age_rating", Int::class.javaObjectType),
       language = requiredString("language"),
       genres = genres,
       tags = tags,
-      totalBookCount = get("total_book_count", Int::class.java),
+      totalBookCount = get("total_book_count", Int::class.javaObjectType),
       sharingLabels = sharingLabels,
       links = links,
       alternateTitles = alternateTitles,
