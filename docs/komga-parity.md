@@ -9,6 +9,11 @@ percentage is calculated from weighted, testable behaviors rather than source
 line count. A row is complete only after implementation and automated
 verification.
 
+The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
+167 schemas. Fifteen operations are partially implemented and none are yet
+certified by differential tests. Protocol and non-REST inventories are tracked
+separately in [`docs/compatibility`](compatibility/README.md).
+
 Status:
 
 - `TODO`: not implemented
