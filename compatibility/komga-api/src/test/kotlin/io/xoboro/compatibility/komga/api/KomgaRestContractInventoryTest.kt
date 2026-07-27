@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(38, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(39, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(127, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(126, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -76,6 +76,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("DELETE", "/api/v1/libraries/{libraryId}"),
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/analyze"),
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/empty-trash"),
+        RestEndpoint("POST", "/api/v1/libraries/{libraryId}/metadata/refresh"),
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/scan"),
         RestEndpoint("GET", "/api/v1/oauth2/providers"),
         RestEndpoint("GET", "/api/v1/settings"),

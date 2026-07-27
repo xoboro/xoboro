@@ -5,6 +5,8 @@ import io.xoboro.core.domain.LibraryId
 interface LibraryMaintenanceRequester {
   fun analyze(libraryId: LibraryId): Int
 
+  fun refreshMetadata(libraryId: LibraryId): Int
+
   fun emptyTrash(libraryId: LibraryId): Boolean
 }
 

@@ -142,6 +142,11 @@ fun Route.komgaLibraryRoutes(
           maintenanceRequester.analyze(call.libraryId())
           call.respond(HttpStatusCode.Accepted)
         }
+        post("/metadata/refresh") {
+          if (!call.requireLibraryAdministrator()) return@post
+          maintenanceRequester.refreshMetadata(call.libraryId())
+          call.respond(HttpStatusCode.Accepted)
+        }
         post("/empty-trash") {
           if (!call.requireLibraryAdministrator()) return@post
           val id = call.libraryId()

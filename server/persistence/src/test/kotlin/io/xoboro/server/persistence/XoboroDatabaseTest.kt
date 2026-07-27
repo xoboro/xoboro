@@ -38,6 +38,16 @@ class XoboroDatabaseTest {
             "media",
             "book_page",
             "media_file",
+            "book_metadata",
+            "book_metadata_author",
+            "book_metadata_tag",
+            "book_metadata_link",
+            "series_metadata",
+            "series_metadata_genre",
+            "series_metadata_tag",
+            "series_metadata_sharing_label",
+            "series_metadata_link",
+            "series_metadata_alternate_title",
             "user_account",
             "user_role",
             "user_library_sharing",
@@ -54,7 +64,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(13, database.migrationResult.migrationsExecuted)
+      assertEquals(14, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -143,7 +153,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(12, database.migrationResult.migrationsExecuted)
+      assertEquals(13, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -172,6 +182,24 @@ class XoboroDatabaseTest {
         "COMIC",
         database.dsl
           .fetchOne("SELECT media_item_type FROM book WHERE id = ?", "legacy-book")
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "Legacy synthetic series",
+        database.dsl
+          .fetchOne(
+            "SELECT title FROM series_metadata WHERE series_id = ?",
+            "legacy-series",
+          )
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "Legacy synthetic book",
+        database.dsl
+          .fetchOne(
+            "SELECT title FROM book_metadata WHERE book_id = ?",
+            "legacy-book",
+          )
           ?.get(0, String::class.java),
       )
     }
