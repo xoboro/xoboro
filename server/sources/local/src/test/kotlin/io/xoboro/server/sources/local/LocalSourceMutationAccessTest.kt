@@ -129,4 +129,48 @@ class LocalSourceMutationAccessTest {
       },
     )
   }
+
+  @Test
+  fun `repairs an extension and returns canonical source facts`() {
+    val root = Files.createDirectories(tempDirectory.resolve("library-repair"))
+    val series = Files.createDirectories(root.resolve("Synthetic series"))
+    val source = Files.writeString(series.resolve("chapter.cbr"), "content")
+
+    val result =
+      LocalSourceMutationAccess().renameExtension(
+        root.toUri().toString(),
+        source.toUri().toString(),
+        "cbz",
+      )
+
+    val repaired = series.resolve("chapter.cbz")
+    assertTrue(Files.exists(repaired))
+    assertTrue(!Files.exists(source))
+    assertEquals("Synthetic series/chapter.cbz", result.relativePath)
+    assertEquals("chapter.cbz", result.name)
+    assertEquals(Files.size(repaired), result.size)
+    assertTrue(Files.isSameFile(repaired, Path.of(URI(result.itemId))))
+  }
+
+  @Test
+  fun `atomically replaces media while changing its extension`() {
+    val root = Files.createDirectories(tempDirectory.resolve("library-convert"))
+    val series = Files.createDirectories(root.resolve("Synthetic series"))
+    val source = Files.writeString(series.resolve("chapter.cbr"), "old")
+    val replacement = Files.writeString(tempDirectory.resolve("replacement.cbz"), "new")
+
+    val result =
+      LocalSourceMutationAccess().replaceWithFile(
+        root.toUri().toString(),
+        source.toUri().toString(),
+        replacement.toString(),
+        "cbz",
+      )
+
+    val converted = series.resolve("chapter.cbz")
+    assertEquals("new", Files.readString(converted))
+    assertTrue(!Files.exists(source))
+    assertEquals("Synthetic series/chapter.cbz", result.relativePath)
+    assertTrue(Files.isSameFile(converted, Path.of(URI(result.itemId))))
+  }
 }

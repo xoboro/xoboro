@@ -65,6 +65,48 @@ class BookContentServiceTest {
   }
 
   @Test
+  fun `streams and converts an indexed RAR page`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(320, 160, BufferedImage.TYPE_INT_RGB), "png", output)
+        output.toByteArray()
+      }
+    val archive =
+      writeSyntheticRar4(
+        temporaryDirectory.resolve("synthetic.cbr"),
+        mapOf("nested/001.png" to source),
+      )
+    val access = RecordingAccess(archive)
+    val service =
+      service(
+        access = access,
+        mediaType = RarMediaAnalyzer.RAR_MEDIA_TYPE,
+      )
+
+    val raw = requireNotNull(service.openPage(BOOK_ID, 1))
+    assertContentEquals(source, raw.inputBytes())
+    raw.close()
+
+    val converted =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(
+            format = PageImageFormat.JPEG,
+            maximumDimension = 160,
+          ),
+        ),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(converted.inputBytes())))
+    assertEquals(160, image.width)
+    assertEquals(80, image.height)
+    assertEquals("image/jpeg", converted.mediaType)
+    assertEquals(2, access.closeCount)
+    converted.close()
+  }
+
+  @Test
   fun `returns indexed pages without materializing the source`() {
     val access = RecordingAccess(archive(emptyMap()))
     val service = service(access = access)
@@ -317,6 +359,16 @@ class BookContentServiceTest {
     }
     return path
   }
+
+  private fun io.xoboro.core.application.MediaContentStream.inputBytes(): ByteArray =
+    buildList<Byte> {
+      val buffer = ByteArray(1_024)
+      while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        repeat(count) { add(buffer[it]) }
+      }
+    }.toByteArray()
 
   private fun io.xoboro.core.application.MediaContentStream.readAllBytes(): ByteArray =
     buildList<Byte> {

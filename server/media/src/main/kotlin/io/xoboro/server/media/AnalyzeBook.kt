@@ -14,6 +14,8 @@ class AnalyzeBook(
   accesses: Collection<SourceMediaAccess>,
   private val media: BookMediaRepository,
   private val zipAnalyzer: ZipMediaAnalyzer,
+  private val rarAnalyzer: RarMediaAnalyzer = RarMediaAnalyzer(),
+  private val archiveFormatDetector: ArchiveFormatDetector = ArchiveFormatDetector(),
   private val epubAnalyzer: EpubMediaAnalyzer = EpubMediaAnalyzer(),
   private val pdfAnalyzer: PdfMediaAnalyzer = PdfMediaAnalyzer(),
   private val contentHasher: Xxh3ContentHasher = Xxh3ContentHasher(),
@@ -61,14 +63,26 @@ class AnalyzeBook(
         }
         when (book.mediaKind) {
           MediaKind.COMIC_ARCHIVE ->
-            zipAnalyzer.analyze(
-              bookId = bookId,
-              path = materialized.path,
-              analyzeDimensions = library.settings.analyzeDimensions,
-              hashPages = library.settings.hashPages,
-              createdAtMillis = createdAtMillis,
-              updatedAtMillis = nowMillis,
-            )
+            when (archiveFormatDetector.detect(materialized.path)) {
+              ArchiveFormat.RAR4, ArchiveFormat.RAR5 ->
+                rarAnalyzer.analyze(
+                  bookId = bookId,
+                  path = materialized.path,
+                  analyzeDimensions = library.settings.analyzeDimensions,
+                  hashPages = library.settings.hashPages,
+                  createdAtMillis = createdAtMillis,
+                  updatedAtMillis = nowMillis,
+                )
+              ArchiveFormat.ZIP, null ->
+                zipAnalyzer.analyze(
+                  bookId = bookId,
+                  path = materialized.path,
+                  analyzeDimensions = library.settings.analyzeDimensions,
+                  hashPages = library.settings.hashPages,
+                  createdAtMillis = createdAtMillis,
+                  updatedAtMillis = nowMillis,
+                )
+            }
           MediaKind.EPUB ->
             epubAnalyzer.analyze(
               bookId = bookId,

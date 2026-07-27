@@ -42,17 +42,17 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, exact-entry page streaming, original-file streaming, stable error codes, and restart tests; differential behavior pending |
-| CBR, RAR, and RAR5 | TODO | |
+| CBR, RAR, and RAR5 | PARTIAL | Signature-routed in-process RAR3-through-RAR7 analysis, bounded dictionary, natural page indexing, dimensions, leading/trailing hashes, indexed page streaming and conversion, RAR4/RAR5 synthetic fixtures, and source lifetime tests; encrypted/multipart and differential fixtures pending |
 | PDF | PARTIAL | PDFBox page analysis, optional crop-box dimensions, bounded page indexing, JPEG rendering, raw single-page PDF extraction, WebPub PDF manifest, source materialization cleanup, and synthetic document tests; encrypted documents, metadata, and differential fixtures pending |
 | EPUB 2 and EPUB 3 | PARTIAL | Secure ZIP/container/package parsing, manifest/spine resources, fixed-layout and DiViNa detection, EPUB3 navigation plus EPUB2 NCX fallback, Readium positions, KEPUB span detection, persisted extensions, resource streaming with CSP, WebPub manifest, and synthetic fixed/reflowable tests; complete metadata, KEPUB conversion, and differential fixtures pending |
-| Content and extension detection | PARTIAL | Tika entry-content detection and corrupt/empty archive tests; outer signatures and non-ZIP formats pending |
-| Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixture; RAR/PDF/EPUB pending |
+| Content and extension detection | PARTIAL | Bounded ZIP/RAR4/RAR5 outer-signature routing plus Tika entry-content detection and corrupt/empty archive tests; PDF/EPUB outer mismatch repair and differential fixtures pending |
+| Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixtures for ZIP and RAR; PDF/EPUB differential behavior pending |
 | Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
 | Cover and thumbnail generation | PARTIAL | Durable owner-scoped Book/Series/Collection/ReadList artwork, bounded multipart upload, decoded-pixel safety, JPEG normalization/resizing, atomic selection, uploaded-only deletion, authenticated byte delivery, first-visible-book page fallback, and low-priority bulk Book poster generation with generated-only atomic replacement; sidecars and differential caching pending |
 | Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, EPUB resource streaming, PDF JPEG rendering and raw single-page extraction, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, CSP, and resource-lifetime tests; PDF Accept negotiation and differential caching semantics pending |
 | Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming and single-byte-range responses; Series and ReadList ZIPs stream entries without whole-archive buffering with role/access enforcement and collision-safe names; differential archive metadata pending |
-| Incorrect extension repair | TODO | |
-| CBR/RAR to CBZ conversion | TODO | |
+| Incorrect extension repair | PARTIAL | Durable per-media-item signature-based ZIP/RAR extension repair, sibling atomic rename, stable catalog identity, source-fact update, post-repair analysis/scan, and local integration tests; PDF/EPUB and non-local mutation adapters pending |
+| CBR/RAR to CBZ conversion | PARTIAL | Durable RAR-to-CBZ entry streaming with dictionary, entry-count, expanded-size, duplicate-name and traversal guards; sibling atomic replacement preserves media ID and progress, clears changed hashes, and schedules analysis/scan; non-local mutation and differential fixtures pending |
 
 ## Libraries and lifecycle
 

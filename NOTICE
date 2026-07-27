@@ -12,6 +12,10 @@ Komga:
 The complete Komga license notice is included at:
   third-party/licenses/KOMGA.txt
 
+Xoboro uses junrar for RAR 3 through RAR 7 decompression. The UnRAR-derived
+code cannot be used to develop a RAR-compatible archiver. Its complete license
+notice is included at:
+  third-party/licenses/JUNRAR.txt
+
 Xoboro is an independent project and is not affiliated with or endorsed by
 the Komga project or its maintainers.
-
