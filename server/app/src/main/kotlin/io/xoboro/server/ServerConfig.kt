@@ -17,6 +17,7 @@ data class ServerConfig(
   val oauth2AccountCreation: Boolean = false,
   val oidcEmailVerification: Boolean = true,
   val fontsDirectory: Path = Path.of("config/fonts"),
+  val corsAllowedOrigins: Set<String> = emptySet(),
   val trustedProxyHosts: Set<String> = emptySet(),
   val metricsToken: String? = null,
 ) {
@@ -35,6 +36,9 @@ data class ServerConfig(
     }
     require(trustedProxyHosts.all(PROXY_HOST_PATTERN::matches)) {
       "Trusted proxy hosts must be plain host names or IP addresses"
+    }
+    require(corsAllowedOrigins.all(::isValidCorsOrigin)) {
+      "CORS allowed origins must be absolute HTTP origins without paths"
     }
     metricsToken?.let {
       require(it.length >= MINIMUM_METRICS_TOKEN_LENGTH) {
@@ -107,6 +111,13 @@ data class ServerConfig(
               ?.let(Path::of)
               ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
             ?: normalizedWorkingDirectory.resolve("config/fonts"),
+        corsAllowedOrigins =
+          environment["KOMGA_CORS_ALLOWEDORIGINS"]
+            ?.split(',')
+            ?.map(String::trim)
+            ?.filter(String::isNotEmpty)
+            ?.toSet()
+            .orEmpty(),
         trustedProxyHosts =
           environment["XOBORO_TRUSTED_PROXIES"]
             ?.split(',')
@@ -147,5 +158,17 @@ data class ServerConfig(
 
     private val CONTEXT_PATH_PATTERN = Regex("^/[\\w-/]*[a-zA-Z0-9]$")
     private val PROXY_HOST_PATTERN = Regex("^[\\[\\]A-Za-z0-9._:%-]+$")
+
+    private fun isValidCorsOrigin(value: String): Boolean =
+      value == "null" ||
+        runCatching {
+          val uri = java.net.URI(value)
+          uri.scheme in setOf("http", "https") &&
+            !uri.rawAuthority.isNullOrBlank() &&
+            uri.rawUserInfo == null &&
+            uri.rawPath.orEmpty().isEmpty() &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null
+        }.getOrDefault(false)
   }
 }

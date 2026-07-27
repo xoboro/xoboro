@@ -199,6 +199,7 @@ class XoboroRuntime private constructor(
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
   val effectiveServerContextPath: String?,
+  val corsAllowedOrigins: Set<String>,
   val trustedProxyHosts: Set<String>,
   val metricsToken: String?,
 ) : AutoCloseable {
@@ -850,6 +851,7 @@ class XoboroRuntime private constructor(
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,
           effectiveServerContextPath = effectiveServerContextPath,
+          corsAllowedOrigins = config.corsAllowedOrigins,
           trustedProxyHosts = config.trustedProxyHosts,
           metricsToken = config.metricsToken,
         ).also {

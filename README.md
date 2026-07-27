@@ -118,6 +118,7 @@ editing source:
 | `XOBORO_TASK_LEASE_MILLIS` | `600000` |
 | `XOBORO_SHUTDOWN_TIMEOUT_MILLIS` | `30000` |
 | `XOBORO_CONTEXT_PATH` | unset |
+| `KOMGA_CORS_ALLOWEDORIGINS` | unset |
 | `XOBORO_TRUSTED_PROXIES` | unset |
 | `XOBORO_METRICS_TOKEN` | unset |
 | `KOMGA_OAUTH2_ACCOUNT_CREATION` | `false` |
@@ -125,6 +126,12 @@ editing source:
 
 Malformed or out-of-range overrides fail startup instead of silently falling
 back to another value.
+
+Set `KOMGA_CORS_ALLOWEDORIGINS` to a comma-separated list of exact browser
+origins, including scheme and port. Xoboro then matches Komga's credentialed
+CORS behavior for REST, OPDS, SSE, OAuth, Kobo, and KOReader routes. Requests
+carrying an unlisted `Origin` are rejected. Leave it unset when all browser
+traffic is same-origin.
 
 OAuth2 clients use Spring Security's environment naming, for example
 `SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID` and the matching
