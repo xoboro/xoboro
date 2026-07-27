@@ -13,4 +13,5 @@ allprojects {
 tasks.named("check") {
   dependsOn(":core:domain:check")
   dependsOn(":server:app:check")
+  dependsOn(":server:persistence:check")
 }
