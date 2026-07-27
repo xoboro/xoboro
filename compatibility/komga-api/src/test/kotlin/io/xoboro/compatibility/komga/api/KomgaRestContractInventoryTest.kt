@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(97, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(102, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(68, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(63, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -78,7 +78,9 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("POST", "/api/v1/books/list"),
         RestEndpoint("GET", "/api/v1/books/ondeck"),
         RestEndpoint("GET", "/api/v1/books/{bookId}"),
+        RestEndpoint("POST", "/api/v1/books/{bookId}/analyze"),
         RestEndpoint("PATCH", "/api/v1/books/{bookId}/metadata"),
+        RestEndpoint("POST", "/api/v1/books/{bookId}/metadata/refresh"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file/*"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/next"),
@@ -127,9 +129,11 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/series/new"),
         RestEndpoint("GET", "/api/v1/series/updated"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}"),
+        RestEndpoint("POST", "/api/v1/series/{seriesId}/analyze"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/books"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/collections"),
         RestEndpoint("PATCH", "/api/v1/series/{seriesId}/metadata"),
+        RestEndpoint("POST", "/api/v1/series/{seriesId}/metadata/refresh"),
         RestEndpoint("DELETE", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("POST", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("GET", "/api/v1/settings"),
@@ -138,6 +142,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/tags"),
         RestEndpoint("GET", "/api/v1/tags/book"),
         RestEndpoint("GET", "/api/v1/tags/series"),
+        RestEndpoint("DELETE", "/api/v1/tasks"),
         RestEndpoint("DELETE", "/api/v1/client-settings/global"),
         RestEndpoint("PATCH", "/api/v1/client-settings/global"),
         RestEndpoint("GET", "/api/v1/client-settings/global/list"),

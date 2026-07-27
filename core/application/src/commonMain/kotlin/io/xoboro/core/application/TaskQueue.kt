@@ -91,4 +91,7 @@ interface DurableTaskQueue {
   ): Boolean
 
   fun counts(): TaskCounts
+
+  fun clearUnclaimed(): Int =
+    error("Clearing unclaimed tasks is not supported by this queue")
 }

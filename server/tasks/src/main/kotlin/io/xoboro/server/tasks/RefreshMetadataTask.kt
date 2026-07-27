@@ -4,6 +4,7 @@ import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.MetadataRefreshLifecycle
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.LibraryId
@@ -26,61 +27,92 @@ class RefreshMetadataTaskEmitter(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
   ): Int {
-    val nowMillis = currentTimeMillis()
-    require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
+    val nowMillis = now()
     var emitted = 0
     books
       .findAllByLibraryId(libraryId)
       .asSequence()
       .filter { it.deletedAtMillis == null }
-      .forEach { book ->
-        if (
-          queue.enqueue(
-            task =
-              DurableTask(
-                id = bookTaskId(book.id),
-                type = RefreshBookMetadataTaskHandler.TASK_TYPE,
-                payloadJson =
-                  buildJsonObject {
-                    put(RefreshBookMetadataTaskHandler.BOOK_ID_FIELD, book.id.value)
-                  }.toString(),
-                priority = priority,
-                groupId = book.seriesId.value,
-                availableAtMillis = nowMillis,
-              ),
-            nowMillis = nowMillis,
-          )
-        ) {
-          emitted += 1
-        }
-      }
+      .forEach { if (enqueueBook(it, priority, nowMillis)) emitted += 1 }
     series
       .findAllByLibraryId(libraryId)
       .asSequence()
       .filter { it.deletedAtMillis == null }
-      .forEach { item ->
-        if (
-          queue.enqueue(
-            task =
-              DurableTask(
-                id = seriesTaskId(item.id),
-                type = RefreshSeriesMetadataTaskHandler.TASK_TYPE,
-                payloadJson =
-                  buildJsonObject {
-                    put(RefreshSeriesMetadataTaskHandler.SERIES_ID_FIELD, item.id.value)
-                  }.toString(),
-                priority = priority,
-                groupId = item.id.value,
-                availableAtMillis = nowMillis,
-              ),
-            nowMillis = nowMillis,
-          )
-        ) {
-          emitted += 1
-        }
-      }
+      .forEach { if (enqueueSeries(it.id, priority, nowMillis)) emitted += 1 }
     return emitted
   }
+
+  fun refreshBook(
+    bookId: BookId,
+    priority: Int = TaskPriority.HIGH,
+  ): Boolean {
+    val book = books.findByIdOrNull(bookId)?.takeIf { it.deletedAtMillis == null } ?: return false
+    return enqueueBook(book, priority, now())
+  }
+
+  fun refreshSeries(
+    seriesId: SeriesId,
+    priority: Int = TaskPriority.HIGH,
+  ): Int {
+    val nowMillis = now()
+    var emitted = 0
+    books
+      .findAllBySeriesId(seriesId)
+      .asSequence()
+      .filter { it.deletedAtMillis == null }
+      .forEach { if (enqueueBook(it, priority, nowMillis)) emitted += 1 }
+    series.findByIdOrNull(seriesId)?.takeIf { it.deletedAtMillis == null }?.let {
+      if (enqueueSeries(it.id, priority, nowMillis)) emitted += 1
+    }
+    return emitted
+  }
+
+  private fun enqueueBook(
+    book: Book,
+    priority: Int,
+    nowMillis: Long,
+  ): Boolean =
+    queue.enqueue(
+      task =
+        DurableTask(
+          id = bookTaskId(book.id),
+          type = RefreshBookMetadataTaskHandler.TASK_TYPE,
+          payloadJson =
+            buildJsonObject {
+              put(RefreshBookMetadataTaskHandler.BOOK_ID_FIELD, book.id.value)
+            }.toString(),
+          priority = priority,
+          groupId = book.seriesId.value,
+          availableAtMillis = nowMillis,
+        ),
+      nowMillis = nowMillis,
+    )
+
+  private fun enqueueSeries(
+    seriesId: SeriesId,
+    priority: Int,
+    nowMillis: Long,
+  ): Boolean =
+    queue.enqueue(
+      task =
+        DurableTask(
+          id = seriesTaskId(seriesId),
+          type = RefreshSeriesMetadataTaskHandler.TASK_TYPE,
+          payloadJson =
+            buildJsonObject {
+              put(RefreshSeriesMetadataTaskHandler.SERIES_ID_FIELD, seriesId.value)
+            }.toString(),
+          priority = priority,
+          groupId = seriesId.value,
+          availableAtMillis = nowMillis,
+        ),
+      nowMillis = nowMillis,
+    )
+
+  private fun now(): Long =
+    currentTimeMillis().also {
+      require(it >= 0) { "Task emission timestamp must not be negative" }
+    }
 
   companion object {
     fun bookTaskId(bookId: BookId): String = "REFRESH_BOOK_METADATA_${bookId.value}"
