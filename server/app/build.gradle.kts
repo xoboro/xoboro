@@ -7,19 +7,25 @@ plugins {
 }
 
 kotlin {
-  jvmToolchain(17)
+  jvmToolchain(26)
   compilerOptions {
-    jvmTarget.set(JvmTarget.JVM_17)
+    jvmTarget.set(JvmTarget.JVM_26)
     allWarningsAsErrors.set(true)
   }
 }
 
 application {
   mainClass.set("io.xoboro.server.ApplicationKt")
+  applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
 
 dependencies {
+  implementation(project(":core:application"))
   implementation(project(":core:domain"))
+  implementation(project(":server:media"))
+  implementation(project(":server:persistence"))
+  implementation(project(":server:sources:local"))
+  implementation(project(":server:tasks"))
   implementation(libs.ktor.server.core)
   implementation(libs.ktor.server.netty)
   implementation(libs.ktor.server.call.logging)
@@ -36,4 +42,3 @@ dependencies {
 tasks.test {
   useJUnitPlatform()
 }
-
