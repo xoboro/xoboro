@@ -14,6 +14,8 @@ class AnalyzeBook(
   accesses: Collection<SourceMediaAccess>,
   private val media: BookMediaRepository,
   private val zipAnalyzer: ZipMediaAnalyzer,
+  private val epubAnalyzer: EpubMediaAnalyzer = EpubMediaAnalyzer(),
+  private val pdfAnalyzer: PdfMediaAnalyzer = PdfMediaAnalyzer(),
   private val contentHasher: Xxh3ContentHasher = Xxh3ContentHasher(),
   private val currentTimeMillis: () -> Long,
 ) {
@@ -31,16 +33,16 @@ class AnalyzeBook(
     require(nowMillis >= 0) { "Analysis timestamp must not be negative" }
     val previous = media.findByBookIdOrNull(bookId)
     val createdAtMillis = previous?.createdAtMillis ?: nowMillis
+    val access =
+      accessesBySourceId[library.root.sourceId]
+        ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
     val result =
-      when (book.mediaKind) {
-        MediaKind.COMIC_ARCHIVE -> {
-          val access =
-            accessesBySourceId[library.root.sourceId]
-              ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
-          access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
-            if (library.settings.hashFiles && book.fileHash.isBlank()) {
-              books.update(book.copy(fileHash = contentHasher.hash(materialized.path)))
-            }
+      access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
+        if (library.settings.hashFiles && book.fileHash.isBlank()) {
+          books.update(book.copy(fileHash = contentHasher.hash(materialized.path)))
+        }
+        when (book.mediaKind) {
+          MediaKind.COMIC_ARCHIVE ->
             zipAnalyzer.analyze(
               bookId = bookId,
               path = materialized.path,
@@ -49,16 +51,24 @@ class AnalyzeBook(
               createdAtMillis = createdAtMillis,
               updatedAtMillis = nowMillis,
             )
-          }
+          MediaKind.EPUB ->
+            epubAnalyzer.analyze(
+              bookId = bookId,
+              path = materialized.path,
+              analyzeDimensions = library.settings.analyzeDimensions,
+              hashPages = library.settings.hashPages,
+              createdAtMillis = createdAtMillis,
+              updatedAtMillis = nowMillis,
+            )
+          MediaKind.PDF ->
+            pdfAnalyzer.analyze(
+              bookId = bookId,
+              path = materialized.path,
+              analyzeDimensions = library.settings.analyzeDimensions,
+              createdAtMillis = createdAtMillis,
+              updatedAtMillis = nowMillis,
+            )
         }
-        MediaKind.PDF, MediaKind.EPUB ->
-          BookMedia(
-            bookId = bookId,
-            status = MediaStatus.UNSUPPORTED,
-            comment = "ERR_1001",
-            createdAtMillis = createdAtMillis,
-            updatedAtMillis = nowMillis,
-          )
       }
     val restored = result.restorePageHashesFrom(previous)
     media.upsert(restored)

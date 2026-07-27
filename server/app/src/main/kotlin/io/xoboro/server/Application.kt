@@ -255,7 +255,17 @@ fun Application.xoboroModule(
       }
       if (catalogReadRepository != null && readProgressLifecycle != null) {
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
-        komgaWebPubRoutes(catalogReadRepository, readProgressLifecycle)
+      }
+      if (
+        catalogReadRepository != null &&
+        readProgressLifecycle != null &&
+        bookContentAccess != null
+      ) {
+        komgaWebPubRoutes(
+          catalogReadRepository,
+          readProgressLifecycle,
+          bookContentAccess,
+        )
       }
       oauth2LoginLifecycle?.let { oauth2 ->
         komgaOAuth2Routes(

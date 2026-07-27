@@ -153,7 +153,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
       content.openPage(
         bookId,
         pageNumber,
-        deliveryRequest ?: PageImageRequest(format = requestedFormat),
+        deliveryRequest ?: PageImageRequest(format = requestedFormat, raw = raw),
       )
     } catch (failure: IllegalArgumentException) {
       respond(

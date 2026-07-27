@@ -18,6 +18,9 @@ dependencies {
   implementation(libs.natural.comparator)
   implementation(libs.tika.core)
   implementation(libs.cryptohash)
+  implementation(libs.jsoup)
+  implementation(libs.jspecify)
+  implementation(libs.pdfbox)
 
   testImplementation(kotlin("test-junit5"))
 }

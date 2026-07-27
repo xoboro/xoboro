@@ -7,7 +7,10 @@ import io.xoboro.core.domain.Dimension
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaFile
+import io.xoboro.core.domain.MediaFileKind
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaNavigationEntry
+import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.Series
@@ -72,6 +75,11 @@ class JooqBookMediaRepositoryTest {
       assertNull(repository.findByBookIdOrNull(BOOK_ID))
       assertEquals(0, database.dsl.fetchCount(org.jooq.impl.DSL.table("book_page")))
       assertEquals(0, database.dsl.fetchCount(org.jooq.impl.DSL.table("media_file")))
+      assertEquals(0, database.dsl.fetchCount(org.jooq.impl.DSL.table("media_position")))
+      assertEquals(
+        0,
+        database.dsl.fetchCount(org.jooq.impl.DSL.table("media_navigation_entry")),
+      )
     }
   }
 
@@ -139,11 +147,44 @@ class JooqBookMediaRepositoryTest {
             fileName = "metadata/10.xml",
             mediaType = "application/xml",
             fileSize = 4_000_000_000L,
+            kind = MediaFileKind.EPUB_PAGE,
           ),
           MediaFile(
             fileName = "ComicInfo.xml",
             mediaType = "application/xml",
             fileSize = 20L,
+          ),
+        ),
+      epubDivinaCompatible = true,
+      epubIsKepub = true,
+      epubIsFixedLayout = true,
+      toc =
+        listOf(
+          MediaNavigationEntry(
+            title = "Synthetic contents",
+            href = "chapter.xhtml",
+            children =
+              listOf(
+                MediaNavigationEntry(
+                  title = "Synthetic child",
+                  href = "chapter.xhtml#child",
+                ),
+              ),
+          ),
+        ),
+      landmarks =
+        listOf(MediaNavigationEntry(title = "Start", href = "chapter.xhtml")),
+      pageList =
+        listOf(MediaNavigationEntry(title = "Page one", href = "chapter.xhtml")),
+      positions =
+        listOf(
+          MediaPosition(
+            href = "chapter.xhtml",
+            mediaType = "application/xhtml+xml",
+            progression = 0F,
+            position = 1,
+            totalProgression = 1F,
+            koboSpan = "kobo.1.1",
           ),
         ),
       createdAtMillis = 1_700_000_000_000L,
