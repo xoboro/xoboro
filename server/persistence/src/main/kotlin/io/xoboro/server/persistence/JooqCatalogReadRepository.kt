@@ -263,6 +263,7 @@ class JooqCatalogReadRepository(
     return CatalogBook(
       book = book,
       seriesTitle = parentMetadata.title,
+      seriesMetadata = parentMetadata,
       metadata = metadata,
       media = media.findByBookIdOrNull(id),
       readProgress = userId?.let { readProgress.findByBookIdAndUserIdOrNull(id, it) },
