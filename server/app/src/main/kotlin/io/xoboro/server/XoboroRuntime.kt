@@ -14,6 +14,7 @@ import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
 import io.xoboro.core.application.LibraryLifecycle
+import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RoutingLibraryRootAccess
@@ -39,6 +40,7 @@ import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
@@ -52,7 +54,11 @@ import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
+import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
+import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
 import io.xoboro.server.tasks.DurableTaskWorker
+import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
+import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
 import io.xoboro.server.tasks.ExecutorFixedRateTaskScheduler
 import io.xoboro.server.tasks.LibraryScanScheduler
 import io.xoboro.server.tasks.ScanLibraryTaskEmitter
@@ -85,6 +91,7 @@ class XoboroRuntime private constructor(
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
   val libraryAdministrationLifecycle: LibraryAdministrationLifecycle,
+  val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
@@ -323,6 +330,23 @@ class XoboroRuntime private constructor(
               priority = TaskPriority.HIGHEST,
             )
           }
+        val analyzeBookTaskEmitter =
+          AnalyzeBookTaskEmitter(
+            books = books,
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val emptyLibraryTrashTaskEmitter =
+          EmptyLibraryTrashTaskEmitter(
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val libraryMaintenanceRequester =
+          DurableLibraryMaintenanceRequester(
+            analysis = analyzeBookTaskEmitter,
+            trash = emptyLibraryTrashTaskEmitter,
+          )
+        val libraryTrashStore = JooqLibraryTrashStore(database)
         val analyzeBook =
           AnalyzeBook(
             books = books,
@@ -342,12 +366,18 @@ class XoboroRuntime private constructor(
                 ScanLibraryTaskHandler(
                   libraries = libraries,
                   scanner = catalogScanner,
+                  afterScan = { library, _ ->
+                    if (library.settings.emptyTrashAfterScan) {
+                      emptyLibraryTrashTaskEmitter.emptyTrash(library.id)
+                    }
+                  },
                 ),
                 AnalyzeBookTaskHandler(
                   analyzeBook = { bookId ->
                     analyzeBook.execute(bookId)
                   },
                 ),
+                EmptyLibraryTrashTaskHandler(libraryTrashStore),
               ),
             heartbeat = createdHeartbeat,
             currentTimeMillis = System::currentTimeMillis,
@@ -385,6 +415,7 @@ class XoboroRuntime private constructor(
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
           libraryAdministrationLifecycle = libraryAdministrationLifecycle,
+          libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,

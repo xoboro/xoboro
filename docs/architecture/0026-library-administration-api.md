@@ -37,6 +37,6 @@ HTTP requests must not depend directly on the durable task implementation.
 The Komga library surface is operational without coupling Ktor to the task
 module. Every media subtype can reuse the same library ownership, access,
 source, scheduling, and scan boundaries. Dedicated hash, repair, conversion,
-trash, analysis, and metadata-refresh jobs remain separate compatibility work;
-until those handlers land, maintenance-setting transitions request a deep scan
-so catalog state is not silently left stale.
+and metadata-refresh jobs remain separate compatibility work; until those
+handlers land, maintenance-setting transitions request a deep scan so catalog
+state is not silently left stale.
