@@ -76,6 +76,36 @@ class JooqCatalogReconciliationStoreTest {
   }
 
   @Test
+  fun `rescans preserve explicit semantic media item types`() {
+    withStore("semantic-type") { fixture ->
+      val original = candidate("Series/item.cbz", "identity-1")
+      fixture.scan(listOf(original))
+      val item = fixture.books.findAllByLibraryId(LIBRARY_ID).single()
+      fixture.database.dsl.execute(
+        "UPDATE book SET media_item_type = 'VIDEO' WHERE id = ?",
+        item.id.value,
+      )
+
+      fixture.scan(
+        listOf(
+          original.copy(
+            mediaKind = MediaKind.EPUB,
+            fileSize = 200,
+            fileModifiedAtMillis = 200,
+          ),
+        ),
+      )
+
+      assertEquals(
+        "VIDEO",
+        fixture.database.dsl
+          .fetchOne("SELECT media_item_type FROM book WHERE id = ?", item.id.value)
+          ?.get(0, String::class.java),
+      )
+    }
+  }
+
+  @Test
   fun `detects unique identity moves additions and deletions without opening content`() {
     withStore("moves") { fixture ->
       fixture.scan(

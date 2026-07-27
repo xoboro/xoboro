@@ -8,11 +8,89 @@ data class SeriesId(
   }
 }
 
-data class BookId(
+data class MediaItemId(
   val value: String,
 ) {
   init {
-    require(value.isNotBlank()) { "Book ID must not be blank" }
+    require(value.isNotBlank()) { "Media item ID must not be blank" }
+  }
+}
+
+typealias BookId = MediaItemId
+
+enum class MediaItemType {
+  COMIC,
+  NOVEL,
+  BOOK,
+  VIDEO,
+  AUDIO,
+}
+
+enum class MediaCapability {
+  PAGE_SEQUENCE,
+  REFLOWABLE_TEXT,
+  TIMELINE,
+  IMAGE_CONTENT,
+  VIDEO_CONTENT,
+  AUDIO_CONTENT,
+}
+
+interface MediaItemCommon {
+  val id: MediaItemId
+  val libraryId: LibraryId
+  val name: String
+  val relativePath: String
+  val sourceItemId: String
+  val sourceIdentity: String?
+  val fileModifiedAtMillis: Long
+  val fileSize: Long
+  val deletedAtMillis: Long?
+  val createdAtMillis: Long
+  val updatedAtMillis: Long
+}
+
+sealed interface MediaItem : MediaItemCommon {
+  val type: MediaItemType
+  val capabilities: Set<MediaCapability>
+
+  fun supports(capability: MediaCapability): Boolean = capability in capabilities
+}
+
+sealed interface SeriesMediaItem : MediaItem {
+  val seriesId: SeriesId
+  val number: Int
+  val oneshot: Boolean
+}
+
+data class MediaItemCore(
+  override val id: MediaItemId,
+  override val libraryId: LibraryId,
+  override val name: String,
+  override val relativePath: String,
+  override val sourceItemId: String,
+  override val sourceIdentity: String? = null,
+  override val fileModifiedAtMillis: Long,
+  override val fileSize: Long = 0,
+  override val deletedAtMillis: Long? = null,
+  override val createdAtMillis: Long,
+  override val updatedAtMillis: Long = createdAtMillis,
+) : MediaItemCommon {
+  init {
+    require(name.isNotBlank()) { "Media item name must not be blank" }
+    require(relativePath.isNotBlank()) { "Media item relative path must not be blank" }
+    require(sourceItemId.isNotBlank()) { "Media item source ID must not be blank" }
+    require(sourceIdentity == null || sourceIdentity.isNotBlank()) {
+      "Media item source identity must be null or non-blank"
+    }
+    require(fileModifiedAtMillis >= 0) { "Media item file timestamp must not be negative" }
+    require(fileSize >= 0) { "Media item file size must not be negative" }
+    require(deletedAtMillis == null || deletedAtMillis >= 0) {
+      "Media item deletion timestamp must not be negative"
+    }
+    require(createdAtMillis >= 0) { "Media item creation timestamp must not be negative" }
+    require(updatedAtMillis >= createdAtMillis) {
+      "Media item update timestamp must not precede creation"
+    }
   }
 }
 
@@ -46,24 +124,27 @@ data class Series(
 }
 
 data class Book(
-  val id: BookId,
-  val libraryId: LibraryId,
-  val seriesId: SeriesId,
-  val name: String,
-  val relativePath: String,
-  val sourceItemId: String,
-  val sourceIdentity: String? = null,
+  override val id: BookId,
+  override val libraryId: LibraryId,
+  override val seriesId: SeriesId,
+  override val name: String,
+  override val relativePath: String,
+  override val sourceItemId: String,
+  override val sourceIdentity: String? = null,
   val mediaKind: MediaKind,
-  val fileModifiedAtMillis: Long,
-  val fileSize: Long = 0,
+  override val fileModifiedAtMillis: Long,
+  override val fileSize: Long = 0,
   val fileHash: String = "",
   val fileHashKoreader: String = "",
-  val number: Int = 0,
-  val deletedAtMillis: Long? = null,
-  val oneshot: Boolean = false,
-  val createdAtMillis: Long,
-  val updatedAtMillis: Long = createdAtMillis,
-) {
+  override val number: Int = 0,
+  override val deletedAtMillis: Long? = null,
+  override val oneshot: Boolean = false,
+  override val createdAtMillis: Long,
+  override val updatedAtMillis: Long = createdAtMillis,
+) : SeriesMediaItem {
+  override val type: MediaItemType = MediaItemType.BOOK
+  override val capabilities: Set<MediaCapability> = BOOK_CAPABILITIES
+
   init {
     require(name.isNotBlank()) { "Book name must not be blank" }
     require(relativePath.isNotBlank()) { "Book relative path must not be blank" }
@@ -82,6 +163,92 @@ data class Book(
       "Book update timestamp must not precede creation"
     }
   }
+
+  companion object {
+    private val BOOK_CAPABILITIES = setOf(MediaCapability.PAGE_SEQUENCE)
+  }
+}
+
+data class Comic(
+  val storage: Book,
+) : SeriesMediaItem by storage {
+  override val type: MediaItemType = MediaItemType.COMIC
+  override val capabilities: Set<MediaCapability> = COMIC_CAPABILITIES
+  override fun supports(capability: MediaCapability): Boolean = capability in capabilities
+
+  companion object {
+    private val COMIC_CAPABILITIES =
+      setOf(MediaCapability.PAGE_SEQUENCE, MediaCapability.IMAGE_CONTENT)
+  }
+}
+
+data class Novel(
+  val storage: Book,
+) : SeriesMediaItem by storage {
+  override val type: MediaItemType = MediaItemType.NOVEL
+  override val capabilities: Set<MediaCapability> = NOVEL_CAPABILITIES
+  override fun supports(capability: MediaCapability): Boolean = capability in capabilities
+
+  companion object {
+    private val NOVEL_CAPABILITIES = setOf(MediaCapability.REFLOWABLE_TEXT)
+  }
+}
+
+data class Video(
+  val core: MediaItemCore,
+  val durationMillis: Long? = null,
+) : MediaItem,
+  MediaItemCommon by core {
+  init {
+    require(durationMillis == null || durationMillis >= 0) {
+      "Video duration must not be negative"
+    }
+  }
+
+  override val type: MediaItemType = MediaItemType.VIDEO
+  override val capabilities: Set<MediaCapability> = VIDEO_CAPABILITIES
+
+  companion object {
+    private val VIDEO_CAPABILITIES =
+      setOf(
+        MediaCapability.TIMELINE,
+        MediaCapability.VIDEO_CONTENT,
+        MediaCapability.AUDIO_CONTENT,
+      )
+  }
+}
+
+data class Audio(
+  val core: MediaItemCore,
+  val durationMillis: Long? = null,
+) : MediaItem,
+  MediaItemCommon by core {
+  init {
+    require(durationMillis == null || durationMillis >= 0) {
+      "Audio duration must not be negative"
+    }
+  }
+
+  override val type: MediaItemType = MediaItemType.AUDIO
+  override val capabilities: Set<MediaCapability> = AUDIO_CAPABILITIES
+
+  companion object {
+    private val AUDIO_CAPABILITIES =
+      setOf(MediaCapability.TIMELINE, MediaCapability.AUDIO_CONTENT)
+  }
+}
+
+fun Book.classifyForLibrary(): SeriesMediaItem =
+  when (mediaKind) {
+    MediaKind.COMIC_ARCHIVE -> Comic(this)
+    MediaKind.EPUB -> Novel(this)
+    MediaKind.PDF -> this
+  }
+
+interface MediaItemRepository {
+  fun findByIdOrNull(id: MediaItemId): MediaItem?
+
+  fun findAllByLibraryId(libraryId: LibraryId): List<MediaItem>
 }
 
 interface SeriesRepository {
