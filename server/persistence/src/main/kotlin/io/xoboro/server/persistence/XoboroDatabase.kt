@@ -17,6 +17,7 @@ data class DatabaseConfig(
   val path: Path,
   val maximumPoolSize: Int = 4,
   val busyTimeoutMillis: Int = 10_000,
+  val acquireProcessLock: Boolean = true,
 ) {
   init {
     require(maximumPoolSize > 0) { "Maximum pool size must be positive" }
@@ -26,10 +27,13 @@ data class DatabaseConfig(
 
 class XoboroDatabase private constructor(
   private val hikariDataSource: HikariDataSource,
+  private val databaseFileLock: AutoCloseable,
+  val path: Path,
   val migrationResult: MigrateResult,
 ) : AutoCloseable {
   val dataSource: DataSource = hikariDataSource
   val dsl: DSLContext = DSL.using(hikariDataSource, SQLDialect.SQLITE)
+  val backups: DatabaseBackupManager = DatabaseBackupManager(this, path)
 
   fun <T> transaction(block: (DSLContext) -> T): T =
     dsl.transactionResult { configuration ->
@@ -42,46 +46,65 @@ class XoboroDatabase private constructor(
     }.getOrDefault(false)
 
   override fun close() {
-    hikariDataSource.close()
+    try {
+      hikariDataSource.close()
+    } finally {
+      databaseFileLock.close()
+    }
   }
 
   companion object {
     fun open(config: DatabaseConfig): XoboroDatabase {
       val absolutePath = config.path.toAbsolutePath().normalize()
       absolutePath.parent?.let(Files::createDirectories)
-
-      val sqliteConfig =
-        SQLiteConfig().apply {
-          enforceForeignKeys(true)
-          setBusyTimeout(config.busyTimeoutMillis)
-          setJournalMode(SQLiteConfig.JournalMode.WAL)
-          setSynchronous(SQLiteConfig.SynchronousMode.NORMAL)
+      val databaseFileLock =
+        if (config.acquireProcessLock) {
+          DatabaseFileLock.acquire(absolutePath)
+        } else {
+          AutoCloseable {}
         }
-      val sqliteDataSource =
-        SQLiteDataSource(sqliteConfig).apply {
-          url = "jdbc:sqlite:$absolutePath"
-        }
-      val hikariDataSource =
-        HikariDataSource(
-          HikariConfig().apply {
-            dataSource = sqliteDataSource
-            poolName = "xoboro-sqlite"
-            maximumPoolSize = config.maximumPoolSize
-            minimumIdle = 0
-            isAutoCommit = true
-          },
-        )
 
       return try {
+        val sqliteConfig =
+          SQLiteConfig().apply {
+            enforceForeignKeys(true)
+            setBusyTimeout(config.busyTimeoutMillis)
+            setJournalMode(SQLiteConfig.JournalMode.WAL)
+            setSynchronous(SQLiteConfig.SynchronousMode.NORMAL)
+          }
+        val sqliteDataSource =
+          SQLiteDataSource(sqliteConfig).apply {
+            url = "jdbc:sqlite:$absolutePath"
+          }
+        val hikariDataSource =
+          HikariDataSource(
+            HikariConfig().apply {
+              dataSource = sqliteDataSource
+              poolName = "xoboro-sqlite"
+              maximumPoolSize = config.maximumPoolSize
+              minimumIdle = 0
+              isAutoCommit = true
+            },
+          )
         val migrationResult =
-          Flyway.configure()
-            .dataSource(hikariDataSource)
-            .locations("classpath:db/migration")
-            .load()
-            .migrate()
-        XoboroDatabase(hikariDataSource, migrationResult)
+          try {
+            Flyway.configure()
+              .dataSource(hikariDataSource)
+              .locations("classpath:db/migration")
+              .load()
+              .migrate()
+          } catch (failure: Throwable) {
+            hikariDataSource.close()
+            throw failure
+          }
+        XoboroDatabase(
+          hikariDataSource = hikariDataSource,
+          databaseFileLock = databaseFileLock,
+          path = absolutePath,
+          migrationResult = migrationResult,
+        )
       } catch (failure: Throwable) {
-        hikariDataSource.close()
+        databaseFileLock.close()
         throw failure
       }
     }

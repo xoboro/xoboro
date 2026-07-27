@@ -18,7 +18,9 @@ import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CompatibilityMaintenanceRequester
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryAvailabilityLifecycle
 import io.xoboro.core.application.LibraryEvent
+import io.xoboro.core.application.LibraryEventPublisher
 import io.xoboro.core.application.LibraryLifecycle
 import io.xoboro.core.application.LocalArtworkRefreshLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
@@ -485,6 +487,18 @@ class XoboroRuntime private constructor(
             reconciliationStore = JooqCatalogReconciliationStore(database),
             currentTimeMillis = System::currentTimeMillis,
           )
+        val libraryAvailabilityLifecycle =
+          LibraryAvailabilityLifecycle(
+            libraries = libraries,
+            currentTimeMillis = System::currentTimeMillis,
+            eventPublisher =
+              LibraryEventPublisher { event ->
+                sseEvents.publishJson(
+                  name = "LibraryChanged",
+                  data = KomgaLibrarySseDto(event.library.id.value),
+                )
+              },
+          )
         val scanEmitter =
           ScanLibraryTaskEmitter(
             queue = queue,
@@ -722,6 +736,7 @@ class XoboroRuntime private constructor(
                 ScanLibraryTaskHandler(
                   libraries = libraries,
                   scanner = catalogScanner,
+                  availability = libraryAvailabilityLifecycle,
                   afterScan = { library, _ ->
                     if (library.settings.emptyTrashAfterScan) {
                       emptyLibraryTrashTaskEmitter.emptyTrash(library.id)

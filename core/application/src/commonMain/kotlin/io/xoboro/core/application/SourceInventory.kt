@@ -1,5 +1,10 @@
 package io.xoboro.core.application
 
+open class SourceInventoryUnavailableException(
+  message: String,
+  cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
 data class SourceFile(
   val itemId: String,
   val parentItemId: String,

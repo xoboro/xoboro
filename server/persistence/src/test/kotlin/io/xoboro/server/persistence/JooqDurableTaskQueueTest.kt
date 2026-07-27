@@ -235,7 +235,8 @@ class JooqDurableTaskQueueTest {
   fun `concurrent workers cannot claim the same task`() {
     val path = tempDirectory.resolve("concurrent.sqlite")
     XoboroDatabase.open(DatabaseConfig(path)).use { firstDatabase ->
-      XoboroDatabase.open(DatabaseConfig(path)).use { secondDatabase ->
+      XoboroDatabase.open(DatabaseConfig(path, acquireProcessLock = false)).use {
+          secondDatabase ->
         val firstQueue = JooqDurableTaskQueue(firstDatabase)
         val secondQueue = JooqDurableTaskQueue(secondDatabase)
         firstQueue.enqueue(taskFixture(), nowMillis = 1L)

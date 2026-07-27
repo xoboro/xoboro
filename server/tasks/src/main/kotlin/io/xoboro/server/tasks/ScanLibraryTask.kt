@@ -3,6 +3,8 @@ package io.xoboro.server.tasks
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.LibraryAvailabilityLifecycle
+import io.xoboro.core.application.SourceInventoryUnavailableException
 import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
@@ -57,6 +59,7 @@ class ScanLibraryTaskEmitter(
 class ScanLibraryTaskHandler(
   private val libraries: LibraryRepository,
   private val scanner: CatalogScanner,
+  private val availability: LibraryAvailabilityLifecycle? = null,
   private val afterScan: (Library, Boolean) -> Unit = { _, _ -> },
   private val json: Json = Json,
 ) : TaskHandler {
@@ -85,7 +88,13 @@ class ScanLibraryTaskHandler(
         )
 
     libraries.findByIdOrNull(libraryId)?.let { library ->
-      scanner.scan(library, deep)
+      try {
+        scanner.scan(library, deep)
+      } catch (failure: SourceInventoryUnavailableException) {
+        availability?.markUnavailable(library.id)
+        throw failure
+      }
+      availability?.markAvailable(library.id)
       afterScan(library, deep)
     }
   }

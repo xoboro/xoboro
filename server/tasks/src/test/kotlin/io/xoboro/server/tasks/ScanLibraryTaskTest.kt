@@ -2,11 +2,19 @@ package io.xoboro.server.tasks
 
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.LibraryAvailabilityLifecycle
+import io.xoboro.core.application.LibraryEvent
+import io.xoboro.core.application.LibraryEventPublisher
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.domain.Book
+import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibrarySettings
+import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.Series
+import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookRepository
@@ -15,6 +23,7 @@ import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.XoboroDatabase
+import io.xoboro.server.sources.local.LocalInventoryUnavailableException
 import io.xoboro.server.sources.local.LocalSourceInventory
 import java.nio.file.Files
 import java.nio.file.Path
@@ -161,6 +170,90 @@ class ScanLibraryTaskTest {
         worker.runOnce("worker-1"),
       )
       assertEquals(TaskCounts(0, 0, 0), queue.counts())
+    }
+  }
+
+  @Test
+  fun `preserves the catalog while storage is unavailable and clears the flag on recovery`() {
+    val root = tempDirectory.resolve("detached")
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("availability.sqlite"))).use {
+        database ->
+      val libraries = JooqLibraryRepository(database)
+      libraries.insert(
+        Library(
+          id = LIBRARY_ID,
+          name = "Synthetic library",
+          root = SourceLocation("local", root.toUri().toString()),
+          createdAtMillis = 1,
+        ),
+      )
+      val series = JooqSeriesRepository(database)
+      val books = JooqBookRepository(database)
+      val seriesId = SeriesId("series-1")
+      series.insert(
+        Series(
+          id = seriesId,
+          libraryId = LIBRARY_ID,
+          name = "Synthetic series",
+          relativePath = "Synthetic series",
+          sourceItemId = root.resolve("Synthetic series").toUri().toString(),
+          fileModifiedAtMillis = 1,
+          bookCount = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      books.insertAll(
+        listOf(
+          Book(
+            id = BookId("book-1"),
+            libraryId = LIBRARY_ID,
+            seriesId = seriesId,
+            name = "Synthetic book",
+            relativePath = "Synthetic series/Synthetic book.cbz",
+            sourceItemId =
+              root.resolve("Synthetic series/Synthetic book.cbz").toUri().toString(),
+            mediaKind = MediaKind.COMIC_ARCHIVE,
+            fileModifiedAtMillis = 1,
+            fileSize = 10,
+            createdAtMillis = 1,
+          ),
+        ),
+      )
+      val events = mutableListOf<LibraryEvent>()
+      var now = 100L
+      val handler =
+        ScanLibraryTaskHandler(
+          libraries = libraries,
+          scanner =
+            CatalogScanner(
+              inventories = listOf(LocalSourceInventory()),
+              reconciliationStore = JooqCatalogReconciliationStore(database),
+              currentTimeMillis = { now },
+            ),
+          availability =
+            LibraryAvailabilityLifecycle(
+              libraries = libraries,
+              currentTimeMillis = { now },
+              eventPublisher = LibraryEventPublisher(events::add),
+            ),
+        )
+
+      assertFailsWith<LocalInventoryUnavailableException> {
+        handler.handle(scanTask("""{"libraryId":"library-1","deep":false}"""))
+      }
+      assertEquals(100, libraries.findById(LIBRARY_ID).unavailableAtMillis)
+      assertEquals(1, series.count())
+      assertEquals(1, books.count())
+      assertEquals(null, series.findByIdOrNull(seriesId)?.deletedAtMillis)
+      assertEquals(null, books.findByIdOrNull(BookId("book-1"))?.deletedAtMillis)
+      assertEquals(1, events.size)
+
+      now = 200
+      Files.createDirectories(root)
+      handler.handle(scanTask("""{"libraryId":"library-1","deep":false}"""))
+
+      assertEquals(null, libraries.findById(LIBRARY_ID).unavailableAtMillis)
+      assertEquals(2, events.size)
     }
   }
 
