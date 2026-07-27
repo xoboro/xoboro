@@ -1,0 +1,81 @@
+{
+  "version": "1.25.0",
+  "cases": [
+    {
+      "name": "synthetic page inventory",
+      "path": "/api/v1/books/{BOOK_ID}/pages",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": ["Content-Length"]
+      }
+    },
+    {
+      "name": "synthetic Divina manifest",
+      "path": "/api/v1/books/{BOOK_ID}/manifest",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/readingOrder/*/href",
+          "/resources/*/href"
+        ]
+      }
+    },
+    {
+      "name": "synthetic archive download",
+      "path": "/api/v1/books/{BOOK_ID}/file",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length"
+        ]
+      }
+    },
+    {
+      "name": "synthetic original page",
+      "path": "/api/v1/books/{BOOK_ID}/pages/1",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length"
+        ]
+      }
+    },
+    {
+      "name": "synthetic converted page",
+      "path": "/api/v1/books/{BOOK_ID}/pages/1?convert=jpeg",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length"
+        ]
+      }
+    },
+    {
+      "name": "synthetic page thumbnail",
+      "path": "/api/v1/books/{BOOK_ID}/pages/1/thumbnail",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": ["Content-Length"]
+      }
+    },
+    {
+      "name": "unsupported synthetic raw page",
+      "path": "/api/v1/books/{BOOK_ID}/pages/1/raw",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "NONE"
+      }
+    }
+  ]
+}

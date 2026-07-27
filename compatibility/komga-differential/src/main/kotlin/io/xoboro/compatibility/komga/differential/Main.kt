@@ -13,6 +13,7 @@ fun main(args: Array<String>) {
       Files.readString(arguments.suite),
     )
   val sharedAuthorization = System.getenv("KOMGA_DIFFERENTIAL_AUTHORIZATION")
+  val pathVariableNames = suite.cases.flatMapTo(mutableSetOf(), DifferentialCase::pathVariables)
   val report =
     DifferentialRunner(JdkDifferentialHttpTransport(), json).run(
       suite = suite,
@@ -22,6 +23,18 @@ fun main(args: Array<String>) {
         System.getenv("KOMGA_REFERENCE_AUTHORIZATION") ?: sharedAuthorization,
       candidateAuthorization =
         System.getenv("XOBORO_CANDIDATE_AUTHORIZATION") ?: sharedAuthorization,
+      referencePathVariables =
+        pathVariableNames.associateWith { name ->
+          requireNotNull(System.getenv("KOMGA_REFERENCE_$name")) {
+            "KOMGA_REFERENCE_$name must be configured"
+          }
+        },
+      candidatePathVariables =
+        pathVariableNames.associateWith { name ->
+          requireNotNull(System.getenv("XOBORO_CANDIDATE_$name")) {
+            "XOBORO_CANDIDATE_$name must be configured"
+          }
+        },
     )
   report.failures.forEach { failure ->
     System.err.println(

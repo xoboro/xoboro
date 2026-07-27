@@ -21,6 +21,7 @@ data class DifferentialCase(
   val name: String,
   val method: String = "GET",
   val path: String,
+  val pathVariables: Set<String> = emptySet(),
   val headers: Map<String, String> = emptyMap(),
   val body: String? = null,
   val comparison: ComparisonPolicy = ComparisonPolicy(),
@@ -32,6 +33,19 @@ data class DifferentialCase(
       "Differential request path must be an origin-relative path"
     }
     require(!path.contains('#')) { "Differential request path must not contain a fragment" }
+    require(pathVariables.all(PATH_VARIABLE_NAME::matches)) {
+      "Differential path variable name is invalid"
+    }
+    val declaredPlaceholders = pathVariables.mapTo(mutableSetOf()) { "{$it}" }
+    val actualPlaceholders = PATH_PLACEHOLDER.findAll(path).mapTo(mutableSetOf()) { it.value }
+    require(actualPlaceholders == declaredPlaceholders) {
+      "Differential path placeholders must exactly match pathVariables"
+    }
+    declaredPlaceholders.forEach { placeholder ->
+      require(Regex("/${Regex.escape(placeholder)}(?=/|\\?|$)").containsMatchIn(path)) {
+        "Differential path variables must occupy a complete path segment"
+      }
+    }
     require(headers.keys.all(HEADER_NAME::matches)) { "Differential header name is invalid" }
     require(headers.values.none { '\r' in it || '\n' in it }) {
       "Differential header value must not contain line breaks"
@@ -41,6 +55,8 @@ data class DifferentialCase(
   companion object {
     private val METHOD = Regex("^[A-Z]+$")
     private val HEADER_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+    private val PATH_VARIABLE_NAME = Regex("^[A-Z][A-Z0-9_]*$")
+    private val PATH_PLACEHOLDER = Regex("\\{[^{}]+}")
   }
 }
 
@@ -60,6 +76,7 @@ data class ComparisonPolicy(
 @Serializable
 enum class BodyMode {
   AUTO,
+  NONE,
   JSON,
   TEXT,
   BINARY,

@@ -14,16 +14,26 @@ class DifferentialRunner(
     candidateUrl: String,
     referenceAuthorization: String? = null,
     candidateAuthorization: String? = null,
+    referencePathVariables: Map<String, String> = emptyMap(),
+    candidatePathVariables: Map<String, String> = emptyMap(),
   ): DifferentialReport {
     val failures =
       suite.cases.flatMap { case ->
         val reference =
           runCatching {
-            transport.execute(referenceUrl, case, referenceAuthorization.validAuthorization())
+            transport.execute(
+              referenceUrl,
+              case.resolvePath(referencePathVariables),
+              referenceAuthorization.validAuthorization(),
+            )
           }
         val candidate =
           runCatching {
-            transport.execute(candidateUrl, case, candidateAuthorization.validAuthorization())
+            transport.execute(
+              candidateUrl,
+              case.resolvePath(candidatePathVariables),
+              candidateAuthorization.validAuthorization(),
+            )
           }
         buildList {
           reference.exceptionOrNull()?.let {
@@ -97,9 +107,11 @@ class DifferentialRunner(
           }
         else -> case.comparison.bodyMode
       }
+    if (mode == BodyMode.NONE) return null
     val normalized =
       runCatching {
         when (mode) {
+          BodyMode.NONE -> error("NONE body mode must return before normalization")
           BodyMode.JSON -> normalizeJson(case, reference.body) to normalizeJson(case, candidate.body)
           BodyMode.TEXT ->
             reference.body.toText().normalizeLineEndings() to
@@ -162,6 +174,21 @@ class DifferentialRunner(
       }
     }
 
+  private fun DifferentialCase.resolvePath(variables: Map<String, String>): DifferentialCase {
+    val resolved =
+      pathVariables.fold(path) { current, name ->
+        val value =
+          requireNotNull(variables[name]) {
+            "Differential path variable '$name' is not configured"
+          }
+        require(PATH_SEGMENT.matches(value)) {
+          "Differential path variable '$name' must be a safe path segment"
+        }
+        current.replace("{$name}", value)
+      }
+    return copy(path = resolved, pathVariables = emptySet())
+  }
+
   private fun String.bounded(): String =
     if (length <= MAX_FAILURE_VALUE_LENGTH) {
       this
@@ -171,5 +198,6 @@ class DifferentialRunner(
 
   companion object {
     private const val MAX_FAILURE_VALUE_LENGTH = 2_000
+    private val PATH_SEGMENT = Regex("^[A-Za-z0-9._~-]+$")
   }
 }
