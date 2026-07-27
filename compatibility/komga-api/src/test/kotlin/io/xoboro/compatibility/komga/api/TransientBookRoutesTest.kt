@@ -102,6 +102,15 @@ class TransientBookRoutesTest {
         assertEquals(HttpStatusCode.OK, page.status)
         assertEquals("image/png", page.headers[HttpHeaders.ContentType])
         assertEquals("synthetic-page", page.bodyAsText())
+        val entityTag = requireNotNull(page.headers[HttpHeaders.ETag])
+        assertEquals(KOMGA_PRIVATE_REVALIDATE, page.headers[HttpHeaders.CacheControl])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/transient-books/transient-1/pages/1") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, "W/$entityTag")
+          }.status,
+        )
       }
     }
   }

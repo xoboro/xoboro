@@ -30,6 +30,7 @@ import io.xoboro.compatibility.komga.api.komgaTachiyomiProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
 import io.xoboro.compatibility.komga.api.komgaServerResourceRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
+import io.xoboro.compatibility.komga.api.installKomgaSecurityHeaders
 import io.xoboro.compatibility.komga.api.installKomgaShallowEtag
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.compatibility.komga.api.komgaKoreaderSyncRoutes
@@ -293,6 +294,7 @@ fun Application.xoboroModule(
     )
   }
   installKomgaShallowEtag()
+  installKomgaSecurityHeaders()
   userLifecycle?.let {
     installKomgaBasicAuthentication(
       users = it,
