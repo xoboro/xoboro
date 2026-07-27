@@ -11,11 +11,13 @@ class LibraryTest {
       Library(
         id = LibraryId("library-1"),
         name = "Comics",
-        source = SourceLocation(sourceId = "local", itemId = "/media/comics"),
+        root = SourceLocation(sourceId = "local", itemId = "file:///synthetic/comics"),
+        createdAtMillis = 1L,
       )
 
     assertEquals("library-1", library.id.value)
-    assertEquals("local", library.source.sourceId)
+    assertEquals("local", library.root.sourceId)
+    assertEquals(ScanInterval.EVERY_6H, library.settings.scanInterval)
   }
 
   @Test
@@ -27,5 +29,23 @@ class LibraryTest {
       SourceLocation(sourceId = "", itemId = "/media/comics")
     }
   }
-}
 
+  @Test
+  fun `invalid timestamps and blank settings are rejected`() {
+    assertFailsWith<IllegalArgumentException> {
+      Library(
+        id = LibraryId("library-1"),
+        name = "Comics",
+        root = SourceLocation(sourceId = "local", itemId = "file:///synthetic/comics"),
+        createdAtMillis = 2L,
+        updatedAtMillis = 1L,
+      )
+    }
+    assertFailsWith<IllegalArgumentException> {
+      LibrarySettings(scanDirectoryExclusions = setOf(""))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      LibrarySettings(oneshotsDirectory = " ")
+    }
+  }
+}
