@@ -17,6 +17,7 @@ class AnalyzeBook(
   private val epubAnalyzer: EpubMediaAnalyzer = EpubMediaAnalyzer(),
   private val pdfAnalyzer: PdfMediaAnalyzer = PdfMediaAnalyzer(),
   private val contentHasher: Xxh3ContentHasher = Xxh3ContentHasher(),
+  private val koreaderHasher: KoreaderPartialMd5Hasher = KoreaderPartialMd5Hasher(),
   private val currentTimeMillis: () -> Long,
 ) {
   private val accessesBySourceId = accesses.associateBy(SourceMediaAccess::sourceId)
@@ -38,8 +39,25 @@ class AnalyzeBook(
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
     val result =
       access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
-        if (library.settings.hashFiles && book.fileHash.isBlank()) {
-          books.update(book.copy(fileHash = contentHasher.hash(materialized.path)))
+        val fileHash =
+          if (library.settings.hashFiles && book.fileHash.isBlank()) {
+            contentHasher.hash(materialized.path)
+          } else {
+            book.fileHash
+          }
+        val fileHashKoreader =
+          if (library.settings.hashKoreader && book.fileHashKoreader.isBlank()) {
+            koreaderHasher.hash(materialized.path)
+          } else {
+            book.fileHashKoreader
+          }
+        if (fileHash != book.fileHash || fileHashKoreader != book.fileHashKoreader) {
+          books.update(
+            book.copy(
+              fileHash = fileHash,
+              fileHashKoreader = fileHashKoreader,
+            ),
+          )
         }
         when (book.mediaKind) {
           MediaKind.COMIC_ARCHIVE ->

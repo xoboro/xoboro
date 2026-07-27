@@ -34,7 +34,7 @@ Status:
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
-| Server-Sent Events | TODO | |
+| Server-Sent Events | PARTIAL | Authenticated bounded per-user streams, role/user filtering, 15-second heartbeat comments, 10-second administrator task snapshots, graceful runtime shutdown, and Library/read-progress lifecycle publication with route and hub tests; remaining catalog, organization, artwork, session, and differential events pending |
 | Backup and restore | TODO | |
 
 ## Media
@@ -64,7 +64,7 @@ Status:
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
-| File, page, and KOReader hashes | PARTIAL | Komga-compatible seeded XXH3-128 whole-file hashes reuse source materialization; optional first/last-three page hashes persist during Comic analysis, JPEG pixels are normalized before hashing, and non-empty hashes are indexed; KOReader hash and differential fixtures pending |
+| File, page, and KOReader hashes | PARTIAL | Komga-compatible seeded XXH3-128 whole-file hashes reuse source materialization; optional first/last-three page hashes persist during Comic analysis, JPEG pixels are normalized before hashing, and non-empty hashes are indexed; exact KOReader sparse partial-MD5 is computed during shared source materialization and indexed by canonical MediaItem ID with deterministic vectors; differential fixtures pending |
 | Book and series lifecycle | PARTIAL | Administrator Book/Series file deletion emits deduplicated, source-aware durable tasks and schedules catalog reconciliation; restore and differential events pending |
 | File import, upgrade, and deletion | PARTIAL | Administrator COPY/MOVE/HARDLINK imports and upgrades use canonical root containment, validated destination leaves, sibling temporary files, atomic replacement, retry-safe deletion, and durable tasks; non-local mutation adapters pending |
 | Filesystem and transient import discovery | PARTIAL | Administrator filesystem listing hides dot entries and validates absolute directories; session-scoped transient CBZ/ZIP, EPUB, and PDF discovery rejects Library overlap, reuses production analysis, and streams previews; differential envelopes and remote import pending |
@@ -122,7 +122,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Page-based progress | PARTIAL | Durable per-user page/completed/read-date/device rows, transactional series aggregates, page-bound validation, Book DTO projection, and REST integration tests; device mutation, SSE, and differential tests pending |
+| Page-based progress | PARTIAL | Durable per-user page/completed/read-date/device rows, transactional series aggregates, page-bound validation, Book DTO projection, REST integration tests, and filtered SSE change/delete events; device mutation and differential tests pending |
 | R2 locator and EPUB progression | PARTIAL | Durable per-user Readium locator/device/timestamp state, stale-write conflict rejection, authenticated GET/PUT contracts, persisted EPUB positions, position-list contract, and DiViNa/EPUB integration tests; advanced locator reconciliation and differential fixtures pending |
 | Mark read and unread by book or series | PARTIAL | Book PATCH/DELETE and set-based Series POST/DELETE routes plus Mihon ReadList index and Series number-sort adapters enforce catalog access and update durable aggregates; bulk and differential adapters pending |
 | Previous and next book semantics | PARTIAL | Stable metadata number, relative-path, and ID tie-breaking in SQL with access checks and boundary tests; differential and read-state semantics pending |
@@ -138,8 +138,8 @@ Status:
 | OPDS v1 | TODO | |
 | OPDS v2 and authentication document | TODO | |
 | Kobo Sync and KEPUB | TODO | |
-| KOReader Sync | TODO | |
-| SSE event contracts | TODO | |
+| KOReader Sync | PARTIAL | All four routes, `X-Auth-User` API-key authentication, role enforcement, duplicate/missing fingerprint behavior, exact partial-MD5 generation, PDF/DiViNa page progress, both EPUB locator forms, durable Readium conversion, and synthetic integration tests; reference differential fixtures pending |
+| SSE event contracts | PARTIAL | Authenticated Ktor SSE stream, Komga event names and JSON DTOs, bounded subscribers, heartbeat, administrator task status, user isolation, and Library/read-progress publishers; remaining event producers and differential reconnect behavior pending |
 
 ## Migration and operations
 

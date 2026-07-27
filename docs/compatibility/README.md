@@ -32,3 +32,6 @@ suites are required for:
 No percentage may be reported as achieved from source line count or endpoint
 presence alone. A capability becomes compatible only after its observable
 behavior is covered by automated contract tests.
+
+The inventory test currently marks 7 of the 66 operations as implemented in
+progress: KOReader, SSE, and OAuth2 browser flow.
