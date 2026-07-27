@@ -17,12 +17,19 @@ import io.xoboro.core.application.OAuth2IdentityGateway
 import io.xoboro.core.application.OAuth2LoginException
 import io.xoboro.core.application.OAuth2Protocol
 import java.math.BigInteger
+import java.security.AlgorithmParameters
 import java.security.KeyFactory
 import java.security.MessageDigest
+import java.security.PublicKey
 import java.security.Signature
+import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECParameterSpec
+import java.security.spec.ECPoint
+import java.security.spec.ECPublicKeySpec
 import java.security.spec.RSAPublicKeySpec
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -38,24 +45,27 @@ class HttpOAuth2IdentityGateway(
   private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : OAuth2IdentityGateway {
   private val jwkSets = ConcurrentHashMap<String, JsonObject>()
+  private val providerMetadata = ConcurrentHashMap<String, JsonObject>()
 
-  override fun authorizationUrl(
+  override suspend fun authorizationUrl(
     registration: OAuth2ClientRegistration,
     redirectUri: String,
     state: String,
     nonce: String?,
-  ): String =
-    URLBuilder(registration.authorizationUri)
+  ): String {
+    val resolved = resolve(registration)
+    return URLBuilder(requireNotNull(resolved.authorizationUri))
       .apply {
         parameters.append("response_type", "code")
-        parameters.append("client_id", registration.clientId)
+        parameters.append("client_id", resolved.clientId)
         parameters.append("redirect_uri", redirectUri)
         parameters.append("state", state)
-        if (registration.scopes.isNotEmpty()) {
-          parameters.append("scope", registration.scopes.joinToString(" "))
+        if (resolved.scopes.isNotEmpty()) {
+          parameters.append("scope", resolved.scopes.joinToString(" "))
         }
         nonce?.let { parameters.append("nonce", it) }
       }.buildString()
+  }
 
   override suspend fun exchange(
     registration: OAuth2ClientRegistration,
@@ -63,38 +73,39 @@ class HttpOAuth2IdentityGateway(
     authorizationCode: String,
     expectedNonce: String?,
   ): OAuth2ExternalIdentity {
+    val resolved = resolve(registration)
     val token =
       client
         .submitForm(
-          url = registration.tokenUri,
+          url = requireNotNull(resolved.tokenUri),
           formParameters =
             Parameters.build {
               append("grant_type", "authorization_code")
               append("code", authorizationCode)
               append("redirect_uri", redirectUri)
-              append("client_id", registration.clientId)
+              append("client_id", resolved.clientId)
               if (
-                registration.clientAuthenticationMethod ==
+                resolved.clientAuthenticationMethod ==
                   OAuth2ClientAuthenticationMethod.CLIENT_SECRET_POST
               ) {
-                append("client_secret", registration.clientSecret)
+                append("client_secret", resolved.clientSecret)
               }
             },
         ) {
           accept(ContentType.Application.Json)
           if (
-            registration.clientAuthenticationMethod ==
+            resolved.clientAuthenticationMethod ==
               OAuth2ClientAuthenticationMethod.CLIENT_SECRET_BASIC
           ) {
-            basicAuth(registration.clientId, registration.clientSecret)
+            basicAuth(resolved.clientId, resolved.clientSecret)
           }
         }.body<JsonObject>()
     val accessToken =
       token.string("access_token")
         ?: throw OAuth2LoginException("missing_access_token")
-    if (registration.protocol == OAuth2Protocol.OIDC) {
+    if (resolved.protocol == OAuth2Protocol.OIDC) {
       validateIdToken(
-        registration = registration,
+        registration = resolved,
         encodedToken =
           token.string("id_token")
             ?: throw OAuth2LoginException("missing_id_token"),
@@ -102,19 +113,19 @@ class HttpOAuth2IdentityGateway(
       )
     }
     val userInfo =
-      client.get(registration.userInfoUri) {
+      client.get(requireNotNull(resolved.userInfoUri)) {
         accept(ContentType.Application.Json)
         bearerAuth(accessToken)
       }.body<JsonObject>()
     var email = userInfo.string("email")
     var emailVerified = userInfo["email_verified"]?.jsonPrimitive?.booleanOrNull
     if (
-      registration.registrationId.equals("github", ignoreCase = true) &&
+      resolved.registrationId.equals("github", ignoreCase = true) &&
       email == null &&
-      registration.scopes.any { it == "user" || it == "user:email" }
+      resolved.scopes.any { it == "user" || it == "user:email" }
     ) {
       val primary =
-        client.get("${registration.userInfoUri.trimEnd('/')}/emails") {
+        client.get("${requireNotNull(resolved.userInfoUri).trimEnd('/')}/emails") {
           accept(ContentType.Application.Json)
           bearerAuth(accessToken)
         }.body<JsonArray>()
@@ -138,33 +149,46 @@ class HttpOAuth2IdentityGateway(
     if (parts.size != 3) throw OAuth2LoginException("invalid_id_token")
     val header = decodeJson(parts[0])
     val claims = decodeJson(parts[1])
-    val algorithm =
+    val algorithmName =
       header.string("alg")
-        ?.let(RSA_SIGNATURE_ALGORITHMS::get)
+        ?: throw OAuth2LoginException("unsupported_id_token_algorithm")
+    val algorithm =
+      SIGNATURE_ALGORITHMS[algorithmName]
         ?: throw OAuth2LoginException("unsupported_id_token_algorithm")
     val keyId =
       header.string("kid")
         ?: throw OAuth2LoginException("missing_id_token_key")
-    val key = findJwk(registration, keyId)
+    val key = findJwk(registration, keyId, algorithm.keyType)
     key.string("alg")?.let {
-      if (RSA_SIGNATURE_ALGORITHMS[it] != algorithm) {
+      if (it != algorithmName) {
         throw OAuth2LoginException("invalid_id_token_key_algorithm")
       }
     }
-    val modulus = key.string("n")?.decodeBase64UrlUnsigned()
-    val exponent = key.string("e")?.decodeBase64UrlUnsigned()
-    if (modulus == null || exponent == null) throw OAuth2LoginException("invalid_id_token_key")
-    val publicKey =
-      KeyFactory
-        .getInstance("RSA")
-        .generatePublic(RSAPublicKeySpec(modulus, exponent))
+    key.string("use")?.let {
+      if (it != "sig") throw OAuth2LoginException("invalid_id_token_key_use")
+    }
+    (key["key_ops"] as? JsonArray)?.let { operations ->
+      if (operations.none { it.jsonPrimitive.content == "verify" }) {
+        throw OAuth2LoginException("invalid_id_token_key_use")
+      }
+    }
+    val publicKey = key.toPublicKey(algorithm)
+    val encodedSignature = parts[2].decodeBase64Url()
+    val signature =
+      if (algorithm.keyType == "EC") {
+        encodedSignature.toDerEcdsaSignature(algorithm.signatureSize)
+      } else {
+        encodedSignature
+      }
     val validSignature =
-      Signature
-        .getInstance(algorithm)
-        .apply {
-          initVerify(publicKey)
-          update("${parts[0]}.${parts[1]}".toByteArray(Charsets.US_ASCII))
-        }.verify(parts[2].decodeBase64Url())
+      runCatching {
+        Signature
+          .getInstance(algorithm.jcaName)
+          .apply {
+            initVerify(publicKey)
+            update("${parts[0]}.${parts[1]}".toByteArray(Charsets.US_ASCII))
+          }.verify(signature)
+      }.getOrDefault(false)
     if (!validSignature) throw OAuth2LoginException("invalid_id_token_signature")
     if (claims.string("iss") != registration.issuerUri) {
       throw OAuth2LoginException("invalid_id_token_issuer")
@@ -213,13 +237,14 @@ class HttpOAuth2IdentityGateway(
   private suspend fun findJwk(
     registration: OAuth2ClientRegistration,
     keyId: String,
+    keyType: String,
   ): JsonObject {
     val uri = requireNotNull(registration.jwkSetUri)
     fun JsonObject.find(): JsonObject? =
       get("keys")
         ?.let { it as? JsonArray }
         ?.map { it.jsonObject }
-        ?.firstOrNull { it.string("kid") == keyId && it.string("kty") == "RSA" }
+        ?.firstOrNull { it.string("kid") == keyId && it.string("kty") == keyType }
     jwkSets[uri]?.find()?.let { return it }
     val refreshed = client.get(uri) {
       accept(ContentType.Application.Json)
@@ -227,6 +252,117 @@ class HttpOAuth2IdentityGateway(
     jwkSets[uri] = refreshed
     return refreshed.find() ?: throw OAuth2LoginException("unknown_id_token_key")
   }
+
+  private suspend fun resolve(registration: OAuth2ClientRegistration): OAuth2ClientRegistration {
+    if (
+      registration.protocol != OAuth2Protocol.OIDC ||
+      (
+        registration.authorizationUri != null &&
+          registration.tokenUri != null &&
+          registration.userInfoUri != null &&
+          registration.jwkSetUri != null
+      )
+    ) {
+      return registration
+    }
+    val issuer = requireNotNull(registration.issuerUri)
+    val metadata =
+      providerMetadata[issuer]
+        ?: discover(issuer.trimEnd('/')).also { providerMetadata[issuer] = it }
+    if (metadata.string("issuer") != issuer) {
+      throw OAuth2LoginException("invalid_oidc_discovery_issuer")
+    }
+    return runCatching {
+      registration.copy(
+        authorizationUri =
+          registration.authorizationUri ?: metadata.requiredWebUri("authorization_endpoint"),
+        tokenUri = registration.tokenUri ?: metadata.requiredWebUri("token_endpoint"),
+        userInfoUri = registration.userInfoUri ?: metadata.requiredWebUri("userinfo_endpoint"),
+        jwkSetUri = registration.jwkSetUri ?: metadata.requiredWebUri("jwks_uri"),
+      )
+    }.getOrElse {
+      if (it is OAuth2LoginException) throw it
+      throw OAuth2LoginException("invalid_oidc_provider_configuration")
+    }
+  }
+
+  private suspend fun discover(issuer: String): JsonObject =
+    try {
+      client
+        .get("$issuer/.well-known/openid-configuration") {
+          accept(ContentType.Application.Json)
+        }.body()
+    } catch (failure: CancellationException) {
+      throw failure
+    } catch (failure: OAuth2LoginException) {
+      throw failure
+    } catch (_: Exception) {
+      throw OAuth2LoginException("oidc_discovery_failed")
+    }
+
+  private fun JsonObject.requiredWebUri(key: String): String =
+    string(key)
+      ?.takeIf(::isWebUri)
+      ?: throw OAuth2LoginException("invalid_oidc_provider_configuration")
+
+  private fun isWebUri(value: String): Boolean =
+    runCatching {
+      val url = URLBuilder(value).build()
+      (url.protocol.name == "http" || url.protocol.name == "https") &&
+        url.host.isNotBlank()
+    }.getOrDefault(false)
+
+  private fun JsonObject.toPublicKey(algorithm: SigningAlgorithm): PublicKey =
+    try {
+      when (algorithm.keyType) {
+        "RSA" -> {
+          val modulus = string("n")?.decodeBase64UrlUnsigned()
+          val exponent = string("e")?.decodeBase64UrlUnsigned()
+          if (modulus == null || exponent == null) {
+            throw OAuth2LoginException("invalid_id_token_key")
+          }
+          KeyFactory
+            .getInstance("RSA")
+            .generatePublic(RSAPublicKeySpec(modulus, exponent))
+        }
+        "EC" -> {
+          val curve =
+            EC_CURVES[string("crv")]
+              ?: throw OAuth2LoginException("invalid_id_token_key")
+          if (curve.joseName != algorithm.curve) {
+            throw OAuth2LoginException("invalid_id_token_key_algorithm")
+          }
+          val x = string("x")?.decodeBase64Url()
+          val y = string("y")?.decodeBase64Url()
+          if (
+            x == null ||
+            y == null ||
+            x.size != curve.coordinateSize ||
+            y.size != curve.coordinateSize
+          ) {
+            throw OAuth2LoginException("invalid_id_token_key")
+          }
+          val parameters =
+            AlgorithmParameters
+              .getInstance("EC")
+              .apply { init(ECGenParameterSpec(curve.jcaName)) }
+              .getParameterSpec(ECParameterSpec::class.java)
+          KeyFactory
+            .getInstance("EC")
+            .generatePublic(
+              ECPublicKeySpec(
+                ECPoint(BigInteger(1, x), BigInteger(1, y)),
+                parameters,
+              ),
+            )
+        }
+        else -> throw OAuth2LoginException("invalid_id_token_key")
+      }
+    } catch (failure: OAuth2LoginException) {
+      throw failure
+    } catch (_: Exception) {
+      throw OAuth2LoginException("invalid_id_token_key")
+    }
 
   private fun decodeJson(value: String): JsonObject =
     runCatching {
@@ -245,13 +381,66 @@ class HttpOAuth2IdentityGateway(
   private fun String.decodeBase64UrlUnsigned(): BigInteger =
     BigInteger(1, decodeBase64Url())
 
+  private fun ByteArray.toDerEcdsaSignature(expectedSize: Int): ByteArray {
+    if (size != expectedSize || size % 2 != 0) {
+      throw OAuth2LoginException("invalid_id_token_signature")
+    }
+    val componentSize = size / 2
+    val r = copyOfRange(0, componentSize).toDerInteger()
+    val s = copyOfRange(componentSize, size).toDerInteger()
+    val values = r + s
+    return byteArrayOf(0x30) + values.size.derLength() + values
+  }
+
+  private fun ByteArray.toDerInteger(): ByteArray {
+    val firstValue = indexOfFirst { it != 0.toByte() }.let { if (it < 0) lastIndex else it }
+    val unsigned = copyOfRange(firstValue, size)
+    val value =
+      if (unsigned.first().toInt() and 0x80 != 0) {
+        byteArrayOf(0) + unsigned
+      } else {
+        unsigned
+      }
+    return byteArrayOf(0x02) + value.size.derLength() + value
+  }
+
+  private fun Int.derLength(): ByteArray =
+    when {
+      this < 0 -> throw OAuth2LoginException("invalid_id_token_signature")
+      this < 128 -> byteArrayOf(toByte())
+      this < 256 -> byteArrayOf(0x81.toByte(), toByte())
+      else -> byteArrayOf(0x82.toByte(), (this shr 8).toByte(), toByte())
+    }
+
+  private data class SigningAlgorithm(
+    val jcaName: String,
+    val keyType: String,
+    val curve: String? = null,
+    val signatureSize: Int = 0,
+  )
+
+  private data class EcCurve(
+    val joseName: String,
+    val jcaName: String,
+    val coordinateSize: Int,
+  )
+
   private companion object {
     const val CLOCK_SKEW_SECONDS = 60
-    val RSA_SIGNATURE_ALGORITHMS =
+    val SIGNATURE_ALGORITHMS =
       mapOf(
-        "RS256" to "SHA256withRSA",
-        "RS384" to "SHA384withRSA",
-        "RS512" to "SHA512withRSA",
+        "RS256" to SigningAlgorithm("SHA256withRSA", "RSA"),
+        "RS384" to SigningAlgorithm("SHA384withRSA", "RSA"),
+        "RS512" to SigningAlgorithm("SHA512withRSA", "RSA"),
+        "ES256" to SigningAlgorithm("SHA256withECDSA", "EC", "P-256", 64),
+        "ES384" to SigningAlgorithm("SHA384withECDSA", "EC", "P-384", 96),
+        "ES512" to SigningAlgorithm("SHA512withECDSA", "EC", "P-521", 132),
       )
+    val EC_CURVES =
+      listOf(
+        EcCurve("P-256", "secp256r1", 32),
+        EcCurve("P-384", "secp384r1", 48),
+        EcCurve("P-521", "secp521r1", 66),
+      ).associateBy(EcCurve::joseName)
   }
 }

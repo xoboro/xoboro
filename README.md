@@ -130,8 +130,12 @@ OAuth2 clients use Spring Security's environment naming, for example
 `SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID` and the matching
 `..._CLIENT_SECRET`. Custom providers also set the corresponding
 `SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_<ID>_AUTHORIZATION_URI`, `TOKEN_URI`,
-and `USER_INFO_URI`; OIDC providers additionally set `ISSUER_URI` and
-`JWK_SET_URI`. Secrets are read at startup and are never returned by an API.
+and `USER_INFO_URI`. For an OIDC provider, `ISSUER_URI` plus an `openid` scope
+is sufficient: Xoboro validates and caches its standard
+`/.well-known/openid-configuration` document. Explicit authorization, token,
+user-info, and JWK-set URIs override discovered values. ID tokens may use
+RS256/384/512 or ES256/384/512. Secrets are read at startup and are never
+returned by an API.
 
 Reverse-proxy headers are rejected by default. Set `XOBORO_TRUSTED_PROXIES`
 to the comma-separated physical peer hosts or addresses that connect directly

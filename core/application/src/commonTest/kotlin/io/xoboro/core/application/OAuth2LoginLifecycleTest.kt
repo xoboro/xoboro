@@ -78,85 +78,107 @@ class OAuth2LoginLifecycleTest {
 
   @Test
   fun `matches Komga OAuth2 and OIDC account errors`() {
-    val cases =
-      listOf(
-        ErrorCase(
-          protocol = OAuth2Protocol.OAUTH2,
-          identity = OAuth2ExternalIdentity(null, null),
-          accountCreationEnabled = true,
-          expected = OAuth2LoginLifecycle.OAUTH2_EMAIL_MISSING,
-        ),
-        ErrorCase(
-          protocol = OAuth2Protocol.OIDC,
-          identity = OAuth2ExternalIdentity(null, true),
-          accountCreationEnabled = true,
-          expected = OAuth2LoginLifecycle.OIDC_EMAIL_MISSING,
-        ),
-        ErrorCase(
-          protocol = OAuth2Protocol.OIDC,
-          identity = OAuth2ExternalIdentity("reader@example.invalid", null),
-          accountCreationEnabled = true,
-          expected = OAuth2LoginLifecycle.OIDC_EMAIL_VERIFICATION_MISSING,
-        ),
-        ErrorCase(
-          protocol = OAuth2Protocol.OIDC,
-          identity = OAuth2ExternalIdentity("reader@example.invalid", false),
-          accountCreationEnabled = true,
-          expected = OAuth2LoginLifecycle.OIDC_EMAIL_NOT_VERIFIED,
-        ),
-        ErrorCase(
-          protocol = OAuth2Protocol.OIDC,
-          identity = OAuth2ExternalIdentity("reader@example.invalid", true),
-          accountCreationEnabled = false,
-          expected = OAuth2LoginLifecycle.ACCOUNT_CREATION_DISABLED,
-        ),
-      )
-
-    cases.forEach { case ->
-      val fixture =
-        Fixture(
-          protocol = case.protocol,
-          accountCreationEnabled = case.accountCreationEnabled,
+    runSuspend {
+      val cases =
+        listOf(
+          ErrorCase(
+            protocol = OAuth2Protocol.OAUTH2,
+            identity = OAuth2ExternalIdentity(null, null),
+            accountCreationEnabled = true,
+            expected = OAuth2LoginLifecycle.OAUTH2_EMAIL_MISSING,
+          ),
+          ErrorCase(
+            protocol = OAuth2Protocol.OIDC,
+            identity = OAuth2ExternalIdentity(null, true),
+            accountCreationEnabled = true,
+            expected = OAuth2LoginLifecycle.OIDC_EMAIL_MISSING,
+          ),
+          ErrorCase(
+            protocol = OAuth2Protocol.OIDC,
+            identity = OAuth2ExternalIdentity("reader@example.invalid", null),
+            accountCreationEnabled = true,
+            expected = OAuth2LoginLifecycle.OIDC_EMAIL_VERIFICATION_MISSING,
+          ),
+          ErrorCase(
+            protocol = OAuth2Protocol.OIDC,
+            identity = OAuth2ExternalIdentity("reader@example.invalid", false),
+            accountCreationEnabled = true,
+            expected = OAuth2LoginLifecycle.OIDC_EMAIL_NOT_VERIFIED,
+          ),
+          ErrorCase(
+            protocol = OAuth2Protocol.OIDC,
+            identity = OAuth2ExternalIdentity("reader@example.invalid", true),
+            accountCreationEnabled = false,
+            expected = OAuth2LoginLifecycle.ACCOUNT_CREATION_DISABLED,
+          ),
         )
-      fixture.gateway.identity = case.identity
-      val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
-      val failure =
-        assertFailsWith<OAuth2LoginException> {
-          runSuspend {
-            fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding)
+
+      cases.forEach { case ->
+        val fixture =
+          Fixture(
+            protocol = case.protocol,
+            accountCreationEnabled = case.accountCreationEnabled,
+          )
+        fixture.gateway.identity = case.identity
+        val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+        val failure =
+          assertFailsWith<OAuth2LoginException> {
+            runSuspend {
+              fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding)
+            }
           }
-        }
-      assertEquals(case.expected, failure.errorCode)
+        assertEquals(case.expected, failure.errorCode)
+      }
     }
   }
 
   @Test
   fun `rejects expired mismatched and colliding authorization state`() {
-    val fixture = Fixture(accountCreationEnabled = true)
-    val first = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
-    fixture.clock = 601_001
-    assertFailsWith<OAuth2LoginException> {
-      runSuspend {
-        fixture.lifecycle.complete("synthetic", first.state, "code", first.browserBinding)
-      }
-    }.also { assertEquals(OAuth2LoginLifecycle.INVALID_AUTHORIZATION_STATE, it.errorCode) }
+    runSuspend {
+      val fixture = Fixture(accountCreationEnabled = true)
+      val first = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+      fixture.clock = 601_001
+      assertFailsWith<OAuth2LoginException> {
+        runSuspend {
+          fixture.lifecycle.complete("synthetic", first.state, "code", first.browserBinding)
+        }
+      }.also { assertEquals(OAuth2LoginLifecycle.INVALID_AUTHORIZATION_STATE, it.errorCode) }
 
-    assertFailsWith<OAuth2LoginException> {
-      fixture.lifecycle.begin("missing", CALLBACK_URI)
-    }.also { assertEquals(OAuth2LoginLifecycle.UNKNOWN_REGISTRATION, it.errorCode) }
+      assertFailsWith<OAuth2LoginException> {
+        runSuspend {
+          fixture.lifecycle.begin("missing", CALLBACK_URI)
+        }
+      }.also { assertEquals(OAuth2LoginLifecycle.UNKNOWN_REGISTRATION, it.errorCode) }
 
-    val bindingFixture = Fixture(accountCreationEnabled = true)
-    val bindingLaunch = bindingFixture.lifecycle.begin("synthetic", CALLBACK_URI)
-    assertFailsWith<OAuth2LoginException> {
-      runSuspend {
-        bindingFixture.lifecycle.complete(
-          "synthetic",
-          bindingLaunch.state,
-          "code",
-          "attacker-browser-binding",
-        )
+      val bindingFixture = Fixture(accountCreationEnabled = true)
+      val bindingLaunch = bindingFixture.lifecycle.begin("synthetic", CALLBACK_URI)
+      assertFailsWith<OAuth2LoginException> {
+        runSuspend {
+          bindingFixture.lifecycle.complete(
+            "synthetic",
+            bindingLaunch.state,
+            "code",
+            "attacker-browser-binding",
+          )
+        }
+      }.also { assertEquals(OAuth2LoginLifecycle.INVALID_AUTHORIZATION_STATE, it.errorCode) }
+    }
+  }
+
+  @Test
+  fun `removes pending state when provider launch fails`() {
+    runSuspend {
+      val fixture = Fixture(accountCreationEnabled = true)
+      fixture.gateway.authorizationFailure = OAuth2LoginException("synthetic_discovery_failure")
+
+      assertFailsWith<OAuth2LoginException> {
+        runSuspend {
+          fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+        }
       }
-    }.also { assertEquals(OAuth2LoginLifecycle.INVALID_AUTHORIZATION_STATE, it.errorCode) }
+
+      assertEquals(0, fixture.pending.size)
+    }
   }
 
   private data class ErrorCase(
@@ -176,6 +198,7 @@ class OAuth2LoginLifecycleTest {
     var passwordFactoryCalls = 0
     private var stateSequence = 0
     private var nonceSequence = 0
+    val pending = InMemoryPendingStore()
     val lifecycle =
       OAuth2LoginLifecycle(
         registrations = listOf(registration(protocol)),
@@ -194,7 +217,7 @@ class OAuth2LoginLifecycleTest {
             userIdFactory = { "user-${users.count() + 1}" },
             currentTimeMillis = { clock },
           ),
-        pendingAuthorizations = InMemoryPendingStore(),
+        pendingAuthorizations = pending,
         identityGateway = gateway,
         accountCreationEnabled = accountCreationEnabled,
         oidcEmailVerificationEnabled = true,
@@ -217,16 +240,18 @@ class OAuth2LoginLifecycleTest {
 
   private class FakeOAuth2IdentityGateway : OAuth2IdentityGateway {
     var identity = OAuth2ExternalIdentity(null, null)
+    var authorizationFailure: Throwable? = null
     var authorizationNonce: String? = null
     var authorizationCode: String? = null
     var expectedNonce: String? = null
 
-    override fun authorizationUrl(
+    override suspend fun authorizationUrl(
       registration: OAuth2ClientRegistration,
       redirectUri: String,
       state: String,
       nonce: String?,
     ): String {
+      authorizationFailure?.let { throw it }
       authorizationNonce = nonce
       return "${registration.authorizationUri}?state=$state"
     }
@@ -245,6 +270,8 @@ class OAuth2LoginLifecycleTest {
 
   private class InMemoryPendingStore : OAuth2PendingAuthorizationStore {
     private val values = mutableMapOf<String, OAuth2PendingAuthorization>()
+    val size: Int
+      get() = values.size
 
     override fun save(pending: OAuth2PendingAuthorization): Boolean {
       if (pending.state in values) return false
