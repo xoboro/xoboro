@@ -184,10 +184,10 @@ data class WPMetadataDto(
   val title: String,
   val identifier: String? = null,
   val type: String? = null,
-  val conformsTo: String,
+  val conformsTo: String? = null,
   val sortAs: String? = null,
   val subtitle: String? = null,
-  val modified: String,
+  val modified: String? = null,
   val published: String? = null,
   val language: String? = null,
   val author: List<String> = emptyList(),
@@ -204,8 +204,8 @@ data class WPMetadataDto(
   val subject: List<String> = emptyList(),
   val readingProgression: String? = null,
   val description: String? = null,
-  val numberOfPages: Int,
-  val belongsTo: WPBelongsToDto,
+  val numberOfPages: Int? = null,
+  val belongsTo: WPBelongsToDto? = null,
   val rendition: Map<String, String> = emptyMap(),
 )
 

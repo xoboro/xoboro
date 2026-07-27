@@ -23,9 +23,15 @@ import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSearchCondition
+import io.xoboro.core.application.CatalogSearchField
+import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
+import io.xoboro.core.application.MetadataFacet
+import io.xoboro.core.application.MetadataFacetQuery
+import io.xoboro.core.application.MetadataFacetRepository
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.ReadProgressLifecycle
@@ -60,6 +66,7 @@ fun Route.komgaOpdsRoutes(
   artwork: ArtworkLifecycle,
   content: BookContentAccess,
   progress: ReadProgressLifecycle,
+  facets: MetadataFacetRepository? = null,
 ) {
   get("/opds/v2/auth") {
     call.respondOpds(
@@ -90,7 +97,7 @@ fun Route.komgaOpdsRoutes(
     strategy = AuthenticationStrategy.FirstSuccessful,
   ) {
     opdsV1Routes(catalog, libraries, collections, readLists, artwork, content)
-    opdsV2Routes(catalog, libraries, collections, readLists, artwork, content)
+    opdsV2Routes(catalog, libraries, collections, readLists, artwork, content, facets)
     opdsV2ManifestRoutes(catalog, progress)
   }
 }
@@ -316,15 +323,16 @@ private fun Route.opdsV2Routes(
   readLists: ReadListRepository,
   artwork: ArtworkLifecycle,
   content: BookContentAccess,
+  facets: MetadataFacetRepository?,
 ) {
   listOf("/opds/v2/catalog", "/opds/v2/libraries").forEach { path ->
     get(path) {
-      call.respondRecommended(catalog, libraries, library = null)
+      call.respondRecommended(catalog, libraries, collections, readLists, library = null)
     }
   }
   get("/opds/v2/libraries/{id}") {
     val library = call.visibleLibrary(libraries) ?: return@get
-    call.respondRecommended(catalog, libraries, library)
+    call.respondRecommended(catalog, libraries, collections, readLists, library)
   }
   listOf("/opds/v2/libraries/keep-reading", "/opds/v2/libraries/{id}/keep-reading")
     .forEach { path ->
@@ -423,20 +431,79 @@ private fun Route.opdsV2Routes(
         val library =
           if (call.parameters["id"] == null) null
           else call.visibleLibrary(libraries) ?: return@get
-        val publishers = call.request.queryParameters.getAll("publisher").orEmpty().toSet()
-        call.respondOpds(
-          call.seriesFeed(
-            title = library?.name ?: "All libraries",
-            path = call.request.path(),
-            page =
-              catalog.findSeries(
-                SeriesCatalogQuery(
-                  libraryIds = library?.let { setOf(it.id) }.orEmpty(),
-                  publishers = publishers,
-                ),
-                call.opdsUser().catalogAccess(),
-                call.opdsPageRequest(listOf(CatalogSort("titleSort"))),
+        val publishers = call.request.queryParameters.getAll("publisher").orEmpty()
+        val publisherCondition =
+          publishers
+            .map {
+              CatalogSearchCondition.Predicate(
+                CatalogSearchField.PUBLISHER,
+                CatalogSearchOperator.IS,
+                it,
+              )
+            }.takeIf { it.isNotEmpty() }
+            ?.let(CatalogSearchCondition::AllOf)
+        val page =
+          catalog.findSeries(
+            SeriesCatalogQuery(
+              libraryIds = library?.let { setOf(it.id) }.orEmpty(),
+              condition = publisherCondition,
+            ),
+            call.opdsUser().catalogAccess(),
+            call.opdsPageRequest(listOf(CatalogSort("titleSort"))),
+          )
+        val user = call.opdsUser()
+        val publisherLinks =
+          facets
+            ?.findValues(
+              MetadataFacet.PUBLISHER,
+              MetadataFacetQuery(
+                libraryIds = library?.let { setOf(it.id) }.orEmpty(),
               ),
+              user.catalogAccess(),
+            ).orEmpty()
+            .map { publisher ->
+              WPLinkDto(
+                title = publisher,
+                href =
+                  call.opdsUrl(call.request.path()) +
+                    "?publisher=${publisher.urlQuery()}",
+                type = OPDS_V2_MEDIA_TYPE,
+              )
+            }
+        call.respondOpds(
+          OpdsFeedDto(
+            metadata =
+              page.toOpdsMetadata(
+                title = library?.name ?: "All libraries",
+                modified = library?.updatedAtMillis?.let { Instant.ofEpochMilli(it).toString() }
+                  ?: Instant.now().toString(),
+              ),
+            links = call.standardV2Links(call.request.path(), page),
+            navigation =
+              call.libraryNavigation(
+                catalog,
+                collections,
+                readLists,
+                library,
+                user,
+              ),
+            groups =
+              buildList {
+                add(
+                  OpdsFeedGroupDto(
+                    metadata = OpdsFeedMetadataDto("Series"),
+                    navigation = page.content.map { it.toV2Link(call) },
+                  ),
+                )
+                if (publisherLinks.isNotEmpty()) {
+                  add(
+                    OpdsFeedGroupDto(
+                      metadata = OpdsFeedMetadataDto("Publisher"),
+                      navigation = publisherLinks,
+                    ),
+                  )
+                }
+              },
           ),
         )
       }
@@ -542,33 +609,67 @@ private fun Route.opdsV2Routes(
   get("/opds/v2/search") {
     val query = call.request.queryParameters["query"].orEmpty()
     val user = call.opdsUser()
+    val titleCondition = query.toOpdsTitleCondition()
+    val searchPage =
+      CatalogPageRequest(
+        size = 20,
+        sorts = listOf(CatalogSort("titleSort")),
+      )
     val series =
       catalog.findSeries(
-        SeriesCatalogQuery(fullTextSearch = query),
+        SeriesCatalogQuery(
+          oneshot = false,
+          condition = titleCondition,
+        ),
         user.catalogAccess(),
-        call.opdsPageRequest(listOf(CatalogSort("titleSort"))),
+        searchPage,
       )
     val books =
       catalog.findBooks(
-        BookCatalogQuery(fullTextSearch = query),
+        BookCatalogQuery(condition = titleCondition),
         user.catalogAccess(),
-        call.opdsPageRequest(listOf(CatalogSort("title"))),
+        searchPage.copy(sorts = listOf(CatalogSort("title"))),
       )
+    val normalizedQuery = query.trim()
+    val visibleCollections =
+      collections
+        .findAll()
+        .visibleCollections(catalog, user)
+        .filter { it.name.contains(normalizedQuery, ignoreCase = true) }
+        .take(20)
+    val visibleReadLists =
+      readLists
+        .findAll()
+        .visibleReadLists(catalog, user)
+        .filter { it.name.contains(normalizedQuery, ignoreCase = true) }
+        .take(20)
     call.respondOpds(
       OpdsFeedDto(
-        metadata = OpdsFeedMetadataDto(title = "Search results for: $query"),
-        links = call.standardV2Links(call.request.path()),
+        metadata =
+          OpdsFeedMetadataDto(
+            title = "Search results",
+            modified = Instant.now().toString(),
+          ),
+        links = call.standardV2Links(call.request.path(), includeSelf = false),
         groups =
-          listOf(
+          listOfNotNull(
             OpdsFeedGroupDto(
               metadata = OpdsFeedMetadataDto("Series"),
               navigation = series.content.map { it.toV2Link(call) },
-            ),
+            ).takeUnless { it.navigation.isEmpty() },
             OpdsFeedGroupDto(
               metadata = OpdsFeedMetadataDto("Books"),
               publications = books.content.mapNotNull { it.toOpdsPublication(call) },
-            ),
-          ).filter { it.navigation.isNotEmpty() || it.publications.isNotEmpty() },
+            ).takeUnless { it.publications.isEmpty() },
+            OpdsFeedGroupDto(
+              metadata = OpdsFeedMetadataDto("Collections"),
+              navigation = visibleCollections.map { it.toV2Link(call) },
+            ).takeUnless { it.navigation.isEmpty() },
+            OpdsFeedGroupDto(
+              metadata = OpdsFeedMetadataDto("Read Lists"),
+              navigation = visibleReadLists.map { it.toV2Link(call) },
+            ).takeUnless { it.navigation.isEmpty() },
+          ),
       ),
     )
   }
@@ -577,6 +678,9 @@ private fun Route.opdsV2Routes(
   }
   get("/opds/v2/books/{bookId}/thumbnail") {
     call.respondOpdsThumbnail(catalog, artwork, content, maximumDimension = 1_600)
+  }
+  get("/opds/v2/books/{bookId}/file") {
+    call.streamBook(catalog, content)
   }
 }
 
@@ -677,6 +781,8 @@ private data class AtomEntry(
 private suspend fun ApplicationCall.respondRecommended(
   catalog: CatalogReadRepository,
   libraries: LibraryRepository,
+  collections: SeriesCollectionRepository,
+  readLists: ReadListRepository,
   library: Library?,
 ) {
   val user = opdsUser()
@@ -714,41 +820,52 @@ private suspend fun ApplicationCall.respondRecommended(
       metadata =
         OpdsFeedMetadataDto(
           title = "${library?.name ?: "All libraries"} - Recommended",
-          modified = Instant.now().toString(),
+          modified =
+            library?.updatedAtMillis?.let { Instant.ofEpochMilli(it).toString() }
+              ?: Instant.now().toString(),
         ),
       links = standardV2Links(request.path()),
-      navigation =
-        listOf(
-          WPLinkDto(
-            title = "Recommended",
-            rel = OPDS_SUBSECTION_REL,
-            href = opdsUrl(request.path()),
-            type = OPDS_V2_MEDIA_TYPE,
-          ),
-          WPLinkDto(
-            title = "Browse",
-            rel = OPDS_SUBSECTION_REL,
-            href = opdsUrl("$libraryBase/browse"),
-            type = OPDS_V2_MEDIA_TYPE,
-          ),
-        ),
+      navigation = libraryNavigation(catalog, collections, readLists, library, user),
       groups =
         buildList {
           if (library == null) {
             add(
               OpdsFeedGroupDto(
                 OpdsFeedMetadataDto("Libraries"),
+                links = listOf(selfV2Link("/opds/v2/libraries")),
                 navigation = libraries.visibleTo(user).map { it.toV2Link(this@respondRecommended) },
               ),
             )
           }
-          addBookGroup("Keep Reading", keepReading, this@respondRecommended)
-          addBookGroup("On Deck", onDeck, this@respondRecommended)
-          addBookGroup("Latest Books", latest, this@respondRecommended)
+          addBookGroup(
+            "Keep Reading",
+            "$libraryBase/keep-reading",
+            keepReading,
+            this@respondRecommended,
+          )
+          addBookGroup(
+            "On Deck",
+            "$libraryBase/on-deck",
+            onDeck,
+            this@respondRecommended,
+          )
+          addBookGroup(
+            "Latest Books",
+            "$libraryBase/books/latest",
+            latest,
+            this@respondRecommended,
+          )
           if (latestSeries.content.isNotEmpty()) {
             add(
               OpdsFeedGroupDto(
-                OpdsFeedMetadataDto("Latest Series"),
+                latestSeries.toOpdsMetadata("Latest Series"),
+                links =
+                  listOf(
+                    subsectionSelfV2Link(
+                      "Latest Series",
+                      "$libraryBase/series/latest",
+                    ),
+                  ),
                 navigation = latestSeries.content.map { it.toV2Link(this@respondRecommended) },
               ),
             )
@@ -758,8 +875,79 @@ private suspend fun ApplicationCall.respondRecommended(
   )
 }
 
+private fun ApplicationCall.libraryNavigation(
+  catalog: CatalogReadRepository,
+  collections: SeriesCollectionRepository,
+  readLists: ReadListRepository,
+  library: Library?,
+  user: User,
+): List<WPLinkDto> {
+  val libraryBase =
+    library?.let { "/opds/v2/libraries/${it.id.value}" }
+      ?: "/opds/v2/libraries"
+  val hasCollections =
+    collections
+      .findAll()
+      .visibleCollections(catalog, user)
+      .any { item ->
+        library == null ||
+          item.seriesIds.any { id ->
+            catalog.findSeriesByIdOrNull(id, user.catalogAccess())?.series?.libraryId == library.id
+          }
+      }
+  val hasReadLists =
+    readLists
+      .findAll()
+      .visibleReadLists(catalog, user)
+      .any { item ->
+        library == null ||
+          item.bookIds.any { id ->
+            catalog.findBookByIdOrNull(id, user.catalogAccess())?.book?.libraryId == library.id
+          }
+      }
+  return buildList {
+    add(
+      WPLinkDto(
+        title = "Recommended",
+        rel = OPDS_SUBSECTION_REL,
+        href = opdsUrl(libraryBase),
+        type = OPDS_V2_MEDIA_TYPE,
+      ),
+    )
+    add(
+      WPLinkDto(
+        title = "Browse",
+        rel = OPDS_SUBSECTION_REL,
+        href = opdsUrl("$libraryBase/browse"),
+        type = OPDS_V2_MEDIA_TYPE,
+      ),
+    )
+    if (hasCollections) {
+      add(
+        WPLinkDto(
+          title = "Collections",
+          rel = OPDS_SUBSECTION_REL,
+          href = opdsUrl("$libraryBase/collections"),
+          type = OPDS_V2_MEDIA_TYPE,
+        ),
+      )
+    }
+    if (hasReadLists) {
+      add(
+        WPLinkDto(
+          title = "Read lists",
+          rel = OPDS_SUBSECTION_REL,
+          href = opdsUrl("$libraryBase/readlists"),
+          type = OPDS_V2_MEDIA_TYPE,
+        ),
+      )
+    }
+  }
+}
+
 private fun MutableList<OpdsFeedGroupDto>.addBookGroup(
   title: String,
+  path: String,
   page: CatalogPage<CatalogBook>,
   call: ApplicationCall,
 ) {
@@ -767,7 +955,8 @@ private fun MutableList<OpdsFeedGroupDto>.addBookGroup(
   if (publications.isNotEmpty()) {
     add(
       OpdsFeedGroupDto(
-        metadata = OpdsFeedMetadataDto(title),
+        metadata = page.toOpdsMetadata(title),
+        links = listOf(call.subsectionSelfV2Link(title, path)),
         publications = publications,
       ),
     )
@@ -828,10 +1017,20 @@ private fun ApplicationCall.navigationFeed(
 private fun ApplicationCall.standardV2Links(
   path: String,
   page: CatalogPage<*>? = null,
+  includeSelf: Boolean = true,
 ): List<WPLinkDto> =
   buildList {
-    add(WPLinkDto(rel = "self", href = opdsUrl(path), type = OPDS_V2_MEDIA_TYPE))
-    add(WPLinkDto(rel = "start", href = opdsUrl("/opds/v2/catalog"), type = OPDS_V2_MEDIA_TYPE))
+    if (includeSelf) {
+      add(selfV2Link(path))
+    }
+    add(
+      WPLinkDto(
+        title = "Home",
+        rel = "start",
+        href = opdsUrl("/opds/v2/catalog"),
+        type = OPDS_V2_MEDIA_TYPE,
+      ),
+    )
     add(
       WPLinkDto(
         title = "Search",
@@ -849,6 +1048,51 @@ private fun ApplicationCall.standardV2Links(
     }
   }
 
+private fun ApplicationCall.selfV2Link(path: String): WPLinkDto =
+  WPLinkDto(
+    rel = "self",
+    href = opdsUrl(path),
+  )
+
+private fun ApplicationCall.subsectionSelfV2Link(
+  title: String,
+  path: String,
+): WPLinkDto =
+  WPLinkDto(
+    title = title,
+    rel = "self",
+    href = opdsUrl(path),
+    type = OPDS_V2_MEDIA_TYPE,
+  )
+
+private fun CatalogPage<*>.toOpdsMetadata(
+  title: String,
+  modified: String? = null,
+): OpdsFeedMetadataDto =
+  OpdsFeedMetadataDto(
+    title = title,
+    modified = modified,
+    itemsPerPage = size,
+    currentPage = page + 1,
+    numberOfItems = totalElements,
+  )
+
+private fun String.toOpdsTitleCondition(): CatalogSearchCondition? {
+  val terms =
+    trim()
+      .split(Regex("\\s+"))
+      .filter(String::isNotEmpty)
+  return terms
+    .map { term ->
+      CatalogSearchCondition.Predicate(
+        field = CatalogSearchField.TITLE,
+        operator = CatalogSearchOperator.CONTAINS,
+        value = term,
+      )
+    }.takeIf { it.isNotEmpty() }
+    ?.let(CatalogSearchCondition::AllOf)
+}
+
 private fun CatalogBook.toOpdsPublication(call: ApplicationCall): WPPublicationDto? {
   val apiBase = call.opdsUrl("/opds/v2")
   val manifest = toWebPubManifest(apiBase) ?: return null
@@ -861,15 +1105,32 @@ private fun CatalogBook.toOpdsPublication(call: ApplicationCall): WPPublicationD
         ),
     )
   return manifest.copy(
+    metadata =
+      manifest.metadata.copy(
+        conformsTo = null,
+        language = null,
+        publisher = emptyList(),
+        readingProgression = null,
+        belongsTo =
+          manifest.metadata.belongsTo?.copy(
+            series =
+              manifest.metadata.belongsTo.series.map { series ->
+                series.copy(
+                  links =
+                    listOf(
+                      WPLinkDto(
+                        href = "$apiBase/series/${book.seriesId.value}",
+                        type = OPDS_V2_MEDIA_TYPE,
+                      ),
+                    ),
+                )
+              },
+          ),
+        rendition = emptyMap(),
+      ),
     links =
       manifest.links.map { link ->
         link.copy(
-          href =
-            if (link.rel == "http://opds-spec.org/acquisition") {
-              call.opdsUrl("/api/v1/books/${book.id.value}/file")
-            } else {
-              link.href
-            },
           properties = authentication,
         )
       } +
@@ -882,11 +1143,16 @@ private fun CatalogBook.toOpdsPublication(call: ApplicationCall): WPPublicationD
     images =
       listOf(
         WPLinkDto(
-          rel = "http://opds-spec.org/image",
           href = "$apiBase/books/${book.id.value}/thumbnail",
           type = "image/jpeg",
+          properties = authentication,
         ),
       ),
+    readingOrder = emptyList(),
+    resources = emptyList(),
+    toc = emptyList(),
+    landmarks = emptyList(),
+    pageList = emptyList(),
   )
 }
 
