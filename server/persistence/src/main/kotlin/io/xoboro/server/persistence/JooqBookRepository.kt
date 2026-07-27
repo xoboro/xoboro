@@ -86,9 +86,10 @@ class JooqBookRepository(
       """
       INSERT INTO book (
         id, library_id, series_id, relative_uri, source_item_id, source_identity,
-        name, media_kind, file_size, file_modified_ms, file_hash, file_hash_koreader,
+        name, media_kind, media_item_type, file_size, file_modified_ms,
+        file_hash, file_hash_koreader,
         number, deleted_at_ms, oneshot, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """.trimIndent(),
       *book.bindValues(),
     )
@@ -100,7 +101,16 @@ class JooqBookRepository(
       UPDATE book SET
         library_id = ?, series_id = ?, relative_uri = ?, source_item_id = ?,
         source_identity = ?, name = ?, media_kind = ?, file_size = ?,
-        file_modified_ms = ?, file_hash = ?, file_hash_koreader = ?, number = ?,
+        media_item_type = CASE
+          WHEN media_item_type = CASE media_kind
+            WHEN 'COMIC_ARCHIVE' THEN 'COMIC'
+            WHEN 'EPUB' THEN 'NOVEL'
+            ELSE 'BOOK'
+          END
+          THEN ? ELSE media_item_type
+        END,
+        file_modified_ms = ?, file_hash = ?,
+        file_hash_koreader = ?, number = ?,
         deleted_at_ms = ?, oneshot = ?, updated_at_ms = ?
       WHERE id = ?
       """.trimIndent(),
@@ -117,6 +127,7 @@ class JooqBookRepository(
       sourceIdentity,
       name,
       mediaKind.name,
+      mediaKind.defaultMediaItemType(),
       fileSize,
       fileModifiedAtMillis,
       fileHash,
@@ -138,6 +149,7 @@ class JooqBookRepository(
       name,
       mediaKind.name,
       fileSize,
+      mediaKind.defaultMediaItemType(),
       fileModifiedAtMillis,
       fileHash,
       fileHashKoreader,
@@ -190,6 +202,13 @@ class JooqBookRepository(
     }
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private fun MediaKind.defaultMediaItemType(): String =
+    when (this) {
+      MediaKind.COMIC_ARCHIVE -> "COMIC"
+      MediaKind.EPUB -> "NOVEL"
+      MediaKind.PDF -> "BOOK"
+    }
 
   companion object {
     private const val SELECT_BOOK =

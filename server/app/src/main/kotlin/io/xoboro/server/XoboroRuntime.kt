@@ -10,6 +10,7 @@ import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.MediaItemRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
@@ -22,6 +23,7 @@ import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqMediaItemRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
@@ -58,6 +60,7 @@ class XoboroRuntime private constructor(
   val rememberMeTokenService: RememberMeTokenService,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
+  val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -108,6 +111,7 @@ class XoboroRuntime private constructor(
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
+        val mediaItems = JooqMediaItemRepository(database, books)
         val media = JooqBookMediaRepository(database)
         val queue = JooqDurableTaskQueue(database)
         val userRepository = JooqUserRepository(database)
@@ -244,6 +248,7 @@ class XoboroRuntime private constructor(
           rememberMeTokenService = rememberMeTokenService,
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
+          mediaItemRepository = mediaItems,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()

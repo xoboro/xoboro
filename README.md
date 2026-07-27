@@ -1,7 +1,7 @@
 # Xoboro
 
-Xoboro is a fast, self-hosted media server for comics, manga, webtoons, and
-ebooks.
+Xoboro is a fast, self-hosted media server built around an extensible library
+model for comics, novels, books, video, and audio.
 
 > [!IMPORTANT]
 > Xoboro is under active development and is not ready to replace a production
