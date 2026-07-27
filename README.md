@@ -108,6 +108,27 @@ At startup, Xoboro enqueues scans for libraries with `scanOnStartup` enabled
 and registers each non-disabled `scanInterval`. Filesystem work runs through
 the durable leased worker queue rather than on the scheduler thread.
 
+### Database backup and restore
+
+Create and verify a transactionally consistent backup while the server is
+running:
+
+```shell
+mise exec -- ./gradlew :server:app:run --args="backup /srv/backup/xoboro.sqlite"
+mise exec -- ./gradlew :server:app:run --args="verify-backup /srv/backup/xoboro.sqlite"
+```
+
+Restore only while the server is stopped. Replacing an existing database
+requires explicit consent:
+
+```shell
+mise exec -- ./gradlew :server:app:run \
+  --args="restore /srv/backup/xoboro.sqlite --replace"
+```
+
+The restore command rejects a running Xoboro process, validates the source and
+staged copy, and removes stale SQLite WAL/SHM sidecars before startup.
+
 ## Compatibility status
 
 The auditable compatibility ledger is maintained in

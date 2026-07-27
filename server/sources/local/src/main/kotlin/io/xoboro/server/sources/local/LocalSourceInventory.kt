@@ -4,6 +4,7 @@ import io.xoboro.core.application.SourceFile
 import io.xoboro.core.application.SourceInventory
 import io.xoboro.core.application.SourceInventoryFailure
 import io.xoboro.core.application.SourceInventorySummary
+import io.xoboro.core.application.SourceInventoryUnavailableException
 import java.io.IOException
 import java.net.URI
 import java.nio.file.FileVisitOption
@@ -16,7 +17,9 @@ import java.nio.file.attribute.BasicFileAttributes
 
 class LocalInventoryUnavailableException(
   rootItemId: String,
-) : IllegalArgumentException("Local inventory root is not a readable directory: $rootItemId")
+) : SourceInventoryUnavailableException(
+    "Local inventory root is not a readable directory: $rootItemId",
+  )
 
 class LocalSourceInventory(
   override val sourceId: String = LocalLibraryRootInspector.SOURCE_ID,
