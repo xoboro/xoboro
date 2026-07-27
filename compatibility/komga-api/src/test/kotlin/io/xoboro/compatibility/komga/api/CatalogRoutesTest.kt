@@ -1,6 +1,7 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.client.call.body
+import io.ktor.client.HttpClient
 import io.ktor.client.statement.bodyAsText
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.basicAuth
@@ -340,6 +341,7 @@ class CatalogRoutesTest {
           }.status,
         )
         assertEquals(7, content.closedStreams)
+        verifyPdfPageNegotiation(client, database, content)
 
         val manifestResponse =
           client.get("/api/v1/books/book-1/manifest") {
@@ -922,6 +924,63 @@ class CatalogRoutesTest {
     assertTrue(JooqCatalogReadRepository(database).findBookByIdOrNull(BookId("book-1"), io.xoboro.core.application.CatalogAccess()) != null)
   }
 
+  private suspend fun verifyPdfPageNegotiation(
+    client: HttpClient,
+    database: XoboroDatabase,
+    content: SyntheticBookContentAccess,
+  ) {
+    val mediaRepository = JooqBookMediaRepository(database)
+    val originalSecondMedia =
+      requireNotNull(mediaRepository.findByBookIdOrNull(BookId("book-2")))
+    mediaRepository.upsert(
+      originalSecondMedia.copy(
+        mediaType = "application/pdf",
+        profile = MediaProfile.PDF,
+      ),
+    )
+    try {
+      val negotiatedPdf =
+        client.get("/api/v1/books/book-2/pages/1") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          header(HttpHeaders.Accept, "application/pdf")
+        }
+      assertEquals(HttpStatusCode.OK, negotiatedPdf.status)
+      assertEquals("application/pdf", negotiatedPdf.headers[HttpHeaders.ContentType])
+      assertTrue(content.lastPageRequest?.raw == true)
+
+      val preferredImage =
+        client.get("/api/v1/books/book-2/pages/1") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          header(HttpHeaders.Accept, "image/jpeg, application/pdf")
+        }
+      assertEquals("image/png", preferredImage.headers[HttpHeaders.ContentType])
+      assertFalse(content.lastPageRequest?.raw == true)
+
+      val disabledNegotiation =
+        client.get("/api/v1/books/book-2/pages/1?contentNegotiation=false") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          header(HttpHeaders.Accept, "application/pdf")
+        }
+      assertEquals("image/png", disabledNegotiation.headers[HttpHeaders.ContentType])
+      assertFalse(content.lastPageRequest?.raw == true)
+
+      assertEquals(
+        HttpStatusCode.BadRequest,
+        client.get("/api/v1/books/book-2/pages/1?contentNegotiation=invalid") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.status,
+      )
+      assertEquals(
+        HttpStatusCode.OK,
+        client.get("/api/v1/books/book-2/pages/1/raw?contentNegotiation=invalid") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.status,
+      )
+    } finally {
+      mediaRepository.upsert(originalSecondMedia)
+    }
+  }
+
   private fun seedRestrictedSeries(database: XoboroDatabase) {
     val libraryId = LibraryId("library-2")
     val seriesId = SeriesId("series-2")
@@ -968,6 +1027,7 @@ class CatalogRoutesTest {
 
   private class SyntheticBookContentAccess : BookContentAccess {
     var closedStreams: Int = 0
+    var lastPageRequest: PageImageRequest? = null
 
     override fun pages(bookId: BookId): List<BookPage>? =
       if (bookId == BookId("book-1")) {
@@ -989,11 +1049,12 @@ class CatalogRoutesTest {
       pageNumber: Int,
       request: PageImageRequest,
     ): MediaContentStream? {
-      if (bookId != BookId("book-1") || pageNumber != 1) return null
+      if (bookId !in setOf(BookId("book-1"), BookId("book-2")) || pageNumber != 1) return null
+      lastPageRequest = request
       return object : MediaContentStream {
         private val bytes = byteArrayOf(1, 2, 3, 4)
         private var cursor = 0
-        override val mediaType: String = "image/png"
+        override val mediaType: String = if (request.raw) "application/pdf" else "image/png"
         override val contentLength: Long = bytes.size.toLong()
 
         override fun read(
