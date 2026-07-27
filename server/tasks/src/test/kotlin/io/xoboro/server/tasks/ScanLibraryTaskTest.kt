@@ -99,10 +99,20 @@ class ScanLibraryTaskTest {
         )
       val emitter = ScanLibraryTaskEmitter(queue, currentTimeMillis = { 100 })
       emitter.scanLibrary(LIBRARY_ID)
+      val completedScans = mutableListOf<Pair<LibraryId, Boolean>>()
       val worker =
         DurableTaskWorker(
           queue = queue,
-          handlers = listOf(ScanLibraryTaskHandler(libraries, scanner)),
+          handlers =
+            listOf(
+              ScanLibraryTaskHandler(
+                libraries = libraries,
+                scanner = scanner,
+                afterScan = { library, deep ->
+                  completedScans += library.id to deep
+                },
+              ),
+            ),
           heartbeat = LeaseHeartbeat { _, _ -> AutoCloseable {} },
           currentTimeMillis = { 200 },
           leaseTokenFactory = { "lease-1" },
@@ -115,6 +125,7 @@ class ScanLibraryTaskTest {
 
       assertEquals(1, series.count())
       assertEquals(1, books.count())
+      assertEquals(listOf(LIBRARY_ID to false), completedScans)
       assertEquals("Synthetic series/Book 001.cbz", books.findAllByLibraryId(LIBRARY_ID).single().relativePath)
       assertEquals(TaskCounts(pending = 1, running = 0, dead = 0), queue.counts())
     }

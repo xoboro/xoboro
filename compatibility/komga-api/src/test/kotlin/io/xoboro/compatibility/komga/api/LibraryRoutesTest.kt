@@ -24,6 +24,7 @@ import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
 import io.xoboro.core.application.LibraryLifecycle
+import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryRootAccess
 import io.xoboro.core.application.LibraryScanRequester
@@ -59,7 +60,15 @@ class LibraryRoutesTest {
 
   @Test
   fun `matches Komga library CRUD visibility and patch semantics`() {
-    withLibraryApi("library-crud.sqlite") { client, users, libraries, maintenance, _ ->
+    withLibraryApi("library-crud.sqlite") {
+        client,
+        users,
+        libraries,
+        maintenance,
+        _,
+        _,
+        _,
+      ->
       client.claimAdministrator()
       assertEquals(
         HttpStatusCode.Unauthorized,
@@ -186,7 +195,15 @@ class LibraryRoutesTest {
 
   @Test
   fun `validates local roots and queues highest-level manual scan requests`() {
-    withLibraryApi("library-validation.sqlite") { client, _, _, _, scans ->
+    withLibraryApi("library-validation.sqlite") {
+        client,
+        _,
+        _,
+        _,
+        scans,
+        analyses,
+        trash,
+      ->
       client.claimAdministrator()
       val root = tempDirectory.resolve("validated-root").createDirectories()
       val otherRoot = tempDirectory.resolve("other").createDirectories()
@@ -247,6 +264,35 @@ class LibraryRoutesTest {
           adminCredentials()
         }.status,
       )
+      assertEquals(
+        HttpStatusCode.Accepted,
+        client.post("/api/v1/libraries/${created.id}/analyze") {
+          adminCredentials()
+        }.status,
+      )
+      assertEquals(
+        HttpStatusCode.Accepted,
+        client.post("/api/v1/libraries/missing-library/analyze") {
+          adminCredentials()
+        }.status,
+      )
+      assertEquals(
+        listOf(LibraryId(created.id), LibraryId("missing-library")),
+        analyses,
+      )
+      assertEquals(
+        HttpStatusCode.Accepted,
+        client.post("/api/v1/libraries/${created.id}/empty-trash") {
+          adminCredentials()
+        }.status,
+      )
+      assertEquals(listOf(LibraryId(created.id)), trash)
+      assertEquals(
+        HttpStatusCode.NotFound,
+        client.post("/api/v1/libraries/missing-library/empty-trash") {
+          adminCredentials()
+        }.status,
+      )
     }
   }
 
@@ -259,6 +305,8 @@ class LibraryRoutesTest {
         libraries: LibraryAdministrationLifecycle,
         maintenance: RecordingMaintenanceQueue,
         scans: MutableList<Pair<LibraryId, Boolean>>,
+        analyses: MutableList<LibraryId>,
+        trash: MutableList<LibraryId>,
       ) -> Unit,
   ) {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve(databaseName))).use { database ->
@@ -291,6 +339,8 @@ class LibraryRoutesTest {
           currentTimeMillis = { 2_000L + nextLibraryId },
         )
       val scans = mutableListOf<Pair<LibraryId, Boolean>>()
+      val analyses = mutableListOf<LibraryId>()
+      val trash = mutableListOf<LibraryId>()
       testApplication {
         application {
           install(ServerContentNegotiation) {
@@ -306,6 +356,18 @@ class LibraryRoutesTest {
                   scans += id to deep
                   true
                 },
+              maintenanceRequester =
+                object : LibraryMaintenanceRequester {
+                  override fun analyze(libraryId: LibraryId): Int {
+                    analyses += libraryId
+                    return 1
+                  }
+
+                  override fun emptyTrash(libraryId: LibraryId): Boolean {
+                    trash += libraryId
+                    return true
+                  }
+                },
             )
           }
         }
@@ -315,7 +377,7 @@ class LibraryRoutesTest {
               json(KOMGA_JSON)
             }
           }
-        assertions(client, users, libraries, maintenance, scans)
+        assertions(client, users, libraries, maintenance, scans, analyses, trash)
       }
     }
   }

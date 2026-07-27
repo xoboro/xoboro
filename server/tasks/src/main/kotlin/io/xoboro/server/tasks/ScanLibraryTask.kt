@@ -4,6 +4,7 @@ import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
 import kotlinx.serialization.json.Json
@@ -56,6 +57,7 @@ class ScanLibraryTaskEmitter(
 class ScanLibraryTaskHandler(
   private val libraries: LibraryRepository,
   private val scanner: CatalogScanner,
+  private val afterScan: (Library, Boolean) -> Unit = { _, _ -> },
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -84,6 +86,7 @@ class ScanLibraryTaskHandler(
 
     libraries.findByIdOrNull(libraryId)?.let { library ->
       scanner.scan(library, deep)
+      afterScan(library, deep)
     }
   }
 
