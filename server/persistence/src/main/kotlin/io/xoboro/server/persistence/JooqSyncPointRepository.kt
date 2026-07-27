@@ -29,6 +29,22 @@ class JooqSyncPointRepository(
     )
   }
 
+  override fun updateCursor(
+    id: SyncPointId,
+    cursor: Int,
+  ) {
+    require(cursor >= 0) { "Sync-point cursor must not be negative" }
+    database.dsl.execute(
+      "UPDATE sync_point SET cursor = ? WHERE id = ?",
+      cursor,
+      id.value,
+    )
+  }
+
+  override fun delete(id: SyncPointId) {
+    database.dsl.execute("DELETE FROM sync_point WHERE id = ?", id.value)
+  }
+
   override fun deleteByUserId(userId: UserId): Int =
     database.dsl.execute(
       "DELETE FROM sync_point WHERE user_id = ?",
@@ -56,6 +72,7 @@ class JooqSyncPointRepository(
       userId = UserId(requiredString("user_id")),
       apiKeyId = get("api_key_id", String::class.java)?.let(::ApiKeyId),
       createdAtMillis = requiredString("created_at_ms_64").toLong(),
+      cursor = requireNotNull(get("cursor", Int::class.java)),
     )
 
   private fun Record.requiredString(field: String): String =

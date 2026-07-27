@@ -33,5 +33,5 @@ No percentage may be reported as achieved from source line count or endpoint
 presence alone. A capability becomes compatible only after its observable
 behavior is covered by automated contract tests.
 
-The inventory test currently marks 55 of the 70 operations as implemented in
-progress: OPDS v1/v2, KOReader, SSE, and OAuth2 browser flow.
+The inventory test currently marks all 70 operations as implemented in
+progress: OPDS v1/v2, Kobo, KOReader, SSE, and OAuth2 browser flow.
