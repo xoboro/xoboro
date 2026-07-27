@@ -18,6 +18,7 @@ dependencies {
   implementation(project(":core:domain"))
   implementation(libs.ktor.server.auth)
   implementation(libs.ktor.server.core)
+  implementation(libs.ktor.server.sse)
   implementation(libs.ktor.serialization.kotlinx.json)
 
   testImplementation(kotlin("test-junit5"))

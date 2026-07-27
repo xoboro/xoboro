@@ -33,6 +33,7 @@ import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
+import io.xoboro.core.application.ReadProgressEvent
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.ServerReleaseCatalog
@@ -50,6 +51,13 @@ import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.SyncPointRepository
+import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
+import io.xoboro.compatibility.komga.api.KomgaLibrarySseDto
+import io.xoboro.compatibility.komga.api.KomgaReadProgressSeriesSseDto
+import io.xoboro.compatibility.komga.api.KomgaReadProgressSseDto
+import io.xoboro.compatibility.komga.api.KomgaSseEventHub
+import io.xoboro.compatibility.komga.api.KomgaTaskQueueSseDto
+import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
@@ -71,6 +79,7 @@ import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
+import io.xoboro.server.persistence.JooqMediaItemFingerprintIndex
 import io.xoboro.server.persistence.JooqMetadataFacetRepository
 import io.xoboro.server.persistence.JooqPageHashRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
@@ -171,6 +180,9 @@ class XoboroRuntime private constructor(
   val seriesCollectionRepository: SeriesCollectionRepository,
   val readListRepository: ReadListRepository,
   val readProgressLifecycle: ReadProgressLifecycle,
+  val koreaderSyncLifecycle: KoreaderSyncLifecycle,
+  val sseEventHub: KomgaSseEventHub,
+  val sseTaskStatusProvider: KomgaTaskStatusProvider,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
@@ -191,6 +203,7 @@ class XoboroRuntime private constructor(
       workerPool,
       heartbeat,
       oauthHttpClient,
+      sseEventHub,
       database,
     ).forEach { resource ->
       try {
@@ -222,6 +235,7 @@ class XoboroRuntime private constructor(
       var workerPool: TaskWorkerPool? = null
       var libraryScanScheduler: LibraryScanScheduler? = null
       var oauthHttpClient: HttpClient? = null
+      var sseEventHub: KomgaSseEventHub? = null
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
@@ -275,12 +289,65 @@ class XoboroRuntime private constructor(
             hashes = pageHashes,
             currentTimeMillis = System::currentTimeMillis,
           )
+        val sseEvents = KomgaSseEventHub().also { sseEventHub = it }
         val readProgressLifecycle =
           ReadProgressLifecycle(
             books = books,
             series = series,
             media = media,
             progresses = readProgresses,
+            currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = { event ->
+              when (event) {
+                is ReadProgressEvent.Changed ->
+                  sseEvents.publishJson(
+                    name = "ReadProgressChanged",
+                    data =
+                      KomgaReadProgressSseDto(
+                        bookId = event.progress.bookId.value,
+                        userId = event.userId.value,
+                      ),
+                    userIdOnly = event.userId.value,
+                  )
+                is ReadProgressEvent.Deleted ->
+                  sseEvents.publishJson(
+                    name = "ReadProgressDeleted",
+                    data =
+                      KomgaReadProgressSseDto(
+                        bookId = event.bookId.value,
+                        userId = event.userId.value,
+                      ),
+                    userIdOnly = event.userId.value,
+                  )
+                is ReadProgressEvent.SeriesChanged ->
+                  sseEvents.publishJson(
+                    name = "ReadProgressSeriesChanged",
+                    data =
+                      KomgaReadProgressSeriesSseDto(
+                        seriesId = event.seriesId.value,
+                        userId = event.userId.value,
+                      ),
+                    userIdOnly = event.userId.value,
+                  )
+                is ReadProgressEvent.SeriesDeleted ->
+                  sseEvents.publishJson(
+                    name = "ReadProgressSeriesDeleted",
+                    data =
+                      KomgaReadProgressSeriesSseDto(
+                        seriesId = event.seriesId.value,
+                        userId = event.userId.value,
+                      ),
+                    userIdOnly = event.userId.value,
+                  )
+              }
+            },
+          )
+        val koreaderSyncLifecycle =
+          KoreaderSyncLifecycle(
+            fingerprints = JooqMediaItemFingerprintIndex(database),
+            books = books,
+            media = media,
+            progress = readProgressLifecycle,
             currentTimeMillis = System::currentTimeMillis,
           )
         val sequentialReadProgressLifecycle =
@@ -458,6 +525,15 @@ class XoboroRuntime private constructor(
                   ),
                 maintenanceQueue = libraryMaintenanceQueue,
                 eventPublisher = { event ->
+                  sseEvents.publishJson(
+                    name =
+                      when (event) {
+                        is LibraryEvent.Added -> "LibraryAdded"
+                        is LibraryEvent.Deleted -> "LibraryDeleted"
+                        is LibraryEvent.Updated -> "LibraryChanged"
+                      },
+                    data = KomgaLibrarySseDto(event.library.id.value),
+                  )
                   when (event) {
                     is LibraryEvent.Added ->
                       createdLibraryScanScheduler.schedule(event.library)
@@ -638,6 +714,14 @@ class XoboroRuntime private constructor(
             },
           )
         workerPool = createdWorkerPool
+        val sseTaskStatusProvider =
+          KomgaTaskStatusProvider {
+            val counts = queue.countsByType()
+            KomgaTaskQueueSseDto(
+              count = counts.values.sum(),
+              countByType = counts,
+            )
+          }
         return XoboroRuntime(
           database = database,
           libraryScanScheduler = createdLibraryScanScheduler,
@@ -677,6 +761,9 @@ class XoboroRuntime private constructor(
           seriesCollectionRepository = collections,
           readListRepository = readLists,
           readProgressLifecycle = readProgressLifecycle,
+          koreaderSyncLifecycle = koreaderSyncLifecycle,
+          sseEventHub = sseEvents,
+          sseTaskStatusProvider = sseTaskStatusProvider,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,
@@ -690,6 +777,7 @@ class XoboroRuntime private constructor(
         runCatching { workerPool?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { heartbeat?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { oauthHttpClient?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+        runCatching { sseEventHub?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { database.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         throw failure
       }

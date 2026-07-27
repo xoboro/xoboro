@@ -67,7 +67,9 @@ class AnalyzeBookTest {
     assertEquals(MediaStatus.READY, result.status)
     assertEquals(10, result.pages.single().dimension?.width)
     assertEquals(result, mediaRepository.media)
-    assertTrue(requireNotNull(bookRepository.findByIdOrNull(book.id)).fileHash.isNotBlank())
+    val updatedBook = requireNotNull(bookRepository.findByIdOrNull(book.id))
+    assertTrue(updatedBook.fileHash.isNotBlank())
+    assertTrue(updatedBook.fileHashKoreader.isNotBlank())
   }
 
   @Test
@@ -186,7 +188,11 @@ class AnalyzeBookTest {
       id = LibraryId("library-1"),
       name = "Synthetic library",
       root = SourceLocation("synthetic", "opaque-root"),
-      settings = LibrarySettings(analyzeDimensions = analyzeDimensions),
+      settings =
+        LibrarySettings(
+          analyzeDimensions = analyzeDimensions,
+          hashKoreader = true,
+        ),
       createdAtMillis = 1,
     )
 

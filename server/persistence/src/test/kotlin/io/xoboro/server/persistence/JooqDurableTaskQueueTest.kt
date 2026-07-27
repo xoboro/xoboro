@@ -39,6 +39,27 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `counts queued and running tasks by compatibility type`() {
+    withQueue("counts-by-type") { queue, _ ->
+      queue.enqueue(taskFixture(id = "scan-1"), nowMillis = 1L)
+      queue.enqueue(
+        taskFixture(id = "scan-2", payload = """{"kind":"second"}"""),
+        nowMillis = 2L,
+      )
+      queue.enqueue(
+        taskFixture(id = "analyze-1").copy(type = "ANALYZE_BOOK"),
+        nowMillis = 3L,
+      )
+      queue.claim("worker", "lease", nowMillis = 10L)
+
+      assertEquals(
+        mapOf("ANALYZE_BOOK" to 1, "SYNTHETIC" to 2),
+        queue.countsByType(),
+      )
+    }
+  }
+
+  @Test
   fun `allows only one running task per non-null group`() {
     withQueue("groups") { queue, _ ->
       queue.enqueue(taskFixture(id = "group-first", groupId = "series-1"), nowMillis = 1L)
