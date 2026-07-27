@@ -13,6 +13,7 @@ import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.CatalogMaintenanceRequester
+import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
@@ -33,6 +34,7 @@ import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.TransientBookLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.Library
@@ -44,6 +46,7 @@ import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
+import io.xoboro.server.media.LocalTransientBookLifecycle
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
@@ -80,11 +83,17 @@ import io.xoboro.server.metadata.MylarSeriesMetadataProvider
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
+import io.xoboro.server.sources.local.LocalSourceMutationAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
 import io.xoboro.server.tasks.DurableCatalogMaintenanceRequester
+import io.xoboro.server.tasks.DurableCatalogFileLifecycleRequester
+import io.xoboro.server.tasks.CatalogSourceFileLifecycle
+import io.xoboro.server.tasks.DeleteBookFileTaskHandler
+import io.xoboro.server.tasks.DeleteSeriesFileTaskHandler
+import io.xoboro.server.tasks.ImportBookTaskHandler
 import io.xoboro.server.tasks.DurableTaskWorker
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
@@ -128,6 +137,8 @@ class XoboroRuntime private constructor(
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
   val catalogMaintenanceRequester: CatalogMaintenanceRequester,
+  val catalogFileLifecycleRequester: CatalogFileLifecycleRequester,
+  val transientBookLifecycle: TransientBookLifecycle,
   val metadataEditingLifecycle: MetadataEditingLifecycle,
   val metadataFacetRepository: MetadataFacetRepository,
   val pageHashRepository: PageHashRepository,
@@ -485,6 +496,20 @@ class XoboroRuntime private constructor(
             metadata = refreshMetadataTaskEmitter,
             queue = queue,
           )
+        val catalogFileLifecycleRequester =
+          DurableCatalogFileLifecycleRequester(
+            books = books,
+            series = series,
+            queue = queue,
+            taskIdFactory = { UUID.randomUUID().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val transientBookLifecycle =
+          LocalTransientBookLifecycle(
+            libraries = libraries,
+            idFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val libraryTrashStore = JooqLibraryTrashStore(database)
         val analyzeBook =
           AnalyzeBook(
@@ -494,6 +519,14 @@ class XoboroRuntime private constructor(
             media = media,
             zipAnalyzer = ZipMediaAnalyzer(),
             currentTimeMillis = System::currentTimeMillis,
+          )
+        val catalogSourceFileLifecycle =
+          CatalogSourceFileLifecycle(
+            books = books,
+            series = series,
+            libraries = libraries,
+            mutations = listOf(LocalSourceMutationAccess()),
+            scanEmitter = scanEmitter,
           )
         val createdHeartbeat = ScheduledLeaseHeartbeat()
         heartbeat = createdHeartbeat
@@ -519,6 +552,9 @@ class XoboroRuntime private constructor(
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
                 RefreshBookMetadataTaskHandler(metadataRefreshLifecycle),
                 RefreshSeriesMetadataTaskHandler(metadataRefreshLifecycle),
+                DeleteBookFileTaskHandler(catalogSourceFileLifecycle),
+                DeleteSeriesFileTaskHandler(catalogSourceFileLifecycle),
+                ImportBookTaskHandler(catalogSourceFileLifecycle),
               ),
             heartbeat = createdHeartbeat,
             currentTimeMillis = System::currentTimeMillis,
@@ -561,6 +597,8 @@ class XoboroRuntime private constructor(
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
           catalogMaintenanceRequester = catalogMaintenanceRequester,
+          catalogFileLifecycleRequester = catalogFileLifecycleRequester,
+          transientBookLifecycle = transientBookLifecycle,
           metadataEditingLifecycle = metadataEditing,
           metadataFacetRepository = metadataFacets,
           pageHashRepository = pageHashes,
