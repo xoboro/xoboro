@@ -38,6 +38,45 @@
       }
     },
     {
+      "name": "synthetic OPDS v1 zero-based page",
+      "path": "/opds/v1.2/books/{BOOK_ID}/pages/0",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length",
+          "ETag"
+        ]
+      }
+    },
+    {
+      "name": "synthetic OPDS v2 one-based page",
+      "path": "/opds/v2/books/{BOOK_ID}/pages/1",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length",
+          "ETag"
+        ]
+      }
+    },
+    {
+      "name": "synthetic OPDS common thumbnail",
+      "path": "/opds/v2/books/{BOOK_ID}/thumbnail",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Cache-Control",
+          "Content-Length",
+          "ETag"
+        ]
+      }
+    },
+    {
       "name": "synthetic archive download",
       "path": "/api/v1/books/{BOOK_ID}/file",
       "pathVariables": ["BOOK_ID"],
