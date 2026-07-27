@@ -13,6 +13,7 @@ kotlin {
 }
 
 dependencies {
+  implementation(project(":core:application"))
   implementation(project(":core:domain"))
   implementation(libs.flyway.core)
   implementation(libs.hikari)

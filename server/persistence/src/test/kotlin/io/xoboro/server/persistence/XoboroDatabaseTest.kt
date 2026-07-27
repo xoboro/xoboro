@@ -26,13 +26,20 @@ class XoboroDatabaseTest {
 
       assertTrue(
         tables.containsAll(
-          listOf("flyway_schema_history", "library", "library_scan_exclusion", "series", "book"),
+          listOf(
+            "flyway_schema_history",
+            "library",
+            "library_scan_exclusion",
+            "series",
+            "book",
+            "task",
+          ),
         ),
       )
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(2, database.migrationResult.migrationsExecuted)
+      assertEquals(3, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -85,7 +92,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(1, database.migrationResult.migrationsExecuted)
+      assertEquals(2, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
