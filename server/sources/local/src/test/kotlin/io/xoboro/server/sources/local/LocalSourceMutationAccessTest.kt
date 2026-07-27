@@ -5,6 +5,9 @@ import io.xoboro.core.application.SourceImportRequest
 import java.nio.file.Files
 import java.nio.file.Path
 import java.net.URI
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -90,5 +93,40 @@ class LocalSourceMutationAccessTest {
       access.delete(root.toUri().toString(), source.toUri().toString())
     }
     assertTrue(Files.exists(source))
+  }
+
+  @Test
+  fun `atomically removes selected archive entries`() {
+    val root = Files.createDirectories(tempDirectory.resolve("library-archive"))
+    val series = Files.createDirectories(root.resolve("Synthetic series"))
+    val archive = series.resolve("chapter.cbz")
+    ZipOutputStream(Files.newOutputStream(archive)).use { output ->
+      mapOf(
+        "001.jpg" to "first",
+        "002.jpg" to "second",
+        "ComicInfo.xml" to "<ComicInfo/>",
+      ).forEach { (name, value) ->
+        output.putNextEntry(ZipEntry(name))
+        output.write(value.encodeToByteArray())
+        output.closeEntry()
+      }
+    }
+
+    val removed =
+      LocalSourceMutationAccess().removeArchiveEntries(
+        root.toUri().toString(),
+        archive.toUri().toString(),
+        setOf("002.jpg"),
+      )
+
+    assertEquals(1, removed)
+    assertEquals(
+      listOf("001.jpg", "ComicInfo.xml"),
+      ZipInputStream(Files.newInputStream(archive)).use { input ->
+        buildList {
+          while (true) add(input.nextEntry?.name ?: break)
+        }
+      },
+    )
   }
 }

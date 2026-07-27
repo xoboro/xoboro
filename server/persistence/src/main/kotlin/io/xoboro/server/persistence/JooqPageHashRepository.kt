@@ -180,6 +180,23 @@ class JooqPageHashRepository(
     )
   }
 
+  override fun incrementDeleteCount(
+    hash: String,
+    count: Int,
+  ) {
+    require(hash.isNotBlank()) { "Page hash must not be blank" }
+    require(count > 0) { "Page hash delete increment must be positive" }
+    database.dsl.execute(
+      """
+      UPDATE page_hash_known
+      SET delete_count = delete_count + ?
+      WHERE hash = ?
+      """.trimIndent(),
+      count,
+      hash,
+    )
+  }
+
   private fun knownOrder(sorts: List<CatalogSort>): String =
     order(
       sorts,

@@ -16,6 +16,7 @@ data class ServerConfig(
   val oauth2Registrations: List<OAuth2ClientRegistration> = emptyList(),
   val oauth2AccountCreation: Boolean = false,
   val oidcEmailVerification: Boolean = true,
+  val fontsDirectory: Path = Path.of("config/fonts"),
 ) {
   init {
     require(port in 1..65_535) { "Server port must be between 1 and 65535" }
@@ -86,6 +87,16 @@ data class ServerConfig(
           environment.booleanValue("KOMGA_OAUTH2_ACCOUNT_CREATION", false),
         oidcEmailVerification =
           environment.booleanValue("KOMGA_OIDC_EMAIL_VERIFICATION", true),
+        fontsDirectory =
+          environment["XOBORO_FONTS_PATH"]
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
+            ?: environment["KOMGA_FONTS_DATA_DIRECTORY"]
+              ?.takeIf(String::isNotBlank)
+              ?.let(Path::of)
+              ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
+            ?: normalizedWorkingDirectory.resolve("config/fonts"),
       )
     }
 

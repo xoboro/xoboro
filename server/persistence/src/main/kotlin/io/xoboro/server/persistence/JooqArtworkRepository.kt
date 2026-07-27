@@ -103,6 +103,55 @@ class JooqArtworkRepository(
     }
   }
 
+  override fun replaceGenerated(content: ArtworkContent) {
+    require(content.artwork.type == ArtworkType.GENERATED) {
+      "Replacement artwork must be generated"
+    }
+    database.transaction { transaction ->
+      val item = content.artwork
+      transaction.execute(
+        """
+        DELETE FROM artwork_thumbnail
+        WHERE owner_kind = ? AND owner_id = ? AND artwork_type = ?
+        """.trimIndent(),
+        item.owner.kind.name,
+        item.owner.id,
+        ArtworkType.GENERATED.name,
+      )
+      if (item.selected) {
+        transaction.execute(
+          """
+          UPDATE artwork_thumbnail SET selected = 0, updated_at_ms = ?
+          WHERE owner_kind = ? AND owner_id = ? AND selected = 1
+          """.trimIndent(),
+          item.updatedAtMillis,
+          item.owner.kind.name,
+          item.owner.id,
+        )
+      }
+      transaction.execute(
+        """
+        INSERT INTO artwork_thumbnail (
+          id, owner_kind, owner_id, artwork_type, selected, media_type,
+          file_size, width, height, content, created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+        item.id.value,
+        item.owner.kind.name,
+        item.owner.id,
+        item.type.name,
+        item.selected.toSqliteInt(),
+        item.mediaType,
+        item.fileSize,
+        item.width,
+        item.height,
+        content.bytes,
+        item.createdAtMillis,
+        item.updatedAtMillis,
+      )
+    }
+  }
+
   override fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,
