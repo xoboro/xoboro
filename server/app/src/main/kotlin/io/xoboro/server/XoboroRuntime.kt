@@ -66,6 +66,7 @@ import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.LocalTransientBookLifecycle
 import io.xoboro.server.media.LocalFontResourceCatalog
 import io.xoboro.server.media.ZipMediaAnalyzer
+import io.xoboro.server.media.RarToCbzConverter
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqApiKeyRepository
@@ -111,6 +112,8 @@ import io.xoboro.server.sources.local.LocalSourceMutationAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
+import io.xoboro.server.tasks.ArchiveMaintenanceTaskEmitter
+import io.xoboro.server.tasks.ArchiveMaintenanceTaskHandler
 import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
 import io.xoboro.server.tasks.DurableCatalogMaintenanceRequester
 import io.xoboro.server.tasks.DurableCatalogFileLifecycleRequester
@@ -484,6 +487,12 @@ class XoboroRuntime private constructor(
             queue = queue,
             currentTimeMillis = System::currentTimeMillis,
           )
+        val archiveMaintenanceEmitter =
+          ArchiveMaintenanceTaskEmitter(
+            books = books,
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val createdLibraryScanScheduler =
           LibraryScanScheduler(
             libraries = libraries,
@@ -520,11 +529,21 @@ class XoboroRuntime private constructor(
             }
 
             override fun repairExtensions(id: LibraryId) {
-              scanEmitter.scanLibrary(id, deep = true)
+              val library = libraries.findById(id)
+              archiveMaintenanceEmitter.maintainLibrary(
+                libraryId = id,
+                repairExtensions = true,
+                convertToCbz = library.settings.convertToCbz,
+              )
             }
 
             override fun convertBooksToCbz(id: LibraryId) {
-              scanEmitter.scanLibrary(id, deep = true)
+              val library = libraries.findById(id)
+              archiveMaintenanceEmitter.maintainLibrary(
+                libraryId = id,
+                repairExtensions = library.settings.repairExtensions,
+                convertToCbz = true,
+              )
             }
           }
         val libraryAdministrationLifecycle =
@@ -575,6 +594,7 @@ class XoboroRuntime private constructor(
             currentTimeMillis = System::currentTimeMillis,
           )
         val localMediaAccess = LocalSourceMediaAccess()
+        val localMutationAccess = LocalSourceMutationAccess()
         val bookContentAccess =
           BookContentService(
             libraries = libraries,
@@ -692,6 +712,11 @@ class XoboroRuntime private constructor(
                     if (library.settings.emptyTrashAfterScan) {
                       emptyLibraryTrashTaskEmitter.emptyTrash(library.id)
                     }
+                    archiveMaintenanceEmitter.maintainLibrary(
+                      libraryId = library.id,
+                      repairExtensions = library.settings.repairExtensions,
+                      convertToCbz = library.settings.convertToCbz,
+                    )
                   },
                 ),
                 AnalyzeBookTaskHandler(
@@ -717,8 +742,19 @@ class XoboroRuntime private constructor(
                   books = books,
                   libraries = libraries,
                   pageHashes = pageHashes,
-                  mutations = listOf(LocalSourceMutationAccess()),
+                  mutations = listOf(localMutationAccess),
                   scanEmitter = scanEmitter,
+                ),
+                ArchiveMaintenanceTaskHandler(
+                  books = books,
+                  libraries = libraries,
+                  media = media,
+                  accesses = listOf(localMediaAccess),
+                  mutations = listOf(localMutationAccess),
+                  converter = RarToCbzConverter(),
+                  analysisEmitter = analyzeBookTaskEmitter,
+                  scanEmitter = scanEmitter,
+                  currentTimeMillis = System::currentTimeMillis,
                 ),
               ),
             heartbeat = createdHeartbeat,

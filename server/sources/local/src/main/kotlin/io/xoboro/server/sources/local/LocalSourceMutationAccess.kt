@@ -3,11 +3,13 @@ package io.xoboro.server.sources.local
 import io.xoboro.core.application.SourceCopyMode
 import io.xoboro.core.application.SourceImportRequest
 import io.xoboro.core.application.SourceMutationAccess
+import io.xoboro.core.application.SourceMutationResult
 import java.net.URI
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -115,6 +117,52 @@ class LocalSourceMutationAccess : SourceMutationAccess {
     }
   }
 
+  override fun renameExtension(
+    rootItemId: String,
+    itemId: String,
+    extension: String,
+  ): SourceMutationResult {
+    val validatedExtension = extension.validatedExtension()
+    val root = validatedRoot(rootItemId)
+    val source = validatedItem(root, itemId)
+    val destination = source.withExtension(validatedExtension)
+    if (destination != source) {
+      require(!Files.exists(destination)) {
+        "Extension repair destination already exists: $destination"
+      }
+      moveIntoPlace(source, destination, replaceExisting = false)
+    }
+    return destination.resultRelativeTo(root)
+  }
+
+  override fun replaceWithFile(
+    rootItemId: String,
+    itemId: String,
+    replacementFile: String,
+    extension: String,
+  ): SourceMutationResult {
+    val validatedExtension = extension.validatedExtension()
+    val root = validatedRoot(rootItemId)
+    val source = validatedItem(root, itemId)
+    val replacement = Path.of(replacementFile).toAbsolutePath().normalize().toRealPath()
+    require(Files.isRegularFile(replacement)) {
+      "Replacement media must be a regular file: $replacement"
+    }
+    val destination = source.withExtension(validatedExtension)
+    require(destination == source || !Files.exists(destination)) {
+      "Media replacement destination already exists: $destination"
+    }
+    val temporary = Files.createTempFile(source.parent, ".xoboro-replacement-", ".tmp")
+    try {
+      Files.copy(replacement, temporary, StandardCopyOption.REPLACE_EXISTING)
+      moveIntoPlace(temporary, destination, replaceExisting = destination == source)
+      if (destination != source) Files.delete(source)
+      return destination.resultRelativeTo(root)
+    } finally {
+      Files.deleteIfExists(temporary)
+    }
+  }
+
   private fun atomicCopy(
     source: Path,
     destination: Path,
@@ -190,5 +238,46 @@ class LocalSourceMutationAccess : SourceMutationAccess {
     val uri = URI(this)
     require(uri.scheme.equals("file", ignoreCase = true)) { "$label must use a file URI" }
     return Path.of(uri).toAbsolutePath().normalize()
+  }
+
+  private fun validatedRoot(rootItemId: String): Path =
+    rootItemId.filePath("Local media root").toRealPath().also { root ->
+      require(Files.isDirectory(root)) { "Local media root must be a directory: $root" }
+    }
+
+  private fun validatedItem(
+    root: Path,
+    itemId: String,
+  ): Path =
+    itemId.filePath("Local media item").toRealPath().also { item ->
+      require(item.startsWith(root)) { "Local media item must remain inside its library root" }
+      require(Files.isRegularFile(item)) { "Local media item must be a regular file: $item" }
+    }
+
+  private fun String.validatedExtension(): String {
+    val normalized = trim().lowercase()
+    require(normalized.isNotEmpty() && normalized.none { it == '/' || it == '\\' || it == '.' }) {
+      "Media extension must be a plain non-empty suffix"
+    }
+    return normalized
+  }
+
+  private fun Path.withExtension(extension: String): Path {
+    val leaf = fileName.toString()
+    val stem = leaf.substringBeforeLast('.', missingDelimiterValue = leaf)
+    return parent.resolve("$stem.$extension").normalize()
+  }
+
+  private fun Path.resultRelativeTo(root: Path): SourceMutationResult {
+    val attributes = Files.readAttributes(this, BasicFileAttributes::class.java)
+    return SourceMutationResult(
+      itemId = toUri().toString(),
+      relativePath =
+        root.relativize(this).iterator().asSequence().joinToString("/") { it.toString() },
+      name = fileName.toString(),
+      identity = attributes.fileKey()?.toString(),
+      size = attributes.size(),
+      modifiedAtMillis = attributes.lastModifiedTime().toMillis(),
+    )
   }
 }

@@ -15,6 +15,7 @@ kotlin {
 dependencies {
   implementation(project(":core:application"))
   implementation(project(":core:domain"))
+  implementation(project(":server:media"))
   implementation(libs.kotlinx.serialization.json)
 
   testImplementation(kotlin("test-junit5"))

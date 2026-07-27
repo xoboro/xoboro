@@ -21,6 +21,7 @@ dependencies {
   implementation(libs.jsoup)
   implementation(libs.jspecify)
   implementation(libs.pdfbox)
+  implementation(libs.junrar)
 
   testImplementation(kotlin("test-junit5"))
 }
