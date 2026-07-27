@@ -59,21 +59,39 @@ UI modules are intentionally absent during the backend compatibility phase.
 
 Requirements:
 
-- JDK 17 or newer
+- [mise](https://mise.jdx.dev/) (installs the pinned Eclipse Temurin JDK 26)
 
-Run the complete verification suite:
+Install the project toolchain, then run the complete verification suite:
 
 ```shell
-./gradlew check
+mise install
+mise exec -- ./gradlew check
 ```
 
 Run the server:
 
 ```shell
-./gradlew :server:app:run
+mise exec -- ./gradlew :server:app:run
 ```
 
 The initial health endpoint is available at `http://localhost:25600/health`.
+Readiness is available at `http://localhost:25600/ready`.
+
+Runtime defaults are safe for local development and can be overridden without
+editing source:
+
+| Environment variable | Default |
+|---|---|
+| `XOBORO_PORT` | `25600` |
+| `XOBORO_DATABASE_PATH` | `./config/xoboro.sqlite` |
+| `XOBORO_WORKER_COUNT` | `1` to `4`, based on available processors |
+| `XOBORO_TASK_POLL_MILLIS` | `500` |
+| `XOBORO_TASK_FAILURE_POLL_MILLIS` | `1000` |
+| `XOBORO_TASK_LEASE_MILLIS` | `600000` |
+| `XOBORO_SHUTDOWN_TIMEOUT_MILLIS` | `30000` |
+
+Malformed or out-of-range overrides fail startup instead of silently falling
+back to another value.
 
 ## Compatibility status
 

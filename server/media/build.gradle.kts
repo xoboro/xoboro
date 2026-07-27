@@ -5,9 +5,9 @@ plugins {
 }
 
 kotlin {
-  jvmToolchain(17)
+  jvmToolchain(26)
   compilerOptions {
-    jvmTarget.set(JvmTarget.JVM_17)
+    jvmTarget.set(JvmTarget.JVM_26)
     allWarningsAsErrors.set(true)
   }
 }

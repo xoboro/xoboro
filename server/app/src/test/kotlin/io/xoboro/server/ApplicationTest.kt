@@ -28,5 +28,37 @@ class ApplicationTest {
       assertEquals(HttpStatusCode.OK, response.status)
       assertEquals(HealthResponse(), response.body())
     }
-}
 
+  @Test
+  fun `readiness endpoint reflects runtime availability`() =
+    testApplication {
+      application {
+        xoboroModule(readiness = { false })
+      }
+      val client =
+        createClient {
+          install(ContentNegotiation) {
+            json()
+          }
+        }
+
+      val response = client.get("/ready")
+
+      assertEquals(HttpStatusCode.ServiceUnavailable, response.status)
+      assertEquals(HealthResponse(status = "DOWN"), response.body())
+    }
+
+  @Test
+  fun `application stop closes its runtime owner`() {
+    var stopped = false
+
+    testApplication {
+      application {
+        xoboroModule(onStop = { stopped = true })
+      }
+      startApplication()
+    }
+
+    assertEquals(true, stopped)
+  }
+}

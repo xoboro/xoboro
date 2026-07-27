@@ -23,15 +23,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Set up Java
-        uses: actions/setup-java@v5
+      - name: Set up project tools
+        uses: jdx/mise-action@v4
         with:
-          distribution: temurin
-          java-version: "17"
+          cache: true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
       - name: Verify
         run: ./gradlew check
-
