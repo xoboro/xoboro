@@ -17,9 +17,9 @@ data class OAuth2ClientRegistration(
   val clientName: String,
   val clientId: String,
   val clientSecret: String,
-  val authorizationUri: String,
-  val tokenUri: String,
-  val userInfoUri: String,
+  val authorizationUri: String? = null,
+  val tokenUri: String? = null,
+  val userInfoUri: String? = null,
   val scopes: List<String>,
   val protocol: OAuth2Protocol = OAuth2Protocol.OAUTH2,
   val issuerUri: String? = null,
@@ -32,14 +32,32 @@ data class OAuth2ClientRegistration(
     require(clientName.isNotBlank()) { "OAuth2 client name must not be blank" }
     require(clientId.isNotBlank()) { "OAuth2 client ID must not be blank" }
     require(clientSecret.isNotBlank()) { "OAuth2 client secret must not be blank" }
-    require(authorizationUri.isWebUri()) { "OAuth2 authorization URI must use HTTP or HTTPS" }
-    require(tokenUri.isWebUri()) { "OAuth2 token URI must use HTTP or HTTPS" }
-    require(userInfoUri.isWebUri()) { "OAuth2 user-info URI must use HTTP or HTTPS" }
     require(scopes.none(String::isBlank)) { "OAuth2 scopes must not be blank" }
     if (protocol == OAuth2Protocol.OIDC) {
       require(issuerUri?.isWebUri() == true) { "OIDC issuer URI must use HTTP or HTTPS" }
-      require(jwkSetUri?.isWebUri() == true) { "OIDC JWK-set URI must use HTTP or HTTPS" }
+      require(authorizationUri == null || authorizationUri.isWebUri()) {
+        "OIDC authorization URI must use HTTP or HTTPS"
+      }
+      require(tokenUri == null || tokenUri.isWebUri()) {
+        "OIDC token URI must use HTTP or HTTPS"
+      }
+      require(userInfoUri == null || userInfoUri.isWebUri()) {
+        "OIDC user-info URI must use HTTP or HTTPS"
+      }
+      require(jwkSetUri == null || jwkSetUri.isWebUri()) {
+        "OIDC JWK-set URI must use HTTP or HTTPS"
+      }
       require("openid" in scopes) { "OIDC scopes must include openid" }
+    } else {
+      require(authorizationUri?.isWebUri() == true) {
+        "OAuth2 authorization URI must use HTTP or HTTPS"
+      }
+      require(tokenUri?.isWebUri() == true) {
+        "OAuth2 token URI must use HTTP or HTTPS"
+      }
+      require(userInfoUri?.isWebUri() == true) {
+        "OAuth2 user-info URI must use HTTP or HTTPS"
+      }
     }
   }
 
@@ -91,7 +109,7 @@ data class OAuth2ExternalIdentity(
 )
 
 interface OAuth2IdentityGateway {
-  fun authorizationUrl(
+  suspend fun authorizationUrl(
     registration: OAuth2ClientRegistration,
     redirectUri: String,
     state: String,
@@ -142,7 +160,7 @@ class OAuth2LoginLifecycle(
   fun providers(): List<OAuth2Provider> =
     registrations.values.map { OAuth2Provider(it.clientName, it.registrationId) }
 
-  fun begin(
+  suspend fun begin(
     registrationId: String,
     redirectUri: String,
   ): OAuth2AuthorizationLaunch {
@@ -169,14 +187,20 @@ class OAuth2LoginLifecycle(
           expiresAtMillis = now + authorizationTtlMillis,
         )
       if (pendingAuthorizations.save(pending)) {
-        return OAuth2AuthorizationLaunch(
-          redirectUri =
+        val authorizationUrl =
+          try {
             identityGateway.authorizationUrl(
               registration = registration,
               redirectUri = redirectUri,
               state = state,
               nonce = nonce,
-            ),
+            )
+          } catch (failure: Throwable) {
+            pendingAuthorizations.consume(state)
+            throw failure
+          }
+        return OAuth2AuthorizationLaunch(
+          redirectUri = authorizationUrl,
           state = state,
           browserBinding = browserBinding,
         )

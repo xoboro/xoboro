@@ -66,6 +66,29 @@ class OAuth2EnvironmentConfigTest {
   }
 
   @Test
+  fun `allows an OIDC issuer to supply endpoints through discovery`() {
+    val registration =
+      OAuth2EnvironmentConfig.registrations(
+        mapOf(
+          "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SYNTHETIC_CLIENT_ID" to "synthetic-id",
+          "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SYNTHETIC_CLIENT_SECRET" to
+            "synthetic-secret",
+          "SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_SYNTHETIC_SCOPE" to
+            "openid profile email",
+          "SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_SYNTHETIC_ISSUER_URI" to
+            "https://identity.example.invalid/",
+        ),
+      ).single()
+
+    assertEquals(OAuth2Protocol.OIDC, registration.protocol)
+    assertEquals("https://identity.example.invalid", registration.issuerUri)
+    assertEquals(null, registration.authorizationUri)
+    assertEquals(null, registration.tokenUri)
+    assertEquals(null, registration.userInfoUri)
+    assertEquals(null, registration.jwkSetUri)
+  }
+
+  @Test
   fun `binds Komga account policies through server config`() {
     val config =
       ServerConfig.fromEnvironment(
