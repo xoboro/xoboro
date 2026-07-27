@@ -22,6 +22,8 @@ class UserLifecycle(
   private val userIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
 ) {
+  fun isClaimed(): Boolean = users.count() > 0
+
   fun claimInitialAdministrator(
     email: String,
     rawPassword: String,

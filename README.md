@@ -49,7 +49,8 @@ server/
   security/          Password hashing and authentication primitives
   sources/local/     Local filesystem source adapter
   tasks/             Leased durable worker runtime and task routing
-compatibility/       Komga API and protocol adapters
+compatibility/
+  komga-api/         Komga REST compatibility adapters and wire DTOs
 docs/                Architecture, parity, testing, and design records
 third-party/         Third-party license notices
 ```

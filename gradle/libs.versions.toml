@@ -11,6 +11,7 @@ natural-comparator = "1.1"
 kotlinx-serialization = "1.11.0"
 spring-security = "7.0.4"
 commons-logging = "1.4.0"
+tsid-creator = "5.2.6"
 
 [libraries]
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
@@ -31,6 +32,7 @@ natural-comparator = { module = "net.grey-panther:natural-comparator", version.r
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 spring-security-crypto = { module = "org.springframework.security:spring-security-crypto", version.ref = "spring-security" }
 commons-logging = { module = "commons-logging:commons-logging", version.ref = "commons-logging" }
+tsid-creator = { module = "com.github.f4b6a3:tsid-creator", version.ref = "tsid-creator" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
