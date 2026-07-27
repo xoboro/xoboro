@@ -1,6 +1,5 @@
 package io.xoboro.compatibility.komga.api
 
-import io.ktor.http.CacheControl
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -14,7 +13,6 @@ import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
@@ -40,10 +38,11 @@ import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.User
-import java.util.concurrent.TimeUnit
 import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 fun Route.komgaArtworkRoutes(
   artwork: ArtworkLifecycle,
@@ -142,24 +141,34 @@ private fun Route.artworkOwnerRoutes(
         call.respondFallbackArtwork(
           content = content,
           bookId = fallbackBook(owner, user),
+          cacheControl = kind.selectedArtworkCacheControl(),
         )
       } else {
-        call.response.header(
-          HttpHeaders.CacheControl,
-          CacheControl.MaxAge(
-            maxAgeSeconds = TimeUnit.HOURS.toSeconds(1).toInt(),
-            visibility = CacheControl.Visibility.Private,
-          ).toString(),
-        )
+        val body = selectedContent.bytes.komgaCachedBody()
+        if (
+          call.respondNotModified(
+            body = body,
+            lastModifiedMillis = null,
+            cacheControl = kind.selectedArtworkCacheControl(),
+          )
+        ) {
+          return@get
+        }
         call.respondBytes(
-          selectedContent.bytes,
+          body.bytes,
           ContentType.parse(selectedContent.artwork.mediaType),
         )
       }
     }
     get("/thumbnails") {
       val owner = call.visibleArtworkOwner(kind, idParameter, visible) ?: return@get
-      call.respond(artwork.findAll(owner).map(Artwork::toDto))
+      val body =
+        ARTWORK_RESPONSE_JSON
+          .encodeToString(artwork.findAll(owner).map(Artwork::toDto))
+          .encodeToByteArray()
+          .komgaCachedBody()
+      if (call.respondNotModified(body, lastModifiedMillis = null)) return@get
+      call.respondBytes(body.bytes, ContentType.Application.Json)
     }
     get("/thumbnails/{thumbnailId}") {
       val owner = call.visibleArtworkOwner(kind, idParameter, visible) ?: return@get
@@ -171,8 +180,10 @@ private fun Route.artworkOwnerRoutes(
       if (content == null) {
         call.respond(HttpStatusCode.NotFound)
       } else {
+        val body = content.bytes.komgaCachedBody()
+        if (call.respondNotModified(body, lastModifiedMillis = null)) return@get
         call.respondBytes(
-          content.bytes,
+          body.bytes,
           ContentType.parse(content.artwork.mediaType),
         )
       }
@@ -238,6 +249,7 @@ private fun CatalogReadRepository.firstVisibleBook(
 private suspend fun ApplicationCall.respondFallbackArtwork(
   content: BookContentAccess,
   bookId: BookId?,
+  cacheControl: String,
 ) {
   if (bookId == null) {
     respond(HttpStatusCode.NotFound)
@@ -260,22 +272,25 @@ private suspend fun ApplicationCall.respondFallbackArtwork(
     return
   }
   try {
-    respondOutputStream(
-      contentType = ContentType.Image.JPEG,
-      status = HttpStatusCode.OK,
-      contentLength = opened.contentLength,
-    ) {
-      val buffer = ByteArray(16 * 1_024)
-      while (true) {
-        val read = opened.read(buffer)
-        if (read < 0) break
-        if (read > 0) write(buffer, 0, read)
-      }
+    val body = opened.readKomgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null, cacheControl = cacheControl)) {
+      return
     }
+    respondBytes(body.bytes, ContentType.Image.JPEG, HttpStatusCode.OK)
   } finally {
     opened.close()
   }
 }
+
+private fun ArtworkOwnerKind.selectedArtworkCacheControl(): String =
+  when (this) {
+    ArtworkOwnerKind.COLLECTION,
+    ArtworkOwnerKind.READ_LIST,
+    -> KOMGA_PRIVATE_ONE_HOUR
+    ArtworkOwnerKind.MEDIA_ITEM,
+    ArtworkOwnerKind.SERIES,
+    -> KOMGA_PRIVATE_REVALIDATE
+  }
 
 private suspend fun ApplicationCall.visibleArtworkOwner(
   kind: ArtworkOwnerKind,
@@ -333,6 +348,9 @@ data class KomgaArtworkDto(
   val width: Int,
   val height: Int,
 )
+
+private const val KOMGA_PRIVATE_ONE_HOUR = "max-age=3600, private"
+private val ARTWORK_RESPONSE_JSON = Json { explicitNulls = false }
 
 private fun Artwork.toDto(): KomgaArtworkDto =
   KomgaArtworkDto(

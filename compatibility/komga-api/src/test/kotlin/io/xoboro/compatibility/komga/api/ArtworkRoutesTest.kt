@@ -152,20 +152,35 @@ class ArtworkRoutesTest {
           )
         assertEquals(HttpStatusCode.OK, uploaded.status)
         assertEquals("artwork-1", uploaded.body<KomgaArtworkDto>().id)
-        assertContentEquals(
-          byteArrayOf(1, 2, 3),
-          client
-            .get("/api/v1/books/book-1/thumbnail") {
-              basicAuth(USER_EMAIL, USER_PASSWORD)
-            }.body(),
+        val selectedBook =
+          client.get("/api/v1/books/book-1/thumbnail") {
+            basicAuth(USER_EMAIL, USER_PASSWORD)
+          }
+        assertContentEquals(byteArrayOf(1, 2, 3), selectedBook.body())
+        assertEquals(KOMGA_PRIVATE_REVALIDATE, selectedBook.headers[HttpHeaders.CacheControl])
+        val selectedEntityTag = requireNotNull(selectedBook.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-1/thumbnail") {
+            basicAuth(USER_EMAIL, USER_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, selectedEntityTag)
+          }.status,
         )
+        val artworkList =
+          client.get("/api/v1/books/book-1/thumbnails") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
         assertEquals(
           listOf("artwork-1"),
-          client
-            .get("/api/v1/books/book-1/thumbnails") {
-              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
-            }.body<List<KomgaArtworkDto>>()
-            .map(KomgaArtworkDto::id),
+          artworkList.body<List<KomgaArtworkDto>>().map(KomgaArtworkDto::id),
+        )
+        val listEntityTag = requireNotNull(artworkList.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-1/thumbnails") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, listEntityTag)
+          }.status,
         )
         assertEquals(
           HttpStatusCode.NotFound,
@@ -180,6 +195,12 @@ class ArtworkRoutesTest {
               basicAuth(USER_EMAIL, USER_PASSWORD)
             }.body(),
         )
+        val collectionFallback =
+          client.get("/api/v1/collections/collection-1/thumbnail") {
+            basicAuth(USER_EMAIL, USER_PASSWORD)
+          }
+        assertContentEquals(byteArrayOf(9), collectionFallback.body())
+        assertEquals("max-age=3600, private", collectionFallback.headers[HttpHeaders.CacheControl])
         assertEquals(
           HttpStatusCode.NotFound,
           client.put("/api/v1/books/book-1/thumbnails/missing/selected") {
