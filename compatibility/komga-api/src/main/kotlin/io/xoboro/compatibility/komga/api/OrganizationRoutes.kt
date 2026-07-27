@@ -1,0 +1,446 @@
+package io.xoboro.compatibility.komga.api
+
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.auth.AuthenticationStrategy
+import io.ktor.server.auth.authenticate
+import io.ktor.server.auth.principal
+import io.ktor.server.request.receive
+import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
+import io.ktor.server.routing.get
+import io.ktor.server.routing.patch
+import io.ktor.server.routing.post
+import io.ktor.server.routing.route
+import io.xoboro.core.application.CatalogBook
+import io.xoboro.core.application.CatalogPage
+import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSeries
+import io.xoboro.core.application.OrganizationLifecycle
+import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.CollectionId
+import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.ReadList
+import io.xoboro.core.domain.ReadListId
+import io.xoboro.core.domain.ReadListRepository
+import io.xoboro.core.domain.SeriesCollection
+import io.xoboro.core.domain.SeriesCollectionRepository
+import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.User
+import io.xoboro.core.domain.UserRole
+import java.time.Instant
+import kotlinx.serialization.Serializable
+
+fun Route.komgaOrganizationRoutes(
+  collections: SeriesCollectionRepository,
+  readLists: ReadListRepository,
+  lifecycle: OrganizationLifecycle,
+  catalog: CatalogReadRepository,
+) {
+  authenticate(
+    KOMGA_BASIC_AUTHENTICATION,
+    KOMGA_API_KEY_AUTHENTICATION,
+    KOMGA_SESSION_AUTHENTICATION,
+    KOMGA_REMEMBER_ME_AUTHENTICATION,
+    strategy = AuthenticationStrategy.FirstSuccessful,
+  ) {
+    route("/api/v1/collections") {
+      get {
+        val principal = call.organizationPrincipal()
+        val requestedLibraries = call.queryLibraryIds()
+        val search = call.request.queryParameters["search"]?.trim().orEmpty()
+        val visible =
+          collections
+            .findAll()
+            .mapNotNull { it.visibleTo(principal.user, catalog, requestedLibraries) }
+            .filter { search.isEmpty() || it.collection.name.contains(search, ignoreCase = true) }
+        val page = visible.paginate(call.catalogPageRequest())
+        call.respond(page.toPageDto(page.content.map(VisibleCollection::toDto)))
+      }
+      post {
+        if (!call.requireAdministrator()) return@post
+        val request = call.receive<CollectionCreationDto>()
+        try {
+          call.respond(
+            lifecycle
+              .createCollection(
+                name = request.name,
+                ordered = request.ordered,
+                seriesIds = request.seriesIds.map(::SeriesId),
+              ).toDto(filtered = false),
+          )
+        } catch (failure: IllegalArgumentException) {
+          call.respondBadOrganizationRequest(failure)
+        }
+      }
+      get("/{id}") {
+        val principal = call.organizationPrincipal()
+        val visible =
+          collections
+            .findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
+            ?.visibleTo(principal.user, catalog)
+        if (visible == null) call.respond(HttpStatusCode.NotFound) else call.respond(visible.toDto())
+      }
+      patch("/{id}") {
+        if (!call.requireAdministrator()) return@patch
+        val id = CollectionId(requireNotNull(call.parameters["id"]))
+        val request = call.receive<CollectionUpdateDto>()
+        try {
+          lifecycle.updateCollection(
+            id = id,
+            name = request.name,
+            ordered = request.ordered,
+            seriesIds = request.seriesIds?.map(::SeriesId),
+          )
+          call.respond(HttpStatusCode.NoContent)
+        } catch (failure: IllegalArgumentException) {
+          call.respondBadOrganizationRequest(failure)
+        } catch (_: NoSuchElementException) {
+          call.respond(HttpStatusCode.NotFound)
+        }
+      }
+      delete("/{id}") {
+        if (!call.requireAdministrator()) return@delete
+        val deleted =
+          lifecycle.deleteCollection(CollectionId(requireNotNull(call.parameters["id"])))
+        call.respond(if (deleted) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+      }
+      get("/{id}/series") {
+        val principal = call.organizationPrincipal()
+        val visible =
+          collections
+            .findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
+            ?.visibleTo(principal.user, catalog, call.queryLibraryIds())
+        if (visible == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        val members =
+          if (visible.collection.ordered) {
+            visible.series
+          } else {
+            visible.series.sortedWith(
+              compareBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.titleSort },
+            )
+          }
+        call.respond(
+          members
+            .paginate(call.catalogPageRequest())
+            .toSeriesPageDto(principal.user),
+        )
+      }
+    }
+
+    get("/api/v1/series/{seriesId}/collections") {
+      val principal = call.organizationPrincipal()
+      val seriesId = SeriesId(requireNotNull(call.parameters["seriesId"]))
+      if (catalog.findSeriesByIdOrNull(seriesId, principal.user.catalogAccess()) == null) {
+        call.respond(HttpStatusCode.NotFound)
+        return@get
+      }
+      call.respond(
+        collections
+          .findAllBySeriesId(seriesId)
+          .mapNotNull { it.visibleTo(principal.user, catalog) }
+          .map(VisibleCollection::toDto),
+      )
+    }
+
+    route("/api/v1/readlists") {
+      get {
+        val principal = call.organizationPrincipal()
+        val requestedLibraries = call.queryLibraryIds()
+        val search = call.request.queryParameters["search"]?.trim().orEmpty()
+        val visible =
+          readLists
+            .findAll()
+            .mapNotNull { it.visibleTo(principal.user, catalog, requestedLibraries) }
+            .filter { search.isEmpty() || it.readList.name.contains(search, ignoreCase = true) }
+        val page = visible.paginate(call.catalogPageRequest())
+        call.respond(page.toPageDto(page.content.map(VisibleReadList::toDto)))
+      }
+      post {
+        if (!call.requireAdministrator()) return@post
+        val request = call.receive<ReadListCreationDto>()
+        try {
+          call.respond(
+            lifecycle
+              .createReadList(
+                name = request.name,
+                summary = request.summary,
+                ordered = request.ordered,
+                bookIds = request.bookIds.map(::BookId),
+              ).toDto(filtered = false),
+          )
+        } catch (failure: IllegalArgumentException) {
+          call.respondBadOrganizationRequest(failure)
+        }
+      }
+      get("/{id}") {
+        val principal = call.organizationPrincipal()
+        val visible =
+          readLists
+            .findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
+            ?.visibleTo(principal.user, catalog)
+        if (visible == null) call.respond(HttpStatusCode.NotFound) else call.respond(visible.toDto())
+      }
+      patch("/{id}") {
+        if (!call.requireAdministrator()) return@patch
+        val id = ReadListId(requireNotNull(call.parameters["id"]))
+        val request = call.receive<ReadListUpdateDto>()
+        try {
+          lifecycle.updateReadList(
+            id = id,
+            name = request.name,
+            summary = request.summary,
+            ordered = request.ordered,
+            bookIds = request.bookIds?.map(::BookId),
+          )
+          call.respond(HttpStatusCode.NoContent)
+        } catch (failure: IllegalArgumentException) {
+          call.respondBadOrganizationRequest(failure)
+        } catch (_: NoSuchElementException) {
+          call.respond(HttpStatusCode.NotFound)
+        }
+      }
+      delete("/{id}") {
+        if (!call.requireAdministrator()) return@delete
+        val deleted = lifecycle.deleteReadList(ReadListId(requireNotNull(call.parameters["id"])))
+        call.respond(if (deleted) HttpStatusCode.NoContent else HttpStatusCode.NotFound)
+      }
+      get("/{id}/books") {
+        val principal = call.organizationPrincipal()
+        val visible =
+          readLists
+            .findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
+            ?.visibleTo(principal.user, catalog, call.queryLibraryIds())
+        if (visible == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        val members =
+          if (visible.readList.ordered) {
+            visible.books
+          } else {
+            visible.books.sortedWith(
+              compareBy<CatalogBook> { it.metadata.releaseDate.orEmpty() }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.title },
+            )
+          }
+        call.respond(members.paginate(call.catalogPageRequest()).toBookPageDto(principal.user))
+      }
+      get("/{id}/books/{bookId}/previous") {
+        call.respondReadListSibling(readLists, catalog, previous = true)
+      }
+      get("/{id}/books/{bookId}/next") {
+        call.respondReadListSibling(readLists, catalog, previous = false)
+      }
+    }
+
+    get("/api/v1/books/{bookId}/readlists") {
+      val principal = call.organizationPrincipal()
+      val bookId = BookId(requireNotNull(call.parameters["bookId"]))
+      if (catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess()) == null) {
+        call.respond(HttpStatusCode.NotFound)
+        return@get
+      }
+      call.respond(
+        readLists
+          .findAllByBookId(bookId)
+          .mapNotNull { it.visibleTo(principal.user, catalog) }
+          .map(VisibleReadList::toDto),
+      )
+    }
+  }
+}
+
+@Serializable
+data class CollectionCreationDto(
+  val name: String,
+  val ordered: Boolean,
+  val seriesIds: List<String>,
+)
+
+@Serializable
+data class CollectionUpdateDto(
+  val name: String? = null,
+  val ordered: Boolean? = null,
+  val seriesIds: List<String>? = null,
+)
+
+@Serializable
+data class KomgaCollectionDto(
+  val id: String,
+  val name: String,
+  val ordered: Boolean,
+  val seriesIds: List<String>,
+  val createdDate: String,
+  val lastModifiedDate: String,
+  val filtered: Boolean,
+)
+
+@Serializable
+data class ReadListCreationDto(
+  val name: String,
+  val summary: String = "",
+  val ordered: Boolean = true,
+  val bookIds: List<String>,
+)
+
+@Serializable
+data class ReadListUpdateDto(
+  val name: String? = null,
+  val summary: String? = null,
+  val ordered: Boolean? = null,
+  val bookIds: List<String>? = null,
+)
+
+@Serializable
+data class KomgaReadListDto(
+  val id: String,
+  val name: String,
+  val summary: String,
+  val ordered: Boolean,
+  val bookIds: List<String>,
+  val createdDate: String,
+  val lastModifiedDate: String,
+  val filtered: Boolean,
+)
+
+private data class VisibleCollection(
+  val collection: SeriesCollection,
+  val series: List<CatalogSeries>,
+) {
+  fun toDto(): KomgaCollectionDto =
+    collection.copy(seriesIds = series.map { it.series.id }).toDto(
+      filtered = series.size != collection.seriesIds.size,
+    )
+}
+
+private data class VisibleReadList(
+  val readList: ReadList,
+  val books: List<CatalogBook>,
+) {
+  fun toDto(): KomgaReadListDto =
+    readList.copy(bookIds = books.map { it.book.id }).toDto(
+      filtered = books.size != readList.bookIds.size,
+    )
+}
+
+private fun SeriesCollection.visibleTo(
+  user: User,
+  catalog: CatalogReadRepository,
+  requestedLibraries: Set<LibraryId> = emptySet(),
+): VisibleCollection? {
+  val visible =
+    seriesIds
+      .mapNotNull { catalog.findSeriesByIdOrNull(it, user.catalogAccess()) }
+      .filter { requestedLibraries.isEmpty() || it.series.libraryId in requestedLibraries }
+  return VisibleCollection(this, visible).takeIf {
+    visible.isNotEmpty() ||
+      (user.isAdmin && requestedLibraries.isEmpty() && seriesIds.isEmpty())
+  }
+}
+
+private fun ReadList.visibleTo(
+  user: User,
+  catalog: CatalogReadRepository,
+  requestedLibraries: Set<LibraryId> = emptySet(),
+): VisibleReadList? {
+  val visible =
+    bookIds
+      .mapNotNull { catalog.findBookByIdOrNull(it, user.catalogAccess()) }
+      .filter { requestedLibraries.isEmpty() || it.book.libraryId in requestedLibraries }
+  return VisibleReadList(this, visible).takeIf {
+    visible.isNotEmpty() ||
+      (user.isAdmin && requestedLibraries.isEmpty() && bookIds.isEmpty())
+  }
+}
+
+private fun SeriesCollection.toDto(filtered: Boolean): KomgaCollectionDto =
+  KomgaCollectionDto(
+    id = id.value,
+    name = name,
+    ordered = ordered,
+    seriesIds = seriesIds.map(SeriesId::value),
+    createdDate = Instant.ofEpochMilli(createdAtMillis).toString(),
+    lastModifiedDate = Instant.ofEpochMilli(updatedAtMillis).toString(),
+    filtered = filtered,
+  )
+
+private fun ReadList.toDto(filtered: Boolean): KomgaReadListDto =
+  KomgaReadListDto(
+    id = id.value,
+    name = name,
+    summary = summary,
+    ordered = ordered,
+    bookIds = bookIds.map(BookId::value),
+    createdDate = Instant.ofEpochMilli(createdAtMillis).toString(),
+    lastModifiedDate = Instant.ofEpochMilli(updatedAtMillis).toString(),
+    filtered = filtered,
+  )
+
+private fun <T> List<T>.paginate(request: CatalogPageRequest): CatalogPage<T> {
+  if (request.unpaged) {
+    return CatalogPage(
+      content = this,
+      page = 0,
+      size = size.coerceAtLeast(1),
+      totalElements = size.toLong(),
+      unpaged = true,
+    )
+  }
+  val first = (request.page.toLong() * request.size).coerceAtMost(size.toLong()).toInt()
+  val last = (first + request.size).coerceAtMost(size)
+  return CatalogPage(
+    content = subList(first, last),
+    page = request.page,
+    size = request.size,
+    totalElements = size.toLong(),
+  )
+}
+
+private suspend fun ApplicationCall.respondReadListSibling(
+  readLists: ReadListRepository,
+  catalog: CatalogReadRepository,
+  previous: Boolean,
+) {
+  val principal = organizationPrincipal()
+  val visible =
+    readLists
+      .findByIdOrNull(ReadListId(requireNotNull(parameters["id"])))
+      ?.visibleTo(principal.user, catalog)
+  if (visible == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val bookId = BookId(requireNotNull(parameters["bookId"]))
+  val position = visible.books.indexOfFirst { it.book.id == bookId }
+  val sibling = visible.books.getOrNull(position + if (previous) -1 else 1)
+  if (position < 0 || sibling == null) {
+    respond(HttpStatusCode.NotFound)
+  } else {
+    respond(sibling.toDto(principal.user))
+  }
+}
+
+private fun ApplicationCall.organizationPrincipal(): KomgaPrincipal =
+  requireNotNull(principal<KomgaPrincipal>()) { "Organization routes require authentication" }
+
+private suspend fun ApplicationCall.requireAdministrator(): Boolean {
+  if (UserRole.ADMIN in organizationPrincipal().user.roles) return true
+  respond(HttpStatusCode.Forbidden)
+  return false
+}
+
+private fun ApplicationCall.queryLibraryIds(): Set<LibraryId> =
+  request.queryParameters.getAll("library_id").orEmpty().map(::LibraryId).toSet()
+
+private suspend fun ApplicationCall.respondBadOrganizationRequest(failure: IllegalArgumentException) {
+  respond(
+    HttpStatusCode.BadRequest,
+    mapOf("error" to (failure.message ?: "Invalid organization request")),
+  )
+}

@@ -20,6 +20,7 @@ import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.MediaContentStream
+import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.domain.Book
@@ -44,6 +45,8 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
+import io.xoboro.server.persistence.JooqReadListRepository
+import io.xoboro.server.persistence.JooqSeriesCollectionRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
@@ -75,6 +78,19 @@ class CatalogRoutesTest {
         )
       val catalog = JooqCatalogReadRepository(database)
       val content = SyntheticBookContentAccess()
+      val collections = JooqSeriesCollectionRepository(database)
+      val readLists = JooqReadListRepository(database)
+      var organizationSequence = 0
+      val organizations =
+        OrganizationLifecycle(
+          collections = collections,
+          readLists = readLists,
+          series = JooqSeriesRepository(database),
+          books = JooqBookRepository(database),
+          collectionIdFactory = { "collection-${++organizationSequence}" },
+          readListIdFactory = { "read-list-${++organizationSequence}" },
+          currentTimeMillis = { 30 + organizationSequence.toLong() },
+        )
       val progress =
         ReadProgressLifecycle(
           books = JooqBookRepository(database),
@@ -94,6 +110,7 @@ class CatalogRoutesTest {
             komgaCatalogRoutes(catalog)
             komgaMediaRoutes(catalog, content)
             komgaReadProgressRoutes(catalog, progress)
+            komgaOrganizationRoutes(collections, readLists, organizations, catalog)
           }
         }
         val client =
@@ -124,6 +141,20 @@ class CatalogRoutesTest {
           HttpStatusCode.Forbidden,
           client.get("/api/v1/books/book-1/file") {
             basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.Forbidden,
+          client.post("/api/v1/collections") {
+            basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              CollectionCreationDto(
+                name = "Denied collection",
+                ordered = true,
+                seriesIds = listOf("series-1"),
+              ),
+            )
           }.status,
         )
         assertEquals(HttpStatusCode.Unauthorized, client.get("/api/v1/books").status)
@@ -212,6 +243,142 @@ class CatalogRoutesTest {
         )
         assertEquals(8, content.closedStreams)
 
+        val collection =
+          client
+            .post("/api/v1/collections") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+              setBody(
+                CollectionCreationDto(
+                  name = "Synthetic collection",
+                  ordered = true,
+                  seriesIds = listOf("series-1"),
+                ),
+              )
+            }.body<KomgaCollectionDto>()
+        assertEquals(listOf("series-1"), collection.seriesIds)
+        assertEquals(
+          listOf("series-1"),
+          client
+            .get("/api/v1/collections/${collection.id}/series") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<KomgaSeriesDto>>().content.map(KomgaSeriesDto::id),
+        )
+        assertEquals(
+          listOf(collection.id),
+          client
+            .get("/api/v1/series/series-1/collections") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<List<KomgaCollectionDto>>().map(KomgaCollectionDto::id),
+        )
+        assertEquals(
+          HttpStatusCode.BadRequest,
+          client.post("/api/v1/collections") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              CollectionCreationDto(
+                name = "synthetic COLLECTION",
+                ordered = false,
+                seriesIds = listOf("series-1"),
+              ),
+            )
+          }.status,
+        )
+        seedRestrictedSeries(database)
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.patch("/api/v1/collections/${collection.id}") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(CollectionUpdateDto(seriesIds = listOf("series-1", "series-2")))
+          }.status,
+        )
+        users.updateUser(
+          requireNotNull(users.findByEmailIgnoreCaseOrNull(RESTRICTED_EMAIL)).copy(
+            sharesAllLibraries = false,
+            sharedLibraryIds = setOf(LibraryId("library-1")),
+          ),
+        )
+        val filteredCollection =
+          client
+            .get("/api/v1/collections/${collection.id}") {
+              basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+            }.body<KomgaCollectionDto>()
+        assertEquals(listOf("series-1"), filteredCollection.seriesIds)
+        assertTrue(filteredCollection.filtered)
+
+        val readList =
+          client
+            .post("/api/v1/readlists") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+              setBody(
+                ReadListCreationDto(
+                  name = "Synthetic reading order",
+                  summary = "Synthetic summary",
+                  ordered = true,
+                  bookIds = listOf("book-2", "book-1"),
+                ),
+              )
+            }.body<KomgaReadListDto>()
+        assertEquals(listOf("book-2", "book-1"), readList.bookIds)
+        assertEquals(
+          listOf("book-2", "book-1"),
+          client
+            .get("/api/v1/readlists/${readList.id}/books") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<KomgaBookDto>>().content.map(KomgaBookDto::id),
+        )
+        assertEquals(
+          "book-1",
+          client
+            .get("/api/v1/readlists/${readList.id}/books/book-2/next") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaBookDto>().id,
+        )
+        assertEquals(
+          "book-2",
+          client
+            .get("/api/v1/readlists/${readList.id}/books/book-1/previous") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaBookDto>().id,
+        )
+        assertEquals(
+          listOf(readList.id),
+          client
+            .get("/api/v1/books/book-1/readlists") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<List<KomgaReadListDto>>().map(KomgaReadListDto::id),
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.patch("/api/v1/readlists/${readList.id}") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(ReadListUpdateDto(name = "Updated synthetic list"))
+          }.status,
+        )
+        assertEquals(
+          "Updated synthetic list",
+          client
+            .get("/api/v1/readlists/${readList.id}") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaReadListDto>().name,
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.delete("/api/v1/readlists/${readList.id}") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.delete("/api/v1/collections/${collection.id}") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+
         val books =
           client
             .get("/api/v1/books?size=1&sort=numberSort,desc") {
@@ -256,7 +423,13 @@ class CatalogRoutesTest {
             .get("/api/v1/series/alphabetical-groups") {
               basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
             }.body<List<KomgaGroupCountDto>>()
-        assertEquals(listOf(KomgaGroupCountDto("S", 1)), groups)
+        assertEquals(
+          listOf(
+            KomgaGroupCountDto("R", 1),
+            KomgaGroupCountDto("S", 1),
+          ),
+          groups,
+        )
 
         assertEquals(
           HttpStatusCode.NoContent,
@@ -381,6 +554,31 @@ class CatalogRoutesTest {
       )
     }
     assertTrue(JooqCatalogReadRepository(database).findBookByIdOrNull(BookId("book-1"), io.xoboro.core.application.CatalogAccess()) != null)
+  }
+
+  private fun seedRestrictedSeries(database: XoboroDatabase) {
+    val libraryId = LibraryId("library-2")
+    val seriesId = SeriesId("series-2")
+    JooqLibraryRepository(database).insert(
+      Library(
+        id = libraryId,
+        name = "Restricted synthetic library",
+        root = SourceLocation("local", "file:///restricted-synthetic"),
+        createdAtMillis = 1,
+      ),
+    )
+    JooqSeriesRepository(database).insert(
+      Series(
+        id = seriesId,
+        libraryId = libraryId,
+        name = "Restricted synthetic catalog",
+        relativePath = "restricted-synthetic-catalog",
+        sourceItemId = "file:///restricted-synthetic/restricted-synthetic-catalog",
+        fileModifiedAtMillis = 2,
+        bookCount = 0,
+        createdAtMillis = 1,
+      ),
+    )
   }
 
   private companion object {
