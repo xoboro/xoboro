@@ -38,6 +38,7 @@ import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesCollection
 import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SeriesMetadata
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqArtworkRepository
@@ -45,9 +46,11 @@ import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqMetadataFacetRepository
 import io.xoboro.server.persistence.JooqReadListRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
 import io.xoboro.server.persistence.JooqSeriesCollectionRepository
+import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
@@ -116,6 +119,7 @@ class OpdsRoutesTest {
               artwork = artwork,
               content = content,
               progress = progress,
+              facets = JooqMetadataFacetRepository(database),
             )
           }
         }
@@ -162,7 +166,73 @@ class OpdsRoutesTest {
             .orEmpty()
             .startsWith("application/opds+json"),
         )
-        assertEquals("All libraries - Recommended", JSON.decodeFromString<OpdsFeedDto>(v2.bodyAsText()).metadata.title)
+        val catalogFeed = JSON.decodeFromString<OpdsFeedDto>(v2.bodyAsText())
+        assertEquals("All libraries - Recommended", catalogFeed.metadata.title)
+        assertEquals("self", catalogFeed.links.first().rel)
+        assertEquals(null, catalogFeed.links.first().type)
+        assertEquals("Home", catalogFeed.links.first { it.rel == "start" }.title)
+        assertEquals(
+          listOf("Libraries", "Latest Books", "Latest Series"),
+          catalogFeed.groups.map { it.metadata.title },
+        )
+        catalogFeed.groups.filter { it.metadata.title.startsWith("Latest") }.forEach { group ->
+          assertEquals(5, group.metadata.itemsPerPage)
+          assertEquals(1, group.metadata.currentPage)
+          assertEquals(1, group.metadata.numberOfItems)
+          assertEquals("self", group.links.single().rel)
+        }
+        val catalogPublication =
+          catalogFeed.groups
+            .single { it.metadata.title == "Latest Books" }
+            .publications
+            .single()
+        assertEquals(null, catalogPublication.metadata.conformsTo)
+        assertTrue(catalogPublication.readingOrder.isEmpty())
+        assertTrue(catalogPublication.resources.isEmpty())
+        assertEquals(
+          "application/opds+json",
+          catalogPublication.metadata.belongsTo?.series?.single()?.links?.single()?.type,
+        )
+        assertEquals(null, catalogPublication.images.single().rel)
+        assertEquals(
+          "application/opds-authentication+json",
+          catalogPublication.images.single().properties["authenticate"]?.get("type"),
+        )
+        assertContains(
+          catalogPublication.links.single { it.rel == "http://opds-spec.org/acquisition" }.href.orEmpty(),
+          "/opds/v2/books/book-1/file",
+        )
+
+        val browseFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/libraries/browse?page=0&size=20").bodyAsText(),
+          )
+        assertEquals("All libraries", browseFeed.metadata.title)
+        assertEquals(20, browseFeed.metadata.itemsPerPage)
+        assertEquals(1, browseFeed.metadata.currentPage)
+        assertEquals(1, browseFeed.metadata.numberOfItems)
+        assertEquals(
+          listOf("Recommended", "Browse", "Collections", "Read lists"),
+          browseFeed.navigation.mapNotNull(WPLinkDto::title),
+        )
+        assertEquals(
+          listOf("Series", "Publisher"),
+          browseFeed.groups.map { it.metadata.title },
+        )
+        assertEquals(
+          "Synthetic publisher",
+          browseFeed.groups.single { it.metadata.title == "Publisher" }.navigation.single().title,
+        )
+
+        val searchFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/search?query=series&page=9&size=1").bodyAsText(),
+          )
+        assertEquals("Search results", searchFeed.metadata.title)
+        assertTrue(searchFeed.metadata.modified != null)
+        assertTrue(searchFeed.links.none { it.rel == "self" })
+        assertEquals(listOf("Series"), searchFeed.groups.map { it.metadata.title })
+        assertEquals("Synthetic series", searchFeed.groups.single().navigation.single().title)
 
         catalogPaths.forEach { path ->
           val response = client.authenticatedGet(path)
@@ -251,6 +321,11 @@ class OpdsRoutesTest {
         assertEquals(1, keepReading.metadata.numberOfItems)
         assertEquals(1, keepReading.metadata.itemsPerPage)
         assertEquals("Synthetic chapter", keepReading.publications.single().metadata.title)
+
+        val acquisition = client.authenticatedGet("/opds/v2/books/book-1/file")
+        assertEquals(HttpStatusCode.OK, acquisition.status)
+        assertEquals("application/zip", acquisition.headers[HttpHeaders.ContentType])
+        assertEquals(SyntheticContent.ARCHIVE_BYTES.toList(), acquisition.body<ByteArray>().toList())
       }
     }
   }
@@ -278,6 +353,14 @@ class OpdsRoutesTest {
         sourceItemId = "file:///synthetic/series",
         fileModifiedAtMillis = 1,
         bookCount = 1,
+        createdAtMillis = 1,
+      ),
+    )
+    JooqSeriesMetadataRepository(database).upsert(
+      SeriesMetadata(
+        seriesId = SERIES_ID,
+        title = "Synthetic series",
+        publisher = "Synthetic publisher",
         createdAtMillis = 1,
       ),
     )
@@ -368,20 +451,26 @@ class OpdsRoutesTest {
       }
     }
 
-    override fun openBook(bookId: BookId): MediaContentStream? = null
+    override fun openBook(bookId: BookId): MediaContentStream? =
+      if (bookId == BOOK_ID) {
+        ByteStream(ARCHIVE_BYTES, "chapter.cbz", "application/zip")
+      } else {
+        null
+      }
 
     companion object {
       val FIRST_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xD9.toByte())
       val SECOND_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 2, 0xD9.toByte())
+      val ARCHIVE_BYTES = byteArrayOf(0x50, 0x4B, 3, 4)
     }
   }
 
   private class ByteStream(
     private val bytes: ByteArray,
     override val fileName: String,
+    override val mediaType: String = "image/jpeg",
   ) : MediaContentStream {
     private var cursor = 0
-    override val mediaType: String = "image/jpeg"
     override val contentLength: Long = bytes.size.toLong()
 
     override fun read(

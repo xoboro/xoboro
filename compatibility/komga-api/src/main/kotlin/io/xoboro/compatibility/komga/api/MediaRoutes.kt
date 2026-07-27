@@ -258,7 +258,7 @@ private fun ContentType.isKomgaCompatibleWith(other: ContentType): Boolean =
         contentSubtype.equals(other.contentSubtype, true)
     )
 
-private suspend fun io.ktor.server.application.ApplicationCall.streamBook(
+internal suspend fun io.ktor.server.application.ApplicationCall.streamBook(
   catalog: CatalogReadRepository,
   content: BookContentAccess,
 ) {

@@ -214,6 +214,25 @@ jobs:
           SYNTHETIC_PASSWORD: xoboro-differential-only
         run: |
           for endpoint in \
+            opds/v2/catalog \
+            "opds/v2/libraries/browse?page=0&size=20" \
+            "opds/v2/search?query=Synthetic"; do
+            for port in 25610 25611; do
+              url="http://127.0.0.1:${port}/${endpoint}"
+              etag="$(
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --dump-header - --output /dev/null "${url}" |
+                  awk -F': ' 'tolower($1) == "etag" {
+                    sub("\r$", "", $2)
+                    print $2
+                  }'
+              )"
+              test -n "${etag}"
+            done
+          done
+
+          for endpoint in \
             pages \
             manifest \
             thumbnail \
