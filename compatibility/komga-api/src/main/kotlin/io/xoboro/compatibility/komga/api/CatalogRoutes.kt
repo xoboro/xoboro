@@ -494,14 +494,14 @@ data class KomgaSortDto(
 private fun ApplicationCall.catalogPrincipal(): KomgaPrincipal =
   requireNotNull(principal<KomgaPrincipal>()) { "Catalog routes require authentication" }
 
-private fun User.catalogAccess(): CatalogAccess =
+internal fun User.catalogAccess(): CatalogAccess =
   CatalogAccess(
     userId = id,
     libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
     restrictions = restrictions,
   )
 
-private fun ApplicationCall.catalogPageRequest(
+internal fun ApplicationCall.catalogPageRequest(
   defaultSort: List<CatalogSort> = emptyList(),
 ): CatalogPageRequest {
   val page = request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
@@ -563,7 +563,7 @@ private suspend fun ApplicationCall.requireSupportedSearch(search: JsonObject): 
 private fun JsonObject.string(name: String): String? =
   get(name)?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 
-private fun CatalogBook.toDto(user: User): KomgaBookDto =
+internal fun CatalogBook.toDto(user: User): KomgaBookDto =
   KomgaBookDto(
     id = book.id.value,
     seriesId = book.seriesId.value,
@@ -631,7 +631,7 @@ private fun BookMetadata.toDto(): KomgaBookMetadataDto =
     lastModified = updatedAtMillis.toWireTime(),
   )
 
-private fun CatalogSeries.toDto(user: User): KomgaSeriesDto =
+internal fun CatalogSeries.toDto(user: User): KomgaSeriesDto =
   KomgaSeriesDto(
     id = series.id.value,
     libraryId = series.libraryId.value,
@@ -707,14 +707,14 @@ private fun AlternateTitle.toDto(): KomgaAlternateTitleDto =
 
 private fun CatalogGroupCount.toDto(): KomgaGroupCountDto = KomgaGroupCountDto(group, count)
 
-private fun CatalogPage<CatalogBook>.toBookPageDto(user: User): KomgaPageDto<KomgaBookDto> =
+internal fun CatalogPage<CatalogBook>.toBookPageDto(user: User): KomgaPageDto<KomgaBookDto> =
   toPageDto(content.map { it.toDto(user) })
 
-private fun CatalogPage<CatalogSeries>.toSeriesPageDto(
+internal fun CatalogPage<CatalogSeries>.toSeriesPageDto(
   user: User,
 ): KomgaPageDto<KomgaSeriesDto> = toPageDto(content.map { it.toDto(user) })
 
-private fun <T, R> CatalogPage<T>.toPageDto(mapped: List<R>): KomgaPageDto<R> {
+internal fun <T, R> CatalogPage<T>.toPageDto(mapped: List<R>): KomgaPageDto<R> {
   val totalPages = ceil(totalElements.toDouble() / size).toInt()
   val sort = KomgaSortDto(empty = false, sorted = true, unsorted = false)
   return KomgaPageDto(
