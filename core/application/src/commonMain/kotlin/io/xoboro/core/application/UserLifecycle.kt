@@ -80,6 +80,9 @@ class UserLifecycle(
 
   fun findByIdOrNull(id: UserId): User? = users.findByIdOrNull(id)
 
+  fun findByEmailIgnoreCaseOrNull(email: String): User? =
+    users.findByEmailIgnoreCaseOrNull(email)
+
   fun updateUser(user: User): User {
     requireNotNull(users.findByIdOrNull(user.id)) { "User not found: ${user.id.value}" }
     val updated = user.copy(updatedAtMillis = now())
