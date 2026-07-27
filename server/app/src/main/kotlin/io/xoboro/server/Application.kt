@@ -1,6 +1,7 @@
 package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
+import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
@@ -14,6 +15,7 @@ import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
+import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
@@ -71,6 +73,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryAdministrationLifecycle = runtime.libraryAdministrationLifecycle,
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
+    catalogReadRepository = runtime.catalogReadRepository,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
   )
@@ -91,6 +94,7 @@ fun Application.xoboroModule(
   libraryAdministrationLifecycle: LibraryAdministrationLifecycle? = null,
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
+  catalogReadRepository: CatalogReadRepository? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
 ) {
@@ -161,6 +165,7 @@ fun Application.xoboroModule(
           maintenanceRequester = requireNotNull(libraryMaintenanceRequester),
         )
       }
+      catalogReadRepository?.let(::komgaCatalogRoutes)
       oauth2LoginLifecycle?.let { oauth2 ->
         komgaOAuth2Routes(
           oauth2 = oauth2,
