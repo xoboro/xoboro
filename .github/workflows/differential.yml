@@ -247,6 +247,37 @@ jobs:
             done
           done
 
+          for route in \
+            "opds/v1.2:pages/0" \
+            "opds/v2:pages/1" \
+            "opds/v2:thumbnail"; do
+            route_prefix="${route%%:*}"
+            route_suffix="${route#*:}"
+            for target in \
+              "25610:${KOMGA_REFERENCE_BOOK_ID}" \
+              "25611:${XOBORO_CANDIDATE_BOOK_ID}"; do
+              port="${target%%:*}"
+              book_id="${target#*:}"
+              url="http://127.0.0.1:${port}/${route_prefix}/books/${book_id}/${route_suffix}"
+              etag="$(
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --dump-header - --output /dev/null "${url}" |
+                  awk -F': ' 'tolower($1) == "etag" {
+                    sub("\r$", "", $2)
+                    print $2
+                  }'
+              )"
+              test -n "${etag}"
+              http_status="$(
+                curl --silent --output /dev/null --write-out '%{http_code}' \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --header "If-None-Match: ${etag}" "${url}"
+              )"
+              test "${http_status}" = "304"
+            done
+          done
+
       - name: Show server logs after failure
         if: failure()
         run: |

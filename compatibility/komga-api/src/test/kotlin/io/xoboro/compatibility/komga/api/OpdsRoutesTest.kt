@@ -1,5 +1,6 @@
 package io.xoboro.compatibility.komga.api
 
+import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.basicAuth
 import io.ktor.client.request.get
@@ -97,6 +98,7 @@ class OpdsRoutesTest {
           idFactory = { "artwork-1" },
           currentTimeMillis = { 30 },
         )
+      val content = SyntheticContent()
 
       testApplication {
         application {
@@ -112,7 +114,7 @@ class OpdsRoutesTest {
               collections = JooqSeriesCollectionRepository(database),
               readLists = JooqReadListRepository(database),
               artwork = artwork,
-              content = SyntheticContent(),
+              content = content,
               progress = progress,
             )
           }
@@ -178,13 +180,46 @@ class OpdsRoutesTest {
           )
         }
 
+        val v1Page = client.authenticatedGet("/opds/v1.2/books/book-1/pages/0")
+        assertEquals(HttpStatusCode.OK, v1Page.status)
+        assertEquals(SyntheticContent.FIRST_BYTES.toList(), v1Page.body<ByteArray>().toList())
+        assertEquals(1, content.lastOpenedPage)
+
+        val openedBeforeV2 = content.openedPages
         val page = client.authenticatedGet("/opds/v2/books/book-1/pages/1")
         assertEquals(HttpStatusCode.OK, page.status)
         assertEquals("image/jpeg", page.headers[HttpHeaders.ContentType])
-        assertEquals(SyntheticContent.BYTES.size.toLong(), page.headers[HttpHeaders.ContentLength]?.toLong())
+        assertEquals(SyntheticContent.FIRST_BYTES.size.toLong(), page.headers[HttpHeaders.ContentLength]?.toLong())
+        assertTrue(page.headers[HttpHeaders.ContentDisposition].orEmpty().contains("Synthetic_chapter-1.jpg"))
+        val pageEntityTag = requireNotNull(page.headers[HttpHeaders.ETag])
+        val pageLastModified = requireNotNull(page.headers[HttpHeaders.LastModified])
+        assertEquals(openedBeforeV2 + 1, content.openedPages)
         assertEquals(
-          HttpStatusCode.OK,
-          client.authenticatedGet("/opds/v1.2/books/book-1/thumbnail").status,
+          HttpStatusCode.NotModified,
+          client.get("/opds/v2/books/book-1/pages/1") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, pageEntityTag)
+          }.status,
+        )
+        assertEquals(openedBeforeV2 + 2, content.openedPages)
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/opds/v2/books/book-1/pages/1") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfModifiedSince, pageLastModified)
+          }.status,
+        )
+        assertEquals(openedBeforeV2 + 2, content.openedPages)
+
+        val thumbnail = client.authenticatedGet("/opds/v1.2/books/book-1/thumbnail")
+        assertEquals(HttpStatusCode.OK, thumbnail.status)
+        val thumbnailEntityTag = requireNotNull(thumbnail.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/opds/v1.2/books/book-1/thumbnail") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, thumbnailEntityTag)
+          }.status,
         )
 
         val update =
@@ -272,13 +307,13 @@ class OpdsRoutesTest {
               number = 1,
               fileName = "001.jpg",
               mediaType = "image/jpeg",
-              fileSize = SyntheticContent.BYTES.size.toLong(),
+              fileSize = SyntheticContent.FIRST_BYTES.size.toLong(),
             ),
             BookPage(
               number = 2,
               fileName = "002.jpg",
               mediaType = "image/jpeg",
-              fileSize = SyntheticContent.BYTES.size.toLong(),
+              fileSize = SyntheticContent.SECOND_BYTES.size.toLong(),
             ),
           ),
         pageCount = 2,
@@ -305,9 +340,15 @@ class OpdsRoutesTest {
   }
 
   private class SyntheticContent : BookContentAccess {
+    var openedPages: Int = 0
+    var lastOpenedPage: Int? = null
+
     override fun pages(bookId: BookId): List<BookPage> =
       if (bookId == BOOK_ID) {
-        listOf(BookPage(1, "001.jpg", "image/jpeg", fileSize = BYTES.size.toLong()))
+        listOf(
+          BookPage(1, "001.jpg", "image/jpeg", fileSize = FIRST_BYTES.size.toLong()),
+          BookPage(2, "002.jpg", "image/jpeg", fileSize = SECOND_BYTES.size.toLong()),
+        )
       } else {
         emptyList()
       }
@@ -316,21 +357,30 @@ class OpdsRoutesTest {
       bookId: BookId,
       pageNumber: Int,
       request: PageImageRequest,
-    ): MediaContentStream? =
-      if (bookId == BOOK_ID && pageNumber == 1) ByteStream(BYTES) else null
+    ): MediaContentStream? {
+      if (bookId != BOOK_ID || pageNumber !in 1..2) return null
+      openedPages += 1
+      lastOpenedPage = pageNumber
+      return if (pageNumber == 1) {
+        ByteStream(FIRST_BYTES, "001.jpg")
+      } else {
+        ByteStream(SECOND_BYTES, "002.jpg")
+      }
+    }
 
     override fun openBook(bookId: BookId): MediaContentStream? = null
 
     companion object {
-      val BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+      val FIRST_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 0xD9.toByte())
+      val SECOND_BYTES = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 2, 0xD9.toByte())
     }
   }
 
   private class ByteStream(
     private val bytes: ByteArray,
+    override val fileName: String,
   ) : MediaContentStream {
     private var cursor = 0
-    override val fileName: String = "001.jpg"
     override val mediaType: String = "image/jpeg"
     override val contentLength: Long = bytes.size.toLong()
 
