@@ -2,11 +2,13 @@ package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
+import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -45,6 +47,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     userLifecycle = runtime.userLifecycle,
     apiKeyLifecycle = runtime.apiKeyLifecycle,
     authenticationActivityLifecycle = runtime.authenticationActivityLifecycle,
+    userSessionLifecycle = runtime.userSessionLifecycle,
     libraryRepository = runtime.libraryRepository,
   )
 }
@@ -55,6 +58,7 @@ fun Application.xoboroModule(
   userLifecycle: UserLifecycle? = null,
   apiKeyLifecycle: ApiKeyLifecycle? = null,
   authenticationActivityLifecycle: AuthenticationActivityLifecycle? = null,
+  userSessionLifecycle: UserSessionLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
@@ -69,7 +73,12 @@ fun Application.xoboroModule(
     )
   }
   userLifecycle?.let {
-    installKomgaBasicAuthentication(it, apiKeyLifecycle, authenticationActivityLifecycle)
+    installKomgaBasicAuthentication(
+      users = it,
+      apiKeys = apiKeyLifecycle,
+      authenticationActivities = authenticationActivityLifecycle,
+      sessions = userSessionLifecycle,
+    )
   }
   install(StatusPages) {
     exception<Throwable> { call, cause ->
@@ -105,6 +114,7 @@ fun Application.xoboroModule(
           activities = activities,
         )
       }
+      userSessionLifecycle?.let(::komgaSessionRoutes)
     }
   }
 }

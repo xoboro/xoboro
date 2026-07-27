@@ -23,6 +23,7 @@ class UserLifecycle(
   private val passwordHasher: PasswordHasher,
   private val userIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
+  private val invalidateUserSessions: (UserId) -> Unit = {},
 ) {
   fun isClaimed(): Boolean = users.count() > 0
 
@@ -84,15 +85,26 @@ class UserLifecycle(
     users.findByEmailIgnoreCaseOrNull(email)
 
   fun updateUser(user: User): User {
-    requireNotNull(users.findByIdOrNull(user.id)) { "User not found: ${user.id.value}" }
+    val existing =
+      requireNotNull(users.findByIdOrNull(user.id)) { "User not found: ${user.id.value}" }
     val updated = user.copy(updatedAtMillis = now())
     users.update(updated)
+    if (
+      existing.email != updated.email ||
+      existing.roles != updated.roles ||
+      existing.sharedLibraryIds != updated.sharedLibraryIds ||
+      existing.sharesAllLibraries != updated.sharesAllLibraries ||
+      existing.restrictions != updated.restrictions
+    ) {
+      invalidateUserSessions(user.id)
+    }
     return requireNotNull(users.findByIdOrNull(user.id))
   }
 
   fun updatePassword(
     id: UserId,
     rawPassword: String,
+    expireSessions: Boolean = true,
   ): User {
     require(rawPassword.isNotBlank()) { "User password must not be blank" }
     val existing = requireNotNull(users.findByIdOrNull(id)) { "User not found: ${id.value}" }
@@ -102,12 +114,14 @@ class UserLifecycle(
         updatedAtMillis = now(),
       )
     users.update(updated)
+    if (expireSessions) invalidateUserSessions(id)
     return requireNotNull(users.findByIdOrNull(id))
   }
 
   fun deleteUser(id: UserId): Boolean {
     if (users.findByIdOrNull(id) == null) return false
     users.delete(id)
+    invalidateUserSessions(id)
     return true
   }
 

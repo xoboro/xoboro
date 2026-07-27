@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Fifteen operations are partially implemented and none are yet
+167 schemas. Eighteen operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -104,7 +104,7 @@ Status:
 | Roles and authorization | PARTIAL | Komga role model, durable assignment, implicit USER authority, administrator-only management, self-mutation guards, and 401/403 tests; authorization across remaining APIs pending |
 | Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
 | Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, and persistence tests; catalog query enforcement pending |
-| Sessions and remember-me | TODO | |
+| Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation tests; remember-me and OAuth issuance pending |
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
 | OAuth2 providers | TODO | |
@@ -127,7 +127,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` plus `/api/v2/users` current-user, administration, restriction, password, API-key, and authentication-activity contracts with production runtime wiring; remaining controllers pending |
-| Komga authentication and session semantics | PARTIAL | Basic and `X-API-Key` authentication, multi-provider principal propagation, failure, deletion invalidation, and current-user tests; browser sessions and remember-me pending |
+| Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, and `X-Auth-Token` authentication, multi-provider principal propagation, seven-day inactivity, transport conversion, logout, credential deletion, and security-change invalidation tests; remember-me and OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
 | OPDS v2 and authentication document | TODO | |

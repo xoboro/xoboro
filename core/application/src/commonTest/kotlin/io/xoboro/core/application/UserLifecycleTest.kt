@@ -95,7 +95,31 @@ class UserLifecycleTest {
     assertTrue(lifecycle.findAll().isEmpty())
   }
 
-  private fun lifecycle(repository: InMemoryUserRepository): UserLifecycle =
+  @Test
+  fun `expires sessions only for security changes and explicit password resets`() {
+    val repository = InMemoryUserRepository()
+    val invalidated = mutableListOf<UserId>()
+    val lifecycle = lifecycle(repository, invalidated::add)
+    val created = lifecycle.createUser("reader@example.invalid", "reader-password")
+
+    lifecycle.updateUser(created)
+    assertTrue(invalidated.isEmpty())
+
+    lifecycle.updateUser(created.copy(roles = setOf(UserRole.KOBO_SYNC)))
+    assertEquals(listOf(created.id), invalidated)
+
+    lifecycle.updatePassword(created.id, "self-password", expireSessions = false)
+    assertEquals(1, invalidated.size)
+
+    lifecycle.updatePassword(created.id, "admin-reset", expireSessions = true)
+    lifecycle.deleteUser(created.id)
+    assertEquals(listOf(created.id, created.id, created.id), invalidated)
+  }
+
+  private fun lifecycle(
+    repository: InMemoryUserRepository,
+    invalidateUserSessions: (UserId) -> Unit = {},
+  ): UserLifecycle =
     UserLifecycle(
       users = repository,
       passwordHasher =
@@ -109,6 +133,7 @@ class UserLifecycleTest {
         },
       userIdFactory = { "user-${repository.count() + 1}" },
       currentTimeMillis = { 100 },
+      invalidateUserSessions = invalidateUserSessions,
     )
 
   private class InMemoryUserRepository : UserRepository {
