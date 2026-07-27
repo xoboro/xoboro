@@ -9,8 +9,12 @@ import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadata
+import io.xoboro.core.domain.ReadProgress
+import io.xoboro.core.domain.SeriesReadProgress
+import io.xoboro.core.domain.UserId
 
 data class CatalogAccess(
+  val userId: UserId? = null,
   val libraryIds: Set<LibraryId>? = null,
   val restrictions: ContentRestrictions = ContentRestrictions(),
 )
@@ -66,6 +70,7 @@ data class BookCatalogQuery(
   val seriesId: SeriesId? = null,
   val fullTextSearch: String? = null,
   val deleted: Boolean? = false,
+  val onDeck: Boolean = false,
 )
 
 data class SeriesCatalogQuery(
@@ -84,6 +89,7 @@ data class CatalogBook(
   val seriesTitle: String,
   val metadata: BookMetadata,
   val media: BookMedia?,
+  val readProgress: ReadProgress?,
 )
 
 data class BookMetadataAggregation(
@@ -100,6 +106,7 @@ data class CatalogSeries(
   val series: Series,
   val metadata: SeriesMetadata,
   val booksMetadata: BookMetadataAggregation,
+  val readProgress: SeriesReadProgress?,
 )
 
 data class CatalogGroupCount(

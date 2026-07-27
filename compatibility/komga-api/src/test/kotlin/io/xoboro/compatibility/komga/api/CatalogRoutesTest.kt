@@ -3,9 +3,11 @@ package io.xoboro.compatibility.komga.api
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.basicAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.patch
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -16,6 +18,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerCon
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
@@ -34,6 +37,7 @@ import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
+import io.xoboro.server.persistence.JooqReadProgressRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
@@ -62,6 +66,15 @@ class CatalogRoutesTest {
           userIdFactory = { "admin-1" },
           currentTimeMillis = { 10 },
         )
+      val catalog = JooqCatalogReadRepository(database)
+      val progress =
+        ReadProgressLifecycle(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          media = JooqBookMediaRepository(database),
+          progresses = JooqReadProgressRepository(database),
+          currentTimeMillis = { 20 },
+        )
       testApplication {
         application {
           install(ServerContentNegotiation) {
@@ -70,7 +83,8 @@ class CatalogRoutesTest {
           installKomgaBasicAuthentication(users)
           routing {
             komgaClaimRoutes(users)
-            komgaCatalogRoutes(JooqCatalogReadRepository(database))
+            komgaCatalogRoutes(catalog)
+            komgaReadProgressRoutes(catalog, progress)
           }
         }
         val client =
@@ -135,6 +149,54 @@ class CatalogRoutesTest {
         assertEquals(listOf(KomgaGroupCountDto("S", 1)), groups)
 
         assertEquals(
+          HttpStatusCode.NoContent,
+          client.patch("/api/v1/books/book-1/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(ReadProgressUpdateDto(completed = true))
+          }.status,
+        )
+        val onDeck =
+          client
+            .get("/api/v1/books/ondeck") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<KomgaBookDto>>()
+        assertEquals(listOf("book-2"), onDeck.content.map(KomgaBookDto::id))
+        assertTrue(
+          client
+            .get("/api/v1/books/book-1") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaBookDto>().readProgress?.completed == true,
+        )
+        assertEquals(
+          HttpStatusCode.BadRequest,
+          client.patch("/api/v1/books/book-2/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(ReadProgressUpdateDto(page = 99))
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.post("/api/v1/series/series-1/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          2,
+          client
+            .get("/api/v1/series/series-1") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaSeriesDto>().booksReadCount,
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.delete("/api/v1/series/series-1/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+
+        assertEquals(
           HttpStatusCode.BadRequest,
           client.post("/api/v1/series/list") {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
@@ -196,16 +258,18 @@ class CatalogRoutesTest {
         updatedAtMillis = 2,
       ),
     )
-    JooqBookMediaRepository(database).upsert(
-      BookMedia(
-        bookId = BookId("book-2"),
-        status = MediaStatus.READY,
-        mediaType = "application/zip",
-        profile = MediaProfile.DIVINA,
-        pageCount = 2,
-        createdAtMillis = 1,
-      ),
-    )
+    repeat(2) { index ->
+      JooqBookMediaRepository(database).upsert(
+        BookMedia(
+          bookId = BookId("book-${index + 1}"),
+          status = MediaStatus.READY,
+          mediaType = "application/zip",
+          profile = MediaProfile.DIVINA,
+          pageCount = 2,
+          createdAtMillis = 1,
+        ),
+      )
+    }
     assertTrue(JooqCatalogReadRepository(database).findBookByIdOrNull(BookId("book-1"), io.xoboro.core.application.CatalogAccess()) != null)
   }
 

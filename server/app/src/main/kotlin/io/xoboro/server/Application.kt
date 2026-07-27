@@ -2,6 +2,7 @@ package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
+import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
@@ -20,6 +21,7 @@ import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RememberMeTokenService
+import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
@@ -74,6 +76,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
+    readProgressLifecycle = runtime.readProgressLifecycle,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
   )
@@ -95,6 +98,7 @@ fun Application.xoboroModule(
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
+  readProgressLifecycle: ReadProgressLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
 ) {
@@ -166,6 +170,9 @@ fun Application.xoboroModule(
         )
       }
       catalogReadRepository?.let(::komgaCatalogRoutes)
+      if (catalogReadRepository != null && readProgressLifecycle != null) {
+        komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
+      }
       oauth2LoginLifecycle?.let { oauth2 ->
         komgaOAuth2Routes(
           oauth2 = oauth2,

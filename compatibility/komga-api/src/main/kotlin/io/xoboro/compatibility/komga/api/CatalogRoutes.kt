@@ -95,6 +95,25 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
             ).toBookPageDto(principal.user),
         )
       }
+      get("/ondeck") {
+        val principal = call.catalogPrincipal()
+        call.respond(
+          catalog
+            .findBooks(
+              query =
+                BookCatalogQuery(
+                  libraryIds = call.queryLibraryIds(),
+                  deleted = false,
+                  onDeck = true,
+                ),
+              access = principal.user.catalogAccess(),
+              page =
+                call.catalogPageRequest(
+                  defaultSort = listOf(CatalogSort("lastModified", CatalogSortDirection.DESC)),
+                ),
+            ).toBookPageDto(principal.user),
+        )
+      }
       get("/{bookId}") {
         val principal = call.catalogPrincipal()
         val item =
@@ -300,6 +319,7 @@ data class KomgaBookDto(
   val size: String,
   val media: KomgaMediaDto,
   val metadata: KomgaBookMetadataDto,
+  val readProgress: KomgaReadProgressDto? = null,
   val deleted: Boolean,
   val fileHash: String,
   val oneshot: Boolean,
@@ -338,6 +358,17 @@ data class KomgaBookMetadataDto(
   val linksLock: Boolean,
   val created: String,
   val lastModified: String,
+)
+
+@Serializable
+data class KomgaReadProgressDto(
+  val page: Int,
+  val completed: Boolean,
+  val readDate: String,
+  val created: String,
+  val lastModified: String,
+  val deviceId: String,
+  val deviceName: String,
 )
 
 @Serializable
@@ -465,6 +496,7 @@ private fun ApplicationCall.catalogPrincipal(): KomgaPrincipal =
 
 private fun User.catalogAccess(): CatalogAccess =
   CatalogAccess(
+    userId = id,
     libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
     restrictions = restrictions,
   )
@@ -547,6 +579,18 @@ private fun CatalogBook.toDto(user: User): KomgaBookDto =
     size = book.fileSize.toHumanSize(),
     media = media.toDto(),
     metadata = metadata.toDto(),
+    readProgress =
+      readProgress?.let {
+        KomgaReadProgressDto(
+          page = it.page,
+          completed = it.completed,
+          readDate = it.readAtMillis.toWireTime(),
+          created = it.createdAtMillis.toWireTime(),
+          lastModified = it.updatedAtMillis.toWireTime(),
+          deviceId = it.deviceId,
+          deviceName = it.deviceName,
+        )
+      },
     deleted = book.deletedAtMillis != null,
     fileHash = book.fileHash,
     oneshot = book.oneshot,
@@ -597,9 +641,12 @@ private fun CatalogSeries.toDto(user: User): KomgaSeriesDto =
     lastModified = series.updatedAtMillis.toWireTime(),
     fileLastModified = series.fileModifiedAtMillis.toWireTime(),
     booksCount = series.bookCount,
-    booksReadCount = 0,
-    booksUnreadCount = series.bookCount,
-    booksInProgressCount = 0,
+    booksReadCount = readProgress?.booksReadCount ?: 0,
+    booksUnreadCount =
+      (series.bookCount -
+        (readProgress?.booksReadCount ?: 0) -
+        (readProgress?.booksInProgressCount ?: 0)).coerceAtLeast(0),
+    booksInProgressCount = readProgress?.booksInProgressCount ?: 0,
     metadata = metadata.toDto(),
     booksMetadata = booksMetadata.toDto(),
     deleted = series.deletedAtMillis != null,
