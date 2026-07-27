@@ -2,6 +2,7 @@ package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
+import io.xoboro.compatibility.komga.api.komgaMediaRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
@@ -17,6 +18,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
@@ -76,6 +78,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
+    bookContentAccess = runtime.bookContentAccess,
     readProgressLifecycle = runtime.readProgressLifecycle,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
@@ -98,6 +101,7 @@ fun Application.xoboroModule(
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
+  bookContentAccess: BookContentAccess? = null,
   readProgressLifecycle: ReadProgressLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
@@ -170,6 +174,9 @@ fun Application.xoboroModule(
         )
       }
       catalogReadRepository?.let(::komgaCatalogRoutes)
+      if (catalogReadRepository != null && bookContentAccess != null) {
+        komgaMediaRoutes(catalogReadRepository, bookContentAccess)
+      }
       if (catalogReadRepository != null && readProgressLifecycle != null) {
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
       }

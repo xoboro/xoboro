@@ -18,10 +18,15 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerCon
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.BookContentAccess
+import io.xoboro.core.application.MediaContentStream
+import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
+import io.xoboro.core.domain.BookPage
+import io.xoboro.core.domain.Dimension
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
@@ -30,6 +35,7 @@ import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
+import io.xoboro.core.domain.UserRole
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
@@ -59,14 +65,16 @@ class CatalogRoutesTest {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("catalog-api.sqlite"))).use {
         database ->
       seedCatalog(database)
+      var userSequence = 0
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
           passwordHasher = BCryptPasswordHasher(),
-          userIdFactory = { "admin-1" },
+          userIdFactory = { "user-${++userSequence}" },
           currentTimeMillis = { 10 },
         )
       val catalog = JooqCatalogReadRepository(database)
+      val content = SyntheticBookContentAccess()
       val progress =
         ReadProgressLifecycle(
           books = JooqBookRepository(database),
@@ -84,6 +92,7 @@ class CatalogRoutesTest {
           routing {
             komgaClaimRoutes(users)
             komgaCatalogRoutes(catalog)
+            komgaMediaRoutes(catalog, content)
             komgaReadProgressRoutes(catalog, progress)
           }
         }
@@ -100,7 +109,108 @@ class CatalogRoutesTest {
             header("X-Komga-Password", ADMIN_PASSWORD)
           }.status,
         )
+        users.createUser(
+          email = RESTRICTED_EMAIL,
+          rawPassword = RESTRICTED_PASSWORD,
+          roles = emptySet<UserRole>(),
+        )
+        assertEquals(
+          HttpStatusCode.Forbidden,
+          client.get("/api/v1/books/book-1/pages/1") {
+            basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.Forbidden,
+          client.get("/api/v1/books/book-1/file") {
+            basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          }.status,
+        )
         assertEquals(HttpStatusCode.Unauthorized, client.get("/api/v1/books").status)
+        assertEquals(
+          HttpStatusCode.Unauthorized,
+          client.get("/api/v1/books/book-1/pages").status,
+        )
+
+        val pages =
+          client
+            .get("/api/v1/books/book-1/pages") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<List<KomgaPageContentDto>>()
+        assertEquals("001.png", pages.single().fileName)
+        assertEquals(320, pages.single().width)
+        assertEquals("4 B", pages.single().size)
+
+        assertEquals(
+          listOf<Byte>(1, 2, 3, 4),
+          client
+            .get("/api/v1/books/book-1/pages/1") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<ByteArray>().toList(),
+        )
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/books/book-1/pages/0?zero_based=true") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/books/book-1/pages/1/raw") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/books/book-1/pages/1?convert=jpeg") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.BadRequest,
+          client.get("/api/v1/books/book-1/pages/1?convert=gif") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/books/book-1/pages/1/thumbnail") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.NotFound,
+          client.get("/api/v1/books/missing/pages/1") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        val downloaded =
+          client.get("/api/v1/books/book-1/file") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, downloaded.status)
+        assertEquals(listOf<Byte>(10, 20, 30, 40, 50), downloaded.body<ByteArray>().toList())
+        assertTrue(
+          downloaded.headers[HttpHeaders.ContentDisposition]
+            .orEmpty()
+            .contains("synthetic.cbz"),
+        )
+        val ranged =
+          client.get("/api/v1/books/book-1/file/archive.cbz") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.Range, "bytes=1-3")
+          }
+        assertEquals(HttpStatusCode.PartialContent, ranged.status)
+        assertEquals("bytes 1-3/5", ranged.headers[HttpHeaders.ContentRange])
+        assertEquals(listOf<Byte>(20, 30, 40), ranged.body<ByteArray>().toList())
+        assertEquals(
+          HttpStatusCode.RequestedRangeNotSatisfiable,
+          client.get("/api/v1/books/book-1/file") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.Range, "bytes=20-30")
+          }.status,
+        )
+        assertEquals(8, content.closedStreams)
 
         val books =
           client
@@ -276,6 +386,90 @@ class CatalogRoutesTest {
   private companion object {
     const val ADMIN_EMAIL = "admin@example.invalid"
     const val ADMIN_PASSWORD = "SyntheticPassword1!"
+    const val RESTRICTED_EMAIL = "restricted@example.invalid"
+    const val RESTRICTED_PASSWORD = "SyntheticPassword2!"
     val KOMGA_JSON = Json { explicitNulls = false }
+  }
+
+  private class SyntheticBookContentAccess : BookContentAccess {
+    var closedStreams: Int = 0
+
+    override fun pages(bookId: BookId): List<BookPage>? =
+      if (bookId == BookId("book-1")) {
+        listOf(
+          BookPage(
+            number = 1,
+            fileName = "001.png",
+            mediaType = "image/png",
+            fileSize = 4,
+            dimension = Dimension(320, 640),
+          ),
+        )
+      } else {
+        null
+      }
+
+    override fun openPage(
+      bookId: BookId,
+      pageNumber: Int,
+      request: PageImageRequest,
+    ): MediaContentStream? {
+      if (bookId != BookId("book-1") || pageNumber != 1) return null
+      return object : MediaContentStream {
+        private val bytes = byteArrayOf(1, 2, 3, 4)
+        private var cursor = 0
+        override val mediaType: String = "image/png"
+        override val contentLength: Long = bytes.size.toLong()
+
+        override fun read(
+          buffer: ByteArray,
+          offset: Int,
+          length: Int,
+        ): Int {
+          if (cursor == bytes.size) return -1
+          val count = minOf(length, bytes.size - cursor)
+          bytes.copyInto(buffer, offset, cursor, cursor + count)
+          cursor += count
+          return count
+        }
+
+        override fun close() {
+          closedStreams += 1
+        }
+      }
+    }
+
+    override fun openBook(bookId: BookId): MediaContentStream? {
+      if (bookId != BookId("book-1")) return null
+      return object : MediaContentStream {
+        private val bytes = byteArrayOf(10, 20, 30, 40, 50)
+        private var cursor = 0
+        override val fileName: String = "synthetic.cbz"
+        override val mediaType: String = "application/zip"
+        override val contentLength: Long = bytes.size.toLong()
+
+        override fun read(
+          buffer: ByteArray,
+          offset: Int,
+          length: Int,
+        ): Int {
+          if (cursor == bytes.size) return -1
+          val count = minOf(length, bytes.size - cursor)
+          bytes.copyInto(buffer, offset, cursor, cursor + count)
+          cursor += count
+          return count
+        }
+
+        override fun skip(byteCount: Long): Long {
+          val count = minOf(byteCount.toInt(), bytes.size - cursor)
+          cursor += count
+          return count.toLong()
+        }
+
+        override fun close() {
+          closedStreams += 1
+        }
+      }
+    }
   }
 }
