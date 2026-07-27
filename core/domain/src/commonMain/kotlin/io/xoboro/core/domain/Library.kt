@@ -118,3 +118,26 @@ interface LibraryRepository {
 
   fun count(): Long
 }
+
+sealed class LibraryValidationException(
+  message: String,
+) : IllegalArgumentException(message)
+
+class LibraryRootMissingException(
+  root: SourceLocation,
+) : LibraryValidationException("Library root does not exist: $root")
+
+class LibraryRootNotDirectoryException(
+  root: SourceLocation,
+) : LibraryValidationException("Library root is not a directory: $root")
+
+class DuplicateLibraryNameException(
+  name: String,
+) : LibraryValidationException("Library name already exists: $name")
+
+class OverlappingLibraryRootException(
+  candidate: SourceLocation,
+  existing: Library,
+) : LibraryValidationException(
+    "Library root $candidate overlaps existing library ${existing.name}: ${existing.root}",
+  )

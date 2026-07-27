@@ -40,6 +40,7 @@ the public `core` modules in this repository.
 
 ```text
 core/
+  application/       Portable use cases and external-service ports
   domain/            Platform-neutral domain model
 server/
   app/               Ktor application entry point

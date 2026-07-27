@@ -49,9 +49,9 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository round-trip; overlap validation pending |
+| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository and source-aware name/root lifecycle tests; REST pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement and media-setting round-trip tests |
-| Startup, periodic, manual, and deep scan | TODO | |
+| Startup, periodic, manual, and deep scan | PARTIAL | Lifecycle queue ports and scan-trigger compatibility tests; durable worker pending |
 | Incremental add/change/move/delete detection | TODO | |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | TODO | |
