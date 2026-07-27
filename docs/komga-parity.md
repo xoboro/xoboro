@@ -23,7 +23,7 @@ Status:
 | Configuration and environment overrides | TODO | |
 | SQLite schema and migrations | PARTIAL | Flyway V1-V6 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
-| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, lease recovery, retry, dead-letter, and concurrent-claim tests |
+| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, and analysis-handler integration tests; server lifecycle pending |
 | Structured logs, health, readiness, metrics | PARTIAL | `/health` contract test |
 | Server-Sent Events | TODO | |
 | Backup and restore | TODO | |
@@ -32,7 +32,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, content partitioning, persisted page/file state, stable error codes, and restart test; delivery/worker pending |
+| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, stable error codes, and restart test; delivery pending |
 | CBR, RAR, and RAR5 | TODO | |
 | PDF | TODO | |
 | EPUB 2 and EPUB 3 | TODO | |
@@ -51,7 +51,7 @@ Status:
 |---|---|---|
 | Library CRUD and non-overlapping roots | PARTIAL | Full settings repository, routed source validation, and canonical local/symlink overlap tests; REST pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
-| Startup, periodic, manual, and deep scan | PARTIAL | Lifecycle queue ports, scan triggers, bounded local inventory/reconciliation, and deep-analysis scheduling tests; worker wiring pending |
+| Startup, periodic, manual, and deep scan | PARTIAL | Lifecycle queue ports, scan triggers, bounded local inventory/reconciliation, deep-analysis scheduling, and leased task execution tests; server lifecycle wiring pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | TODO | |

@@ -47,6 +47,7 @@ server/
   media/             Media analysis and source materialization ports
   persistence/       SQLite migrations and jOOQ persistence adapters
   sources/local/     Local filesystem source adapter
+  tasks/             Leased durable worker runtime and task routing
 compatibility/       Komga API and protocol adapters
 docs/                Architecture, parity, testing, and design records
 third-party/         Third-party license notices

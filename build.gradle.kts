@@ -17,4 +17,5 @@ tasks.named("check") {
   dependsOn(":server:media:check")
   dependsOn(":server:persistence:check")
   dependsOn(":server:sources:local:check")
+  dependsOn(":server:tasks:check")
 }
