@@ -13,10 +13,14 @@ enum class PageImageFormat(
 data class PageImageRequest(
   val format: PageImageFormat? = null,
   val maximumDimension: Int? = null,
+  val raw: Boolean = false,
 ) {
   init {
     require(maximumDimension == null || maximumDimension > 0) {
       "Maximum image dimension must be positive"
+    }
+    require(!raw || (format == null && maximumDimension == null)) {
+      "Raw page delivery cannot request image conversion"
     }
   }
 }
@@ -58,4 +62,9 @@ interface BookContentAccess {
   ): MediaContentStream?
 
   fun openBook(bookId: BookId): MediaContentStream?
+
+  fun openResource(
+    bookId: BookId,
+    resource: String,
+  ): MediaContentStream? = null
 }

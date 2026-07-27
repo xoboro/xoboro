@@ -14,6 +14,9 @@ spring-security = "7.0.4"
 commons-logging = "1.4.0"
 tsid-creator = "5.2.6"
 cryptohash = "1.0.2"
+jsoup = "1.21.1"
+jspecify = "1.0.0"
+pdfbox = "3.0.5"
 
 [libraries]
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
@@ -40,6 +43,9 @@ spring-security-crypto = { module = "org.springframework.security:spring-securit
 commons-logging = { module = "commons-logging:commons-logging", version.ref = "commons-logging" }
 tsid-creator = { module = "com.github.f4b6a3:tsid-creator", version.ref = "tsid-creator" }
 cryptohash = { module = "com.appmattus.crypto:cryptohash", version.ref = "cryptohash" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

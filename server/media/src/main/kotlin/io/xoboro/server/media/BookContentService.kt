@@ -20,6 +20,11 @@ import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.zip.ZipFile
 import javax.imageio.ImageIO
+import kotlin.math.ceil
+import org.apache.pdfbox.Loader
+import org.apache.pdfbox.multipdf.PageExtractor
+import org.apache.pdfbox.rendering.ImageType
+import org.apache.pdfbox.rendering.PDFRenderer
 
 class BookContentService(
   private val libraries: LibraryRepository,
@@ -41,7 +46,11 @@ class BookContentService(
     require(analyzed.status == MediaStatus.READY) {
       "Book media is not ready: ${analyzed.status}"
     }
-    return analyzed.pages
+    return if (book.mediaKind == MediaKind.PDF) {
+      analyzed.pages.map { it.copy(mediaType = PageImageFormat.JPEG.mediaType) }
+    } else {
+      analyzed.pages
+    }
   }
 
   override fun openPage(
@@ -51,9 +60,6 @@ class BookContentService(
   ): OpenBookContent? {
     val book = books.findByIdOrNull(bookId) ?: return null
     if (book.deletedAtMillis != null) return null
-    require(book.mediaKind == MediaKind.COMIC_ARCHIVE) {
-      "Page streaming is not implemented for ${book.mediaKind}"
-    }
     val analyzed = media.findByBookIdOrNull(book.id) ?: return null
     require(analyzed.status == MediaStatus.READY) {
       "Book media is not ready: ${analyzed.status}"
@@ -64,13 +70,83 @@ class BookContentService(
       accessesBySourceId[library.root.sourceId]
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
     val materialized = access.materialize(library.root.itemId, book.sourceItemId)
+    return when (book.mediaKind) {
+      MediaKind.COMIC_ARCHIVE, MediaKind.EPUB ->
+        openArchivePage(materialized, page, request)
+      MediaKind.PDF ->
+        openPdfPage(materialized, pageNumber, request)
+    }
+  }
+
+  override fun openResource(
+    bookId: BookId,
+    resource: String,
+  ): OpenBookContent? {
+    val book = books.findByIdOrNull(bookId) ?: return null
+    if (book.deletedAtMillis != null || book.mediaKind != MediaKind.EPUB) return null
+    val analyzed = media.findByBookIdOrNull(book.id) ?: return null
+    require(analyzed.status == MediaStatus.READY) {
+      "Book media is not ready: ${analyzed.status}"
+    }
+    val file = analyzed.files.firstOrNull { it.fileName == resource } ?: return null
+    val library = libraries.findById(book.libraryId)
+    val access =
+      accessesBySourceId[library.root.sourceId]
+        ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
+    val materialized = access.materialize(library.root.itemId, book.sourceItemId)
     var materializationOwned = true
     try {
       val archive = ZipFile(materialized.path.toFile())
       var archiveOwned = true
       try {
-        val entry = archive.getEntry(page.fileName)
-          ?: throw IllegalStateException("Indexed page is missing from the archive")
+        val entry =
+          archive.getEntry(file.fileName)
+            ?: throw IllegalStateException("Indexed EPUB resource is missing from the archive")
+        require(!entry.isDirectory) { "EPUB resource must not be a directory" }
+        val opened =
+          OpenBookContent(
+            input = archive.getInputStream(entry),
+            fileName = file.fileName.substringAfterLast('/'),
+            mediaType = file.mediaType ?: "application/octet-stream",
+            contentLength = entry.size.takeIf { it >= 0 },
+            closeResources = {
+              try {
+                archive.close()
+              } finally {
+                materialized.close()
+              }
+            },
+          )
+        archiveOwned = false
+        materializationOwned = false
+        return opened
+      } catch (failure: Throwable) {
+        if (archiveOwned) {
+          runCatching(archive::close).exceptionOrNull()?.let(failure::addSuppressed)
+        }
+        throw failure
+      }
+    } catch (failure: Throwable) {
+      if (materializationOwned) {
+        runCatching(materialized::close).exceptionOrNull()?.let(failure::addSuppressed)
+      }
+      throw failure
+    }
+  }
+
+  private fun openArchivePage(
+    materialized: MaterializedMedia,
+    page: BookPage,
+    request: PageImageRequest,
+  ): OpenBookContent {
+    var materializationOwned = true
+    try {
+      val archive = ZipFile(materialized.path.toFile())
+      var archiveOwned = true
+      try {
+        val entry =
+          archive.getEntry(page.fileName)
+            ?: throw IllegalStateException("Indexed page is missing from the archive")
         require(!entry.isDirectory) { "Indexed page must not be a directory" }
         if (request.format != null || request.maximumDimension != null) {
           val converted =
@@ -94,18 +170,18 @@ class BookContentService(
         }
         val opened =
           OpenBookContent(
-          input = archive.getInputStream(entry),
-          fileName = page.fileName.substringAfterLast('/'),
-          mediaType = page.mediaType,
-          contentLength = entry.size.takeIf { it >= 0 },
-          closeResources = {
-            try {
-              archive.close()
-            } finally {
-              materialized.close()
-            }
-          },
-        )
+            input = archive.getInputStream(entry),
+            fileName = page.fileName.substringAfterLast('/'),
+            mediaType = page.mediaType,
+            contentLength = entry.size.takeIf { it >= 0 },
+            closeResources = {
+              try {
+                archive.close()
+              } finally {
+                materialized.close()
+              }
+            },
+          )
         archiveOwned = false
         materializationOwned = false
         return opened
@@ -119,6 +195,93 @@ class BookContentService(
       if (materializationOwned) {
         runCatching(materialized::close).exceptionOrNull()?.let(failure::addSuppressed)
       }
+      throw failure
+    }
+  }
+
+  private fun openPdfPage(
+    materialized: MaterializedMedia,
+    pageNumber: Int,
+    request: PageImageRequest,
+  ): OpenBookContent {
+    try {
+      val bytes =
+        Loader.loadPDF(materialized.path.toFile()).use { document ->
+          require(pageNumber in 1..document.numberOfPages) { "PDF page does not exist" }
+          if (request.raw) {
+            ByteArrayOutputStream().use { output ->
+              PageExtractor(document, pageNumber, pageNumber).extract().use { extracted ->
+                extracted.save(output)
+              }
+              output.toByteArray()
+            }
+          } else {
+            val page = document.getPage(pageNumber - 1)
+            val widthPoints = page.cropBox.width
+            val heightPoints = page.cropBox.height
+            require(
+              widthPoints.isFinite() &&
+                heightPoints.isFinite() &&
+                widthPoints > 0 &&
+                heightPoints > 0
+            ) {
+              "PDF page dimensions are invalid"
+            }
+            val requestedDpi =
+              request.maximumDimension?.let { maximum ->
+                maximum * PDF_POINTS_PER_INCH / maxOf(widthPoints, heightPoints)
+              }
+            val renderDpi =
+              requestedDpi?.coerceIn(MINIMUM_PDF_RENDER_DPI, PDF_RENDER_DPI)
+                ?: PDF_RENDER_DPI
+            val widthPixels =
+              ceil(widthPoints * renderDpi / PDF_POINTS_PER_INCH).toLong()
+            val heightPixels =
+              ceil(heightPoints * renderDpi / PDF_POINTS_PER_INCH).toLong()
+            require(
+              widthPixels > 0 &&
+                heightPixels > 0 &&
+                widthPixels <= MAX_DECODED_PIXELS / heightPixels
+            ) {
+              "PDF page exceeds the decoded image safety limit"
+            }
+            val image =
+              PDFRenderer(document).renderImageWithDPI(
+                pageNumber - 1,
+                renderDpi,
+                ImageType.RGB,
+              )
+            val png =
+              ByteArrayOutputStream().use { output ->
+                check(ImageIO.write(image, "png", output)) {
+                  "No PNG image writer is available"
+                }
+                output.toByteArray()
+              }
+            convertImage(ByteArrayInputStream(png), request).bytes
+          }
+        }
+      materialized.close()
+      val mediaType =
+        if (request.raw) PdfMediaAnalyzer.PDF_MEDIA_TYPE
+        else (request.format ?: PageImageFormat.JPEG).mediaType
+      val extension =
+        if (request.raw) {
+          ".pdf"
+        } else if (request.format == PageImageFormat.PNG) {
+          ".png"
+        } else {
+          ".jpg"
+        }
+      return OpenBookContent(
+        input = ByteArrayInputStream(bytes),
+        fileName = "page-$pageNumber$extension",
+        mediaType = mediaType,
+        contentLength = bytes.size.toLong(),
+        closeResources = {},
+      )
+    } catch (failure: Throwable) {
+      runCatching(materialized::close).exceptionOrNull()?.let(failure::addSuppressed)
       throw failure
     }
   }
@@ -259,5 +422,9 @@ class OpenBookContent internal constructor(
     }
   }
 }
+
+private const val PDF_RENDER_DPI: Float = 150F
+private const val MINIMUM_PDF_RENDER_DPI: Float = 12F
+private const val PDF_POINTS_PER_INCH: Float = 72F
 
 private const val MAX_DECODED_PIXELS = 100_000_000L

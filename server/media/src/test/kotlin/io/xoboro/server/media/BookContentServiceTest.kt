@@ -11,7 +11,9 @@ import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.MediaFile
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -30,6 +32,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
+import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.pdmodel.PDPage
 
 class BookContentServiceTest {
   @TempDir
@@ -167,9 +171,103 @@ class BookContentServiceTest {
     assertEquals(1, access.closeCount)
   }
 
+  @Test
+  fun `streams an indexed epub resource with its declared media type`() {
+    val expected = "<html><body>Synthetic</body></html>".encodeToByteArray()
+    val access =
+      RecordingAccess(
+        archive(mapOf("OEBPS/chapter.xhtml" to expected)),
+      )
+    val service =
+      service(
+        access = access,
+        mediaKind = MediaKind.EPUB,
+        mediaType = EpubMediaAnalyzer.EPUB_MEDIA_TYPE,
+        profile = MediaProfile.EPUB,
+        pages = emptyList(),
+        files =
+          listOf(
+            MediaFile(
+              fileName = "OEBPS/chapter.xhtml",
+              mediaType = "application/xhtml+xml",
+            ),
+          ),
+      )
+
+    val opened =
+      requireNotNull(service.openResource(BOOK_ID, "OEBPS/chapter.xhtml"))
+    val actual = ByteArray(expected.size)
+    assertEquals(expected.size, opened.read(actual))
+
+    assertContentEquals(expected, actual)
+    assertEquals("application/xhtml+xml", opened.mediaType)
+    assertEquals(0, access.closeCount)
+    opened.close()
+    assertEquals(1, access.closeCount)
+  }
+
+  @Test
+  fun `renders and extracts a raw pdf page while closing materializations`() {
+    val path = temporaryDirectory.resolve("synthetic.pdf")
+    PDDocument().use { document ->
+      document.addPage(PDPage())
+      document.save(path.toFile())
+    }
+    val access = RecordingAccess(path)
+    val service =
+      service(
+        access = access,
+        mediaKind = MediaKind.PDF,
+        mediaType = PdfMediaAnalyzer.PDF_MEDIA_TYPE,
+        profile = MediaProfile.PDF,
+        pages =
+          listOf(
+            BookPage(
+              number = 1,
+              fileName = "1",
+              mediaType = PdfMediaAnalyzer.PDF_MEDIA_TYPE,
+            ),
+          ),
+      )
+
+    val rendered = requireNotNull(service.openPage(BOOK_ID, 1))
+    val renderedBytes = rendered.readAllBytes()
+    assertEquals("image/jpeg", rendered.mediaType)
+    assertTrue(ImageIO.read(ByteArrayInputStream(renderedBytes)) != null)
+    rendered.close()
+    assertEquals(1, access.closeCount)
+
+    val raw =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(raw = true),
+        ),
+      )
+    val rawBytes = raw.readAllBytes()
+    assertEquals(PdfMediaAnalyzer.PDF_MEDIA_TYPE, raw.mediaType)
+    assertTrue(rawBytes.decodeToString(0, 4).startsWith("%PDF"))
+    raw.close()
+    assertEquals(2, access.closeCount)
+  }
+
   private fun service(
     access: RecordingAccess,
     status: MediaStatus = MediaStatus.READY,
+    mediaKind: MediaKind = MediaKind.COMIC_ARCHIVE,
+    mediaType: String = "application/zip",
+    profile: MediaProfile? = null,
+    pages: List<BookPage> =
+      listOf(
+        BookPage(
+          number = 1,
+          fileName = "nested/001.png",
+          mediaType = "image/png",
+          fileSize = 4,
+        ),
+      ),
+    files: List<MediaFile> = emptyList(),
   ): BookContentService {
     val library =
       Library(
@@ -186,7 +284,7 @@ class BookContentServiceTest {
         name = "Synthetic book",
         relativePath = "series/book.cbz",
         sourceItemId = "opaque-book",
-        mediaKind = MediaKind.COMIC_ARCHIVE,
+        mediaKind = mediaKind,
         fileModifiedAtMillis = 1,
         createdAtMillis = 1,
       )
@@ -194,16 +292,10 @@ class BookContentServiceTest {
       BookMedia(
         bookId = BOOK_ID,
         status = status,
-        mediaType = "application/zip",
-        pages =
-          listOf(
-            BookPage(
-              number = 1,
-              fileName = "nested/001.png",
-              mediaType = "image/png",
-              fileSize = 4,
-            ),
-          ),
+        mediaType = mediaType,
+        profile = profile,
+        pages = pages,
+        files = files,
         createdAtMillis = 1,
       )
     return BookContentService(
@@ -225,6 +317,16 @@ class BookContentServiceTest {
     }
     return path
   }
+
+  private fun io.xoboro.core.application.MediaContentStream.readAllBytes(): ByteArray =
+    buildList<Byte> {
+      val buffer = ByteArray(4 * 1_024)
+      while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        repeat(count) { add(buffer[it]) }
+      }
+    }.toByteArray()
 
   private class RecordingAccess(
     private val archive: Path,

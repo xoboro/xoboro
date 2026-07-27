@@ -123,7 +123,7 @@ class CatalogRoutesTest {
             komgaMediaRoutes(catalog, content)
             komgaPageHashRoutes(pageHashes, pageHashLifecycle, content)
             komgaReadProgressRoutes(catalog, progress)
-            komgaWebPubRoutes(catalog, progress)
+            komgaWebPubRoutes(catalog, progress, content)
             komgaOrganizationRoutes(collections, readLists, organizations, catalog)
           }
         }
