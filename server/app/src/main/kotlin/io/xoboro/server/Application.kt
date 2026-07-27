@@ -1,6 +1,8 @@
 package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
+import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
+import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.UserLifecycle
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -56,6 +58,9 @@ fun Application.xoboroModule(
       },
     )
   }
+  userLifecycle?.let {
+    installKomgaBasicAuthentication(it)
+  }
   install(StatusPages) {
     exception<Throwable> { call, cause ->
       call.application.environment.log.error("Unhandled request failure", cause)
@@ -79,6 +84,7 @@ fun Application.xoboroModule(
     }
     userLifecycle?.let {
       komgaClaimRoutes(it)
+      komgaAuthenticatedUserRoutes()
     }
   }
 }
