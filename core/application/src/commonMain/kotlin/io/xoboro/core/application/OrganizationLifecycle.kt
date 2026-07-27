@@ -11,6 +11,36 @@ import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesRepository
 
+sealed interface OrganizationEvent {
+  data class CollectionAdded(
+    val collection: SeriesCollection,
+  ) : OrganizationEvent
+
+  data class CollectionUpdated(
+    val collection: SeriesCollection,
+  ) : OrganizationEvent
+
+  data class CollectionDeleted(
+    val collection: SeriesCollection,
+  ) : OrganizationEvent
+
+  data class ReadListAdded(
+    val readList: ReadList,
+  ) : OrganizationEvent
+
+  data class ReadListUpdated(
+    val readList: ReadList,
+  ) : OrganizationEvent
+
+  data class ReadListDeleted(
+    val readList: ReadList,
+  ) : OrganizationEvent
+}
+
+fun interface OrganizationEventPublisher {
+  fun publish(event: OrganizationEvent)
+}
+
 class OrganizationLifecycle(
   private val collections: SeriesCollectionRepository,
   private val readLists: ReadListRepository,
@@ -19,6 +49,7 @@ class OrganizationLifecycle(
   private val collectionIdFactory: () -> String,
   private val readListIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
+  private val eventPublisher: OrganizationEventPublisher = OrganizationEventPublisher {},
 ) {
   fun createCollection(
     name: String,
@@ -38,6 +69,7 @@ class OrganizationLifecycle(
       seriesIds = seriesIds,
       createdAtMillis = now,
     ).also(collections::insert)
+      .also { eventPublisher.publish(OrganizationEvent.CollectionAdded(it)) }
   }
 
   fun updateCollection(
@@ -59,11 +91,13 @@ class OrganizationLifecycle(
         seriesIds = updatedSeriesIds,
         updatedAtMillis = now(),
       ).also(collections::update)
+      .also { eventPublisher.publish(OrganizationEvent.CollectionUpdated(it)) }
   }
 
   fun deleteCollection(id: CollectionId): Boolean {
-    if (collections.findByIdOrNull(id) == null) return false
+    val existing = collections.findByIdOrNull(id) ?: return false
     collections.delete(id)
+    eventPublisher.publish(OrganizationEvent.CollectionDeleted(existing))
     return true
   }
 
@@ -87,6 +121,7 @@ class OrganizationLifecycle(
       bookIds = bookIds,
       createdAtMillis = now,
     ).also(readLists::insert)
+      .also { eventPublisher.publish(OrganizationEvent.ReadListAdded(it)) }
   }
 
   fun updateReadList(
@@ -110,11 +145,13 @@ class OrganizationLifecycle(
         bookIds = updatedBookIds,
         updatedAtMillis = now(),
       ).also(readLists::update)
+      .also { eventPublisher.publish(OrganizationEvent.ReadListUpdated(it)) }
   }
 
   fun deleteReadList(id: ReadListId): Boolean {
-    if (readLists.findByIdOrNull(id) == null) return false
+    val existing = readLists.findByIdOrNull(id) ?: return false
     readLists.delete(id)
+    eventPublisher.publish(OrganizationEvent.ReadListDeleted(existing))
     return true
   }
 

@@ -34,7 +34,7 @@ Status:
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | COMPLETE | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, bounded queue/worker gauges, and runtime tests |
 | Structured logs, health, readiness, metrics | COMPLETE | Single-line JSON events and query-free access logs, worker exception logging, `/health` liveness, SQLite-backed `/ready`, and token-protected bounded Prometheus request/readiness/queue/worker/uptime metrics with no path or identifier labels |
-| Server-Sent Events | PARTIAL | Authenticated bounded per-user streams, role/user filtering, 15-second heartbeat comments, 10-second administrator task snapshots, graceful runtime shutdown, and Library/read-progress lifecycle publication with route and hub tests; remaining catalog, organization, artwork, session, and differential events pending |
+| Server-Sent Events | PARTIAL | Authenticated bounded per-user streams, role/user filtering, 15-second heartbeat comments, 10-second administrator task snapshots, graceful runtime shutdown, and post-commit Library/Series/Book/import/organization/artwork/read-progress/session publication through one exact-name bridge with producer and contract tests; reconnect and differential delivery behavior pending |
 | Backup and restore | COMPLETE | Live-WAL `VACUUM INTO` snapshots, integrity validation before publish and restore, file flush, same-directory atomic replacement with documented fallback, corrupt-input preservation, stale WAL/SHM cleanup, running-server exclusion, explicit overwrite consent, offline CLI commands, and restart tests |
 
 ## Media
@@ -83,9 +83,9 @@ Status:
 | One-shot detection | PARTIAL | Configured-directory, root-series, and candidate derivation tests; metadata aggregation pending |
 | ISBN barcode detection | PARTIAL | Setting-aware EAN-13 decoding scans at most the final three pages in reverse then the first three, excludes EPUB, validates 978/979 ISBN prefixes and check digits, uses bounded source-subsampled images, isolates damaged pages, closes streams, and has generated synthetic barcode tests; differential image fixtures pending |
 | Series aggregation | PARTIAL | Transactional path grouping, book counts, restore/delete, partial-scan safety, ordered metadata providers, and lock-preserving book/series merge tests; full Komga aggregation precedence pending |
-| Field locks and manual patches | PARTIAL | Durable normalized lock sets, refresh-time lock preservation, presence-sensitive book/series REST patches, explicit-null clearing, administrator authorization, and persistence/route tests; differential validation and event emission pending |
-| Bulk metadata updates | PARTIAL | Komga-compatible book-ID-to-patch map skips missing targets and updates valid metadata; aggregation events and differential validation pending |
-| Multiple thumbnails and selection | PARTIAL | Shared artwork lifecycle persists multiple owner-scoped candidates with one selected row, restart durability, owner isolation, administrator mutation, and all 24 Komga poster operations; generated/sidecar ingestion and event emission pending |
+| Field locks and manual patches | PARTIAL | Durable normalized lock sets, refresh-time lock preservation, presence-sensitive book/series REST patches, explicit-null clearing, administrator authorization, persistence/route tests, and post-write Book/Series invalidation events; differential validation pending |
+| Bulk metadata updates | PARTIAL | Komga-compatible book-ID-to-patch map skips missing targets, updates valid metadata, and emits one Book invalidation per successful patch; differential validation pending |
+| Multiple thumbnails and selection | PARTIAL | Shared artwork lifecycle persists multiple owner-scoped candidates with one selected row, restart durability, owner isolation, administrator mutation, all 24 Komga poster operations, generated/sidecar ingestion, and exact owner-specific add/delete events; differential image caching pending |
 
 ## Catalog and organization
 
@@ -139,7 +139,7 @@ Status:
 | OPDS v2 and authentication document | PARTIAL | All 30 feed, browse, search, artwork, page, profile manifest, authentication-document, and progression operations reuse shared WebPub/progress boundaries with synthetic integration coverage; exact unauthorized document and differential fixtures pending |
 | Kobo Sync and KEPUB | PARTIAL | All 15 URL-token routes, role enforcement, initialization, device auth, access-filtered metadata/state/shelves, restart-safe incremental SQLite snapshots and continuation cursors, thumbnails, EPUB downloads, bounded external kepubify conversion with revision cache invalidation, and no-proxy catch-all behavior have synthetic integration coverage; Kobo Store proxy merging and differential device fixtures pending |
 | KOReader Sync | PARTIAL | All four routes, `X-Auth-User` API-key authentication, role enforcement, duplicate/missing fingerprint behavior, exact partial-MD5 generation, PDF/DiViNa page progress, both EPUB locator forms, durable Readium conversion, and synthetic integration tests; reference differential fixtures pending |
-| SSE event contracts | PARTIAL | Authenticated Ktor SSE stream, Komga event names and JSON DTOs, bounded subscribers, heartbeat, administrator task status, user isolation, and Library/read-progress publishers; remaining event producers and differential reconnect behavior pending |
+| SSE event contracts | PARTIAL | Authenticated Ktor SSE stream, all Komga 1.25 event names and JSON DTOs, bounded subscribers, heartbeat, administrator task/import filtering, user-isolated progress/session delivery, and lifecycle producers for Library/Series/Book/Collection/ReadList/artwork; differential reconnect behavior pending |
 
 ## Migration and operations
 

@@ -1,6 +1,7 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.ArtworkLifecycle
+import io.xoboro.core.application.ArtworkEvent
 import io.xoboro.core.application.LocalArtworkRefreshLifecycle
 import io.xoboro.core.domain.Artwork
 import io.xoboro.core.domain.ArtworkContent
@@ -112,12 +113,14 @@ class JooqArtworkRepositoryTest {
         ),
       )
       var sequence = 0
+      val events = mutableListOf<ArtworkEvent>()
       val lifecycle =
         ArtworkLifecycle(
           artwork = JooqArtworkRepository(database),
           processor = SafeJpegArtworkProcessor(),
           idFactory = { "artwork-${++sequence}" },
           currentTimeMillis = { sequence.toLong() },
+          eventPublisher = events::add,
         )
       val refresh =
         LocalArtworkRefreshLifecycle(
@@ -148,6 +151,8 @@ class JooqArtworkRepositoryTest {
       assertEquals(0, refresh.refreshBook(BOOK_ID))
       assertEquals(listOf(uploaded.id), lifecycle.findAll(bookOwner).map { it.id })
       assertTrue(lifecycle.findAll(bookOwner).single().selected)
+      assertEquals(5, events.count { it is ArtworkEvent.Added })
+      assertEquals(3, events.count { it is ArtworkEvent.Deleted })
     }
   }
 

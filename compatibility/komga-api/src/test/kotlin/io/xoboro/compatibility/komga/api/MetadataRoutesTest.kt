@@ -17,6 +17,8 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerCon
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.MetadataEditingLifecycle
+import io.xoboro.core.application.CatalogMutationEvent
+import io.xoboro.core.application.CatalogMutationKind
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
@@ -69,6 +71,7 @@ class MetadataRoutesTest {
       val series = JooqSeriesRepository(database)
       val bookMetadata = JooqBookMetadataRepository(database)
       val seriesMetadata = JooqSeriesMetadataRepository(database)
+      val events = mutableListOf<CatalogMutationEvent>()
       val editing =
         MetadataEditingLifecycle(
           books,
@@ -76,6 +79,7 @@ class MetadataRoutesTest {
           bookMetadata,
           seriesMetadata,
           currentTimeMillis = { 20 },
+          eventPublisher = events::add,
         )
       val facets = JooqMetadataFacetRepository(database)
 
@@ -176,6 +180,15 @@ class MetadataRoutesTest {
             ?.get("name")
             ?.jsonPrimitive
             ?.content,
+        )
+        assertEquals(
+          listOf(CatalogMutationKind.UPDATED, CatalogMutationKind.UPDATED),
+          events.map {
+            when (it) {
+              is CatalogMutationEvent.Book -> it.kind
+              is CatalogMutationEvent.Series -> it.kind
+            }
+          },
         )
       }
     }

@@ -37,7 +37,6 @@ import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
-import io.xoboro.core.application.ReadProgressEvent
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.ServerReleaseCatalog
@@ -57,9 +56,7 @@ import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
 import io.xoboro.compatibility.komga.api.KepubContentAccess
-import io.xoboro.compatibility.komga.api.KomgaLibrarySseDto
-import io.xoboro.compatibility.komga.api.KomgaReadProgressSeriesSseDto
-import io.xoboro.compatibility.komga.api.KomgaReadProgressSseDto
+import io.xoboro.compatibility.komga.api.KomgaSseEventBridge
 import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskQueueSseDto
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
@@ -263,12 +260,18 @@ class XoboroRuntime private constructor(
         val readProgresses = JooqReadProgressRepository(database)
         val collections = JooqSeriesCollectionRepository(database)
         val readLists = JooqReadListRepository(database)
+        val sseEvents = KomgaSseEventHub().also { sseEventHub = it }
+        val sseBridge =
+          KomgaSseEventBridge(sseEvents) { bookId ->
+            books.findByIdOrNull(bookId)?.seriesId
+          }
         val artworkLifecycle =
           ArtworkLifecycle(
             artwork = JooqArtworkRepository(database),
             processor = SafeJpegArtworkProcessor(),
             idFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = sseBridge::publish,
           )
         val organizationLifecycle =
           OrganizationLifecycle(
@@ -279,6 +282,7 @@ class XoboroRuntime private constructor(
             collectionIdFactory = { TsidCreator.getTsid256().toString() },
             readListIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = sseBridge::publish,
           )
         val catalogReads =
           JooqCatalogReadRepository(
@@ -297,6 +301,7 @@ class XoboroRuntime private constructor(
             bookMetadata = bookMetadata,
             seriesMetadata = seriesMetadata,
             currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = sseBridge::publish,
           )
         val metadataFacets = JooqMetadataFacetRepository(database)
         val pageHashes = JooqPageHashRepository(database)
@@ -305,7 +310,6 @@ class XoboroRuntime private constructor(
             hashes = pageHashes,
             currentTimeMillis = System::currentTimeMillis,
           )
-        val sseEvents = KomgaSseEventHub().also { sseEventHub = it }
         val readProgressLifecycle =
           ReadProgressLifecycle(
             books = books,
@@ -313,50 +317,7 @@ class XoboroRuntime private constructor(
             media = media,
             progresses = readProgresses,
             currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = { event ->
-              when (event) {
-                is ReadProgressEvent.Changed ->
-                  sseEvents.publishJson(
-                    name = "ReadProgressChanged",
-                    data =
-                      KomgaReadProgressSseDto(
-                        bookId = event.progress.bookId.value,
-                        userId = event.userId.value,
-                      ),
-                    userIdOnly = event.userId.value,
-                  )
-                is ReadProgressEvent.Deleted ->
-                  sseEvents.publishJson(
-                    name = "ReadProgressDeleted",
-                    data =
-                      KomgaReadProgressSseDto(
-                        bookId = event.bookId.value,
-                        userId = event.userId.value,
-                      ),
-                    userIdOnly = event.userId.value,
-                  )
-                is ReadProgressEvent.SeriesChanged ->
-                  sseEvents.publishJson(
-                    name = "ReadProgressSeriesChanged",
-                    data =
-                      KomgaReadProgressSeriesSseDto(
-                        seriesId = event.seriesId.value,
-                        userId = event.userId.value,
-                      ),
-                    userIdOnly = event.userId.value,
-                  )
-                is ReadProgressEvent.SeriesDeleted ->
-                  sseEvents.publishJson(
-                    name = "ReadProgressSeriesDeleted",
-                    data =
-                      KomgaReadProgressSeriesSseDto(
-                        seriesId = event.seriesId.value,
-                        userId = event.userId.value,
-                      ),
-                    userIdOnly = event.userId.value,
-                  )
-              }
-            },
+            eventPublisher = sseBridge::publish,
           )
         val koreaderSyncLifecycle =
           KoreaderSyncLifecycle(
@@ -417,6 +378,7 @@ class XoboroRuntime private constructor(
             userIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
             invalidateUserSessions = { sessionRepository.deleteByUserId(it) },
+            eventPublisher = sseBridge::publish,
           )
         val apiKeyLifecycle =
           ApiKeyLifecycle(
@@ -487,7 +449,11 @@ class XoboroRuntime private constructor(
         val catalogScanner =
           CatalogScanner(
             inventories = listOf(LocalSourceInventory()),
-            reconciliationStore = JooqCatalogReconciliationStore(database),
+            reconciliationStore =
+              JooqCatalogReconciliationStore(
+                database = database,
+                eventPublisher = sseBridge::publish,
+              ),
             currentTimeMillis = System::currentTimeMillis,
           )
         val libraryAvailabilityLifecycle =
@@ -496,10 +462,7 @@ class XoboroRuntime private constructor(
             currentTimeMillis = System::currentTimeMillis,
             eventPublisher =
               LibraryEventPublisher { event ->
-                sseEvents.publishJson(
-                  name = "LibraryChanged",
-                  data = KomgaLibrarySseDto(event.library.id.value),
-                )
+                sseBridge.publish(event)
               },
           )
         val scanEmitter =
@@ -578,15 +541,7 @@ class XoboroRuntime private constructor(
                   ),
                 maintenanceQueue = libraryMaintenanceQueue,
                 eventPublisher = { event ->
-                  sseEvents.publishJson(
-                    name =
-                      when (event) {
-                        is LibraryEvent.Added -> "LibraryAdded"
-                        is LibraryEvent.Deleted -> "LibraryDeleted"
-                        is LibraryEvent.Updated -> "LibraryChanged"
-                      },
-                    data = KomgaLibrarySseDto(event.library.id.value),
-                  )
+                  sseBridge.publish(event)
                   when (event) {
                     is LibraryEvent.Added ->
                       createdLibraryScanScheduler.schedule(event.library)
@@ -661,6 +616,7 @@ class XoboroRuntime private constructor(
                 MylarSeriesMetadataProvider(listOf(LocalSourceSidecarAccess())),
               ),
             currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = sseBridge::publish,
           )
         val localArtworkRefreshLifecycle =
           LocalArtworkRefreshLifecycle(
@@ -735,6 +691,7 @@ class XoboroRuntime private constructor(
             history = historicalEvents,
             historyIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            importEventPublisher = sseBridge::publish,
           )
         val createdHeartbeat = ScheduledLeaseHeartbeat()
         heartbeat = createdHeartbeat

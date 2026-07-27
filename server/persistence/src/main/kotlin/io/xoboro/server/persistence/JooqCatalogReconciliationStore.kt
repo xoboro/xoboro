@@ -1,17 +1,23 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.CatalogCandidate
+import io.xoboro.core.application.CatalogMutationEvent
+import io.xoboro.core.application.CatalogMutationEventPublisher
+import io.xoboro.core.application.CatalogMutationKind
 import io.xoboro.core.application.CatalogReconciliationResult
 import io.xoboro.core.application.CatalogReconciliationStore
 import io.xoboro.core.application.ScanSessionId
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.SeriesId
 import java.util.UUID
 import org.jooq.DSLContext
 import org.jooq.Record
 
 class JooqCatalogReconciliationStore(
   private val database: XoboroDatabase,
+  private val eventPublisher: CatalogMutationEventPublisher = CatalogMutationEventPublisher {},
   private val sessionIdFactory: () -> String = { UUID.randomUUID().toString() },
 ) : CatalogReconciliationStore {
   override fun begin(
@@ -76,7 +82,7 @@ class JooqCatalogReconciliationStore(
     require(ignoredFiles >= 0) { "Ignored file count must not be negative" }
     require(completedAtMillis >= 0) { "Scan completion timestamp must not be negative" }
 
-    return database.transaction { transaction ->
+    val completion = database.transaction { transaction ->
       val session = transaction.requireStagingSession(sessionId)
       val libraryId = session.requiredString("library_id")
       val deep = session.requiredBoolean("deep")
@@ -104,6 +110,12 @@ class JooqCatalogReconciliationStore(
         if (failedEntries == 0L) transaction.countDeletedBooks(sessionId, libraryId) else 0L
       val deletedSeries =
         if (failedEntries == 0L) transaction.countDeletedSeries(sessionId, libraryId) else 0L
+      val eventSnapshot =
+        transaction.catalogEventSnapshot(
+          sessionId = sessionId,
+          libraryId = libraryId,
+          includeDeletions = failedEntries == 0L,
+        )
 
       transaction.insertMissingSeries(sessionId, libraryId, completedAtMillis)
       transaction.updateMatchedBooks(sessionId, libraryId, completedAtMillis)
@@ -136,25 +148,37 @@ class JooqCatalogReconciliationStore(
         ignoredFiles,
         sessionId.value,
       )
+      val events =
+        transaction.catalogMutationEvents(
+          sessionId = sessionId,
+          libraryId = libraryId,
+          snapshot = eventSnapshot,
+        )
       transaction.execute(
         "DELETE FROM catalog_scan_candidate WHERE session_id = ?",
         sessionId.value,
       )
 
-      CatalogReconciliationResult(
-        addedBooks = addedBooks,
-        changedBooks = changedBooks,
-        movedBooks = movedBooks,
-        restoredBooks = restoredBooks,
-        deletedBooks = deletedBooks,
-        addedSeries = addedSeries,
-        restoredSeries = restoredSeries,
-        deletedSeries = deletedSeries,
-        ignoredFiles = ignoredFiles,
-        failedEntries = failedEntries,
-        partial = failedEntries > 0,
+      CatalogCompletion(
+        result =
+          CatalogReconciliationResult(
+            addedBooks = addedBooks,
+            changedBooks = changedBooks,
+            movedBooks = movedBooks,
+            restoredBooks = restoredBooks,
+            deletedBooks = deletedBooks,
+            addedSeries = addedSeries,
+            restoredSeries = restoredSeries,
+            deletedSeries = deletedSeries,
+            ignoredFiles = ignoredFiles,
+            failedEntries = failedEntries,
+            partial = failedEntries > 0,
+          ),
+        events = events,
       )
     }
+    completion.events.forEach(eventPublisher::publish)
+    return completion.result
   }
 
   override fun abort(
@@ -312,6 +336,170 @@ class JooqCatalogReconciliationStore(
       "SELECT count(*) FROM catalog_scan_candidate WHERE session_id = ? AND $trustedCondition",
       sessionId.value,
     ).countValue()
+
+  private fun DSLContext.catalogEventSnapshot(
+    sessionId: ScanSessionId,
+    libraryId: String,
+    includeDeletions: Boolean,
+  ): CatalogEventSnapshot {
+    val newSeriesPaths =
+      fetch(
+        """
+        SELECT DISTINCT candidate.series_relative_path
+        FROM catalog_scan_candidate candidate
+        WHERE candidate.session_id = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM series
+            WHERE series.library_id = ?
+              AND series.relative_uri = candidate.series_relative_path
+          )
+        """.trimIndent(),
+        sessionId.value,
+        libraryId,
+      ).mapTo(linkedSetOf()) { it.requiredString("series_relative_path") }
+    val updatedSeriesIds =
+      fetch(
+        """
+        SELECT DISTINCT series.id
+        FROM series
+        JOIN catalog_scan_candidate candidate
+          ON candidate.series_relative_path = series.relative_uri
+        WHERE candidate.session_id = ?
+          AND series.library_id = ?
+          AND (
+            series.deleted_at_ms IS NOT NULL
+            OR candidate.change_type <> 'UNCHANGED'
+            OR candidate.was_deleted = 1
+          )
+        """.trimIndent(),
+        sessionId.value,
+        libraryId,
+      ).mapTo(linkedSetOf()) { it.requiredString("id") }
+    if (!includeDeletions) {
+      return CatalogEventSnapshot(newSeriesPaths, updatedSeriesIds, emptyList(), emptyList())
+    }
+    val deletedBooks =
+      fetch(
+        """
+        SELECT book.id, book.series_id, book.library_id
+        FROM book
+        WHERE book.library_id = ?
+          AND book.deleted_at_ms IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM catalog_scan_candidate candidate
+            WHERE candidate.session_id = ? AND candidate.matched_book_id = book.id
+          )
+        ORDER BY book.id
+        """.trimIndent(),
+        libraryId,
+        sessionId.value,
+      ).map { record ->
+        CatalogMutationEvent.Book(
+          kind = CatalogMutationKind.DELETED,
+          bookId = BookId(record.requiredString("id")),
+          seriesId = SeriesId(record.requiredString("series_id")),
+          libraryId = LibraryId(record.requiredString("library_id")),
+        )
+      }
+    updatedSeriesIds += deletedBooks.map { it.seriesId.value }
+    val deletedSeries =
+      fetch(
+        """
+        SELECT series.id, series.library_id
+        FROM series
+        WHERE series.library_id = ?
+          AND series.deleted_at_ms IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM catalog_scan_candidate candidate
+            WHERE candidate.session_id = ?
+              AND candidate.series_relative_path = series.relative_uri
+          )
+        ORDER BY series.id
+        """.trimIndent(),
+        libraryId,
+        sessionId.value,
+      ).map { record ->
+        CatalogMutationEvent.Series(
+          kind = CatalogMutationKind.DELETED,
+          seriesId = SeriesId(record.requiredString("id")),
+          libraryId = LibraryId(record.requiredString("library_id")),
+        )
+      }
+    return CatalogEventSnapshot(
+      newSeriesPaths = newSeriesPaths,
+      updatedSeriesIds = updatedSeriesIds,
+      deletedBooks = deletedBooks,
+      deletedSeries = deletedSeries,
+    )
+  }
+
+  private fun DSLContext.catalogMutationEvents(
+    sessionId: ScanSessionId,
+    libraryId: String,
+    snapshot: CatalogEventSnapshot,
+  ): List<CatalogMutationEvent> {
+    val books =
+      fetch(
+        """
+        SELECT
+          book.id,
+          book.series_id,
+          book.library_id,
+          candidate.change_type,
+          candidate.was_deleted
+        FROM catalog_scan_candidate candidate
+        JOIN book ON book.id = candidate.matched_book_id
+        WHERE candidate.session_id = ?
+          AND (
+            candidate.change_type <> 'UNCHANGED'
+            OR candidate.was_deleted = 1
+          )
+        ORDER BY book.id
+        """.trimIndent(),
+        sessionId.value,
+      ).map { record ->
+        CatalogMutationEvent.Book(
+          kind =
+            if (record.requiredString("change_type") == "NEW") {
+              CatalogMutationKind.ADDED
+            } else {
+              CatalogMutationKind.UPDATED
+            },
+          bookId = BookId(record.requiredString("id")),
+          seriesId = SeriesId(record.requiredString("series_id")),
+          libraryId = LibraryId(record.requiredString("library_id")),
+        )
+      }
+    val series =
+      fetch(
+        """
+        SELECT DISTINCT series.id, series.library_id, series.relative_uri
+        FROM series
+        JOIN catalog_scan_candidate candidate
+          ON candidate.series_relative_path = series.relative_uri
+        WHERE candidate.session_id = ? AND series.library_id = ?
+        ORDER BY series.id
+        """.trimIndent(),
+        sessionId.value,
+        libraryId,
+      ).mapNotNull { record ->
+        val seriesId = record.requiredString("id")
+        val kind =
+          when {
+            record.requiredString("relative_uri") in snapshot.newSeriesPaths ->
+              CatalogMutationKind.ADDED
+            seriesId in snapshot.updatedSeriesIds ->
+              CatalogMutationKind.UPDATED
+            else -> null
+          } ?: return@mapNotNull null
+        CatalogMutationEvent.Series(
+          kind = kind,
+          seriesId = SeriesId(seriesId),
+          libraryId = LibraryId(record.requiredString("library_id")),
+        )
+      }
+    return series + books + snapshot.deletedBooks + snapshot.deletedSeries
+  }
 
   private fun DSLContext.countAddedSeries(
     sessionId: ScanSessionId,
@@ -677,6 +865,18 @@ class JooqCatalogReconciliationStore(
     } ?: 0L
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private data class CatalogEventSnapshot(
+    val newSeriesPaths: Set<String>,
+    val updatedSeriesIds: Set<String>,
+    val deletedBooks: List<CatalogMutationEvent.Book>,
+    val deletedSeries: List<CatalogMutationEvent.Series>,
+  )
+
+  private data class CatalogCompletion(
+    val result: CatalogReconciliationResult,
+    val events: List<CatalogMutationEvent>,
+  )
 
   private companion object {
     val STAGE_CANDIDATE_SQL =

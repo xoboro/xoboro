@@ -79,6 +79,7 @@ class MetadataRefreshLifecycle(
   private val bookProviders: List<BookMetadataProvider>,
   private val seriesProviders: List<SeriesMetadataProvider>,
   private val currentTimeMillis: () -> Long,
+  private val eventPublisher: CatalogMutationEventPublisher = CatalogMutationEventPublisher {},
 ) {
   fun refreshBook(bookId: BookId): BookMetadata? {
     val book = books.findByIdOrNull(bookId) ?: return null
@@ -98,7 +99,16 @@ class MetadataRefreshLifecycle(
         provider.provide(library, book)?.let { patch -> metadata.applyPatch(patch) } ?: metadata
       }.copy(updatedAtMillis = now(existing.updatedAtMillis))
     bookMetadata.upsert(updated)
-    return bookMetadata.findByBookIdOrNull(book.id)
+    return bookMetadata.findByBookIdOrNull(book.id)?.also {
+      eventPublisher.publish(
+        CatalogMutationEvent.Book(
+          kind = CatalogMutationKind.UPDATED,
+          bookId = book.id,
+          seriesId = book.seriesId,
+          libraryId = book.libraryId,
+        ),
+      )
+    }
   }
 
   fun refreshSeries(seriesId: SeriesId): SeriesMetadata? {
@@ -120,7 +130,15 @@ class MetadataRefreshLifecycle(
         } ?: metadata
       }.copy(updatedAtMillis = now(existing.updatedAtMillis))
     seriesMetadata.upsert(updated)
-    return seriesMetadata.findBySeriesIdOrNull(item.id)
+    return seriesMetadata.findBySeriesIdOrNull(item.id)?.also {
+      eventPublisher.publish(
+        CatalogMutationEvent.Series(
+          kind = CatalogMutationKind.UPDATED,
+          seriesId = item.id,
+          libraryId = item.libraryId,
+        ),
+      )
+    }
   }
 
   private fun now(previousUpdatedAtMillis: Long): Long =

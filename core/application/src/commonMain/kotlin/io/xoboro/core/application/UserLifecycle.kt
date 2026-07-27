@@ -18,12 +18,23 @@ interface PasswordHasher {
   ): Boolean
 }
 
+sealed interface UserEvent {
+  data class SessionsExpired(
+    val userId: UserId,
+  ) : UserEvent
+}
+
+fun interface UserEventPublisher {
+  fun publish(event: UserEvent)
+}
+
 class UserLifecycle(
   private val users: UserRepository,
   private val passwordHasher: PasswordHasher,
   private val userIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
   private val invalidateUserSessions: (UserId) -> Unit = {},
+  private val eventPublisher: UserEventPublisher = UserEventPublisher {},
 ) {
   fun isClaimed(): Boolean = users.count() > 0
 
@@ -96,7 +107,7 @@ class UserLifecycle(
       existing.sharesAllLibraries != updated.sharesAllLibraries ||
       existing.restrictions != updated.restrictions
     ) {
-      invalidateUserSessions(user.id)
+      expireSessions(user.id)
     }
     return requireNotNull(users.findByIdOrNull(user.id))
   }
@@ -114,14 +125,14 @@ class UserLifecycle(
         updatedAtMillis = now(),
       )
     users.update(updated)
-    if (expireSessions) invalidateUserSessions(id)
+    if (expireSessions) expireSessions(id)
     return requireNotNull(users.findByIdOrNull(id))
   }
 
   fun deleteUser(id: UserId): Boolean {
     if (users.findByIdOrNull(id) == null) return false
     users.delete(id)
-    invalidateUserSessions(id)
+    expireSessions(id)
     return true
   }
 
@@ -138,4 +149,9 @@ class UserLifecycle(
     currentTimeMillis().also {
       require(it >= 0) { "User lifecycle timestamp must not be negative" }
     }
+
+  private fun expireSessions(userId: UserId) {
+    invalidateUserSessions(userId)
+    eventPublisher.publish(UserEvent.SessionsExpired(userId))
+  }
 }
