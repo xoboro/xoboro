@@ -500,6 +500,7 @@ fun Application.xoboroModule(
           artwork = artworkLifecycle,
           content = bookContentAccess,
           progress = readProgressLifecycle,
+          facets = metadataFacetRepository,
         )
       }
       oauth2LoginLifecycle?.let { oauth2 ->

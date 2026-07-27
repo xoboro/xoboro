@@ -52,6 +52,51 @@
       "comparison": {
         "bodyMode": "JSON"
       }
+    },
+    {
+      "name": "OPDS v2 recommended catalog",
+      "path": "/opds/v2/catalog",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href",
+          "/groups/*/links/*/href",
+          "/groups/*/navigation/*/href",
+          "/groups/*/publications/*/metadata/modified",
+          "/groups/*/publications/*/metadata/belongsTo/series/*/links/*/href",
+          "/groups/*/publications/*/links/*/href",
+          "/groups/*/publications/*/links/*/properties/authenticate/href",
+          "/groups/*/publications/*/images/*/href",
+          "/groups/*/publications/*/images/*/properties/authenticate/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 library browse",
+      "path": "/opds/v2/libraries/browse?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href",
+          "/groups/*/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 title search",
+      "path": "/opds/v2/search?query=Synthetic",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/groups/*/navigation/*/href"
+        ]
+      }
     }
   ]
 }
