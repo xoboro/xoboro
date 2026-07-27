@@ -6,6 +6,9 @@ import io.xoboro.core.domain.BookMediaRepository
 import io.xoboro.core.domain.BookPage
 import io.xoboro.core.domain.Dimension
 import io.xoboro.core.domain.MediaFile
+import io.xoboro.core.domain.MediaFileKind
+import io.xoboro.core.domain.MediaNavigationEntry
+import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
 import org.jooq.DSLContext
@@ -34,6 +37,13 @@ class JooqBookMediaRepository(
       pages = database.dsl.findPages(bookId),
       pageCount = record.requiredInt("page_count"),
       files = database.dsl.findFiles(bookId),
+      epubDivinaCompatible = record.requiredBoolean("epub_divina_compatible"),
+      epubIsKepub = record.requiredBoolean("epub_is_kepub"),
+      epubIsFixedLayout = record.requiredBoolean("epub_is_fixed_layout"),
+      toc = database.dsl.findNavigation(bookId, "TOC"),
+      landmarks = database.dsl.findNavigation(bookId, "LANDMARK"),
+      pageList = database.dsl.findNavigation(bookId, "PAGE_LIST"),
+      positions = database.dsl.findPositions(bookId),
       comment = record.get("comment", String::class.java),
       createdAtMillis = record.requiredLongText("created_at_ms_64"),
       updatedAtMillis = record.requiredLongText("updated_at_ms_64"),
@@ -45,14 +55,18 @@ class JooqBookMediaRepository(
       transaction.execute(
         """
         INSERT INTO media (
-          book_id, status, media_type, profile, page_count, comment,
+          book_id, status, media_type, profile, page_count,
+          epub_divina_compatible, epub_is_kepub, epub_is_fixed_layout, comment,
           created_at_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(book_id) DO UPDATE SET
           status = excluded.status,
           media_type = excluded.media_type,
           profile = excluded.profile,
           page_count = excluded.page_count,
+          epub_divina_compatible = excluded.epub_divina_compatible,
+          epub_is_kepub = excluded.epub_is_kepub,
+          epub_is_fixed_layout = excluded.epub_is_fixed_layout,
           comment = excluded.comment,
           created_at_ms = excluded.created_at_ms,
           updated_at_ms = excluded.updated_at_ms
@@ -62,6 +76,9 @@ class JooqBookMediaRepository(
         media.mediaType,
         media.profile?.name,
         media.pageCount,
+        media.epubDivinaCompatible.toSqliteInt(),
+        media.epubIsKepub.toSqliteInt(),
+        media.epubIsFixedLayout.toSqliteInt(),
         media.comment,
         media.createdAtMillis,
         media.updatedAtMillis,
@@ -72,6 +89,15 @@ class JooqBookMediaRepository(
       media.files.forEachIndexed { index, file ->
         transaction.insertFile(media.bookId, number = index + 1, file = file)
       }
+      transaction.execute("DELETE FROM media_position WHERE book_id = ?", media.bookId.value)
+      media.positions.forEach { position -> transaction.insertPosition(media.bookId, position) }
+      transaction.execute(
+        "DELETE FROM media_navigation_entry WHERE book_id = ?",
+        media.bookId.value,
+      )
+      transaction.insertNavigation(media.bookId, "TOC", media.toc)
+      transaction.insertNavigation(media.bookId, "LANDMARK", media.landmarks)
+      transaction.insertNavigation(media.bookId, "PAGE_LIST", media.pageList)
     }
   }
 
@@ -122,8 +148,63 @@ class JooqBookMediaRepository(
         fileName = record.requiredString("file_name"),
         mediaType = record.get("media_type", String::class.java),
         fileSize = record.nullableLongText("file_size_64"),
+        kind = MediaFileKind.valueOf(record.requiredString("kind")),
       )
     }
+
+  private fun DSLContext.findPositions(bookId: BookId): List<MediaPosition> =
+    fetch(
+      """
+      SELECT *
+      FROM media_position
+      WHERE book_id = ?
+      ORDER BY position
+      """.trimIndent(),
+      bookId.value,
+    ).map { record ->
+      MediaPosition(
+        href = record.requiredString("href"),
+        mediaType = record.requiredString("media_type"),
+        progression = record.requiredFloat("progression"),
+        position = record.requiredInt("position"),
+        totalProgression = record.requiredFloat("total_progression"),
+        koboSpan = record.get("kobo_span", String::class.java),
+      )
+    }
+
+  private fun DSLContext.findNavigation(
+    bookId: BookId,
+    type: String,
+  ): List<MediaNavigationEntry> {
+    val rows =
+      fetch(
+        """
+        SELECT path, parent_path, title, href
+        FROM media_navigation_entry
+        WHERE book_id = ? AND navigation_type = ?
+        ORDER BY path
+        """.trimIndent(),
+        bookId.value,
+        type,
+      ).map { record ->
+        NavigationRow(
+          path = record.requiredString("path"),
+          parentPath = record.get("parent_path", String::class.java),
+          title = record.requiredString("title"),
+          href = record.get("href", String::class.java),
+        )
+      }
+    val childrenByParent = rows.groupBy(NavigationRow::parentPath)
+    fun descendants(parentPath: String?): List<MediaNavigationEntry> =
+      childrenByParent[parentPath].orEmpty().map { row ->
+        MediaNavigationEntry(
+          title = row.title,
+          href = row.href,
+          children = descendants(row.path),
+        )
+      }
+    return descendants(null)
+  }
 
   private fun DSLContext.insertPage(
     bookId: BookId,
@@ -153,15 +234,61 @@ class JooqBookMediaRepository(
   ) {
     execute(
       """
-      INSERT INTO media_file (book_id, number, file_name, media_type, file_size)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO media_file (book_id, number, file_name, media_type, file_size, kind)
+      VALUES (?, ?, ?, ?, ?, ?)
       """.trimIndent(),
       bookId.value,
       number,
       file.fileName,
       file.mediaType,
       file.fileSize,
+      file.kind.name,
     )
+  }
+
+  private fun DSLContext.insertPosition(
+    bookId: BookId,
+    position: MediaPosition,
+  ) {
+    execute(
+      """
+      INSERT INTO media_position (
+        book_id, position, href, media_type, progression, total_progression, kobo_span
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      """.trimIndent(),
+      bookId.value,
+      position.position,
+      position.href,
+      position.mediaType,
+      position.progression,
+      position.totalProgression,
+      position.koboSpan,
+    )
+  }
+
+  private fun DSLContext.insertNavigation(
+    bookId: BookId,
+    type: String,
+    entries: List<MediaNavigationEntry>,
+    parentPath: String? = null,
+  ) {
+    entries.forEachIndexed { index, entry ->
+      val path = parentPath?.let { "$it.${index + 1}" } ?: "${index + 1}"
+      execute(
+        """
+        INSERT INTO media_navigation_entry (
+          book_id, navigation_type, path, parent_path, title, href
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+        bookId.value,
+        type,
+        path,
+        parentPath,
+        entry.title,
+        entry.href,
+      )
+      insertNavigation(bookId, type, entry.children, path)
+    }
   }
 
   private fun Record.requiredString(field: String): String =
@@ -174,6 +301,25 @@ class JooqBookMediaRepository(
     requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
       .toLong()
 
+  private fun Record.requiredFloat(field: String): Float =
+    requireNotNull(get(field, Float::class.java)) { "Database field '$field' must not be null" }
+
+  private fun Record.requiredBoolean(field: String): Boolean =
+    when (requiredInt(field)) {
+      0 -> false
+      1 -> true
+      else -> error("Database field '$field' must be zero or one")
+    }
+
   private fun Record.nullableLongText(field: String): Long? =
     get(field, String::class.java)?.toLong()
+
+  private data class NavigationRow(
+    val path: String,
+    val parentPath: String?,
+    val title: String,
+    val href: String?,
+  )
 }
+
+private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0

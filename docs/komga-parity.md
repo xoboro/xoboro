@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. One hundred thirty-seven operations are partially implemented and none are yet
+167 schemas. One hundred forty-one operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V18 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V19 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -43,13 +43,13 @@ Status:
 |---|---|---|
 | CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, exact-entry page streaming, original-file streaming, stable error codes, and restart tests; differential behavior pending |
 | CBR, RAR, and RAR5 | TODO | |
-| PDF | TODO | |
-| EPUB 2 and EPUB 3 | TODO | |
+| PDF | PARTIAL | PDFBox page analysis, optional crop-box dimensions, bounded page indexing, JPEG rendering, raw single-page PDF extraction, WebPub PDF manifest, source materialization cleanup, and synthetic document tests; encrypted documents, metadata, and differential fixtures pending |
+| EPUB 2 and EPUB 3 | PARTIAL | Secure ZIP/container/package parsing, manifest/spine resources, fixed-layout and DiViNa detection, EPUB3 navigation plus EPUB2 NCX fallback, Readium positions, KEPUB span detection, persisted extensions, resource streaming with CSP, WebPub manifest, and synthetic fixed/reflowable tests; complete metadata, KEPUB conversion, and differential fixtures pending |
 | Content and extension detection | PARTIAL | Tika entry-content detection and corrupt/empty archive tests; outer signatures and non-ZIP formats pending |
 | Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixture; RAR/PDF/EPUB pending |
 | Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
 | Cover and thumbnail generation | PARTIAL | Durable owner-scoped Book/Series/Collection/ReadList artwork, bounded multipart upload, decoded-pixel safety, JPEG normalization/resizing, atomic selection, uploaded-only deletion, authenticated byte delivery, and first-visible-book page fallback; generated thumbnail persistence, sidecars, and differential caching pending |
-| Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, and resource-lifetime tests; PDF negotiation and differential caching semantics pending |
+| Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, EPUB resource streaming, PDF JPEG rendering and raw single-page extraction, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, CSP, and resource-lifetime tests; PDF Accept negotiation and differential caching semantics pending |
 | Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming, single-byte-range responses, role/access enforcement, and wildcard filename compatibility; series/read-list archives pending |
 | Incorrect extension repair | TODO | |
 | CBR/RAR to CBZ conversion | TODO | |
@@ -121,7 +121,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Page-based progress | PARTIAL | Durable per-user page/completed/read-date/device rows, transactional series aggregates, page-bound validation, Book DTO projection, and REST integration tests; device mutation, SSE, and differential tests pending |
-| R2 locator and EPUB progression | PARTIAL | Durable per-user Readium locator/device/timestamp state, stale-write conflict rejection, authenticated GET/PUT contracts, and DiViNa locator integration tests; EPUB/PDF positions and differential fixtures pending |
+| R2 locator and EPUB progression | PARTIAL | Durable per-user Readium locator/device/timestamp state, stale-write conflict rejection, authenticated GET/PUT contracts, persisted EPUB positions, position-list contract, and DiViNa/EPUB integration tests; advanced locator reconciliation and differential fixtures pending |
 | Mark read and unread by book or series | PARTIAL | Book PATCH/DELETE and set-based Series POST/DELETE routes enforce catalog access and update durable aggregates; bulk and protocol adapters pending |
 | Previous and next book semantics | PARTIAL | Stable metadata number, relative-path, and ID tie-breaking in SQL with access checks and boundary tests; differential and read-state semantics pending |
 | Sync points and conflict behavior | TODO | |

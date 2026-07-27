@@ -1,6 +1,8 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.http.ContentType
+import io.ktor.http.ContentDisposition
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
@@ -11,16 +13,22 @@ import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
+import io.ktor.server.response.header
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.MediaProfile
+import io.xoboro.core.domain.MediaFileKind
+import io.xoboro.core.domain.MediaNavigationEntry
+import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadingDirection
 import java.time.Instant
@@ -31,6 +39,7 @@ import kotlinx.serialization.json.Json
 fun Route.komgaWebPubRoutes(
   catalog: CatalogReadRepository,
   progress: ReadProgressLifecycle,
+  content: BookContentAccess,
 ) {
   authenticate(
     KOMGA_BASIC_AUTHENTICATION,
@@ -41,10 +50,101 @@ fun Route.komgaWebPubRoutes(
   ) {
     route("/api/v1/books/{bookId}") {
       get("/manifest") {
-        call.respondDivinaManifest(catalog)
+        call.respondManifest(catalog)
       }
       get("/manifest/divina") {
-        call.respondDivinaManifest(catalog)
+        call.respondProfileManifest(catalog, MediaProfile.DIVINA)
+      }
+      get("/manifest/epub") {
+        call.respondProfileManifest(catalog, MediaProfile.EPUB)
+      }
+      get("/manifest/pdf") {
+        call.respondProfileManifest(catalog, MediaProfile.PDF)
+      }
+      get("/positions") {
+        val principal = requireNotNull(call.principal<KomgaPrincipal>())
+        val bookId = BookId(requireNotNull(call.parameters["bookId"]))
+        val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
+        if (item == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        val analyzed = item.media
+        if (analyzed?.profile != MediaProfile.EPUB) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        call.respondText(
+          WEBPUB_JSON.encodeToString(
+            R2PositionsDto(
+              total = analyzed.positions.size,
+              positions = analyzed.positions.map(MediaPosition::toLocatorDto),
+            ),
+          ),
+          POSITION_LIST_CONTENT_TYPE,
+        )
+      }
+      get("/resource/{resource...}") {
+        val principal = requireNotNull(call.principal<KomgaPrincipal>())
+        val bookId = BookId(requireNotNull(call.parameters["bookId"]))
+        val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
+        if (item == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        if (item.media?.profile != MediaProfile.EPUB) {
+          call.respond(HttpStatusCode.BadRequest)
+          return@get
+        }
+        val resource =
+          call.parameters.getAll("resource")?.joinToString("/")?.takeIf(String::isNotBlank)
+        if (resource == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        val opened =
+          try {
+            content.openResource(bookId, resource)
+          } catch (failure: IllegalArgumentException) {
+            call.respond(
+              HttpStatusCode.NotFound,
+              mapOf("error" to (failure.message ?: "EPUB resource is unavailable")),
+            )
+            return@get
+          }
+        if (opened == null) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+        call.response.header(
+          "Content-Security-Policy",
+          "script-src 'none'; object-src 'none';",
+        )
+        opened.fileName?.let { fileName ->
+          call.response.header(
+            HttpHeaders.ContentDisposition,
+            ContentDisposition.Inline
+              .withParameter(ContentDisposition.Parameters.FileName, fileName)
+              .toString(),
+          )
+        }
+        try {
+          call.respondOutputStream(
+            contentType =
+              runCatching { ContentType.parse(opened.mediaType) }
+                .getOrDefault(ContentType.Application.OctetStream),
+            contentLength = opened.contentLength,
+          ) {
+            val buffer = ByteArray(WEBPUB_STREAM_BUFFER_SIZE)
+            while (true) {
+              val read = opened.read(buffer)
+              if (read < 0) break
+              if (read > 0) write(buffer, 0, read)
+            }
+          }
+        } finally {
+          opened.close()
+        }
       }
       get("/progression") {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
@@ -133,7 +233,8 @@ data class WPLinkDto(
   val templated: Boolean? = null,
   val width: Int? = null,
   val height: Int? = null,
-  val properties: Map<String, Map<String, String>>,
+  val properties: Map<String, Map<String, String>> = emptyMap(),
+  val children: List<WPLinkDto> = emptyList(),
 )
 
 @Serializable
@@ -218,7 +319,13 @@ data class R2ProgressionDto(
   val locator: R2LocatorDto,
 )
 
-private suspend fun ApplicationCall.respondDivinaManifest(catalog: CatalogReadRepository) {
+@Serializable
+data class R2PositionsDto(
+  val total: Int,
+  val positions: List<R2LocatorDto>,
+)
+
+private suspend fun ApplicationCall.respondManifest(catalog: CatalogReadRepository) {
   val principal = requireNotNull(principal<KomgaPrincipal>())
   val bookId = BookId(requireNotNull(parameters["bookId"]))
   val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
@@ -226,16 +333,65 @@ private suspend fun ApplicationCall.respondDivinaManifest(catalog: CatalogReadRe
     respond(HttpStatusCode.NotFound)
     return
   }
-  if (item.media?.profile != MediaProfile.DIVINA) {
+  val analyzed = item.media
+  if (analyzed == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val manifest =
+    when (analyzed.profile) {
+      MediaProfile.DIVINA -> item.toDivinaManifest(apiBaseUrl())
+      MediaProfile.EPUB -> item.toEpubManifest(apiBaseUrl())
+      MediaProfile.PDF -> item.toPdfManifest(apiBaseUrl())
+      null -> null
+    }
+  if (manifest == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val contentType =
+    if (analyzed.profile == MediaProfile.DIVINA) DIVINA_CONTENT_TYPE
+    else WEBPUB_CONTENT_TYPE
+  respondText(WEBPUB_JSON.encodeToString(manifest), contentType)
+}
+
+private suspend fun ApplicationCall.respondProfileManifest(
+  catalog: CatalogReadRepository,
+  requestedProfile: MediaProfile,
+) {
+  val principal = requireNotNull(principal<KomgaPrincipal>())
+  val bookId = BookId(requireNotNull(parameters["bookId"]))
+  val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
+  if (item == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val analyzed = item.media
+  val compatible =
+    when (requestedProfile) {
+      MediaProfile.DIVINA ->
+        analyzed?.profile == MediaProfile.DIVINA ||
+          analyzed?.profile == MediaProfile.PDF ||
+          (analyzed?.profile == MediaProfile.EPUB && analyzed.epubDivinaCompatible)
+      else -> analyzed?.profile == requestedProfile
+    }
+  if (!compatible) {
     respond(
       HttpStatusCode.BadRequest,
-      mapOf("error" to "Book media is not compatible with the DiViNa profile"),
+      mapOf("error" to "Book media is not compatible with the requested profile"),
     )
     return
   }
+  val manifest =
+    when (requestedProfile) {
+      MediaProfile.DIVINA -> item.toDivinaManifest(apiBaseUrl())
+      MediaProfile.EPUB -> item.toEpubManifest(apiBaseUrl())
+      MediaProfile.PDF -> item.toPdfManifest(apiBaseUrl())
+    }
   respondText(
-    WEBPUB_JSON.encodeToString(item.toDivinaManifest(apiBaseUrl())),
-    DIVINA_CONTENT_TYPE,
+    WEBPUB_JSON.encodeToString(manifest),
+    if (requestedProfile == MediaProfile.DIVINA) DIVINA_CONTENT_TYPE
+    else WEBPUB_CONTENT_TYPE,
   )
 }
 
@@ -260,7 +416,9 @@ private fun CatalogBook.toDivinaManifest(apiBaseUrl: String): WPPublicationDto {
     analyzed.pages.map { page ->
       WPLinkDto(
         href = "$apiBaseUrl/books/${book.id.value}/pages/${page.number}?contentNegotiation=false",
-        type = page.mediaType,
+        type =
+          if (analyzed.profile == MediaProfile.PDF) "image/jpeg"
+          else page.mediaType,
         width = page.dimension?.width,
         height = page.dimension?.height,
         properties = emptyProperties,
@@ -339,6 +497,83 @@ private fun CatalogBook.toDivinaManifest(apiBaseUrl: String): WPPublicationDto {
   )
 }
 
+private fun CatalogBook.toPdfManifest(apiBaseUrl: String): WPPublicationDto {
+  val analyzed = requireNotNull(media)
+  val base = toDivinaManifest(apiBaseUrl)
+  return base.copy(
+    metadata =
+      base.metadata.copy(
+        conformsTo = "https://readium.org/webpub-manifest/profiles/pdf",
+      ),
+    links = base.links.replaceSelfType(WEBPUB_MEDIA_TYPE),
+    readingOrder =
+      List(analyzed.pageCount) { index ->
+        WPLinkDto(
+          href = "$apiBaseUrl/books/${book.id.value}/pages/${index + 1}/raw",
+          type = "application/pdf",
+        )
+      },
+  )
+}
+
+private fun CatalogBook.toEpubManifest(apiBaseUrl: String): WPPublicationDto {
+  val analyzed = requireNotNull(media)
+  val base = toDivinaManifest(apiBaseUrl)
+  val resourceBase = "$apiBaseUrl/books/${book.id.value}/resource/"
+  return base.copy(
+    metadata =
+      base.metadata.copy(
+        conformsTo = "https://readium.org/webpub-manifest/profiles/epub",
+        rendition =
+          mapOf(
+            "layout" to if (analyzed.epubIsFixedLayout) "fixed" else "reflowable",
+          ),
+      ),
+    links = base.links.replaceSelfType(WEBPUB_MEDIA_TYPE),
+    readingOrder =
+      analyzed.files.filter { it.kind == MediaFileKind.EPUB_PAGE }.map { file ->
+        WPLinkDto(
+          href = resourceBase + file.fileName,
+          type = file.mediaType,
+        )
+      },
+    resources =
+      base.resources +
+        analyzed.files.filter { it.kind == MediaFileKind.EPUB_ASSET }.map { file ->
+          WPLinkDto(
+            href = resourceBase + file.fileName,
+            type = file.mediaType,
+          )
+        },
+    toc = analyzed.toc.map { it.toLinkDto(resourceBase) },
+    landmarks = analyzed.landmarks.map { it.toLinkDto(resourceBase) },
+    pageList = analyzed.pageList.map { it.toLinkDto(resourceBase) },
+  )
+}
+
+private fun List<WPLinkDto>.replaceSelfType(mediaType: String): List<WPLinkDto> =
+  map { link -> if (link.rel == "self") link.copy(type = mediaType) else link }
+
+private fun MediaNavigationEntry.toLinkDto(resourceBase: String): WPLinkDto =
+  WPLinkDto(
+    title = title,
+    href = href?.let { resourceBase + it },
+    children = children.map { it.toLinkDto(resourceBase) },
+  )
+
+private fun MediaPosition.toLocatorDto(): R2LocatorDto =
+  R2LocatorDto(
+    href = href,
+    type = mediaType,
+    locations =
+      R2LocationDto(
+        progression = progression,
+        position = position,
+        totalProgression = totalProgression,
+      ),
+    koboSpan = koboSpan,
+  )
+
 private fun CatalogBook.readingProgression(): String? =
   when (seriesMetadata.readingDirection) {
     ReadingDirection.LEFT_TO_RIGHT -> "ltr"
@@ -380,6 +615,11 @@ private val WEBPUB_JSON =
     ignoreUnknownKeys = true
   }
 private val DIVINA_CONTENT_TYPE = ContentType.parse(DIVINA_MEDIA_TYPE)
+private val WEBPUB_CONTENT_TYPE = ContentType.parse(WEBPUB_MEDIA_TYPE)
+private val POSITION_LIST_CONTENT_TYPE =
+  ContentType.parse("application/vnd.readium.position-list+json")
 private val PROGRESSION_CONTENT_TYPE =
   ContentType.parse("application/vnd.readium.progression+json")
 private const val DIVINA_MEDIA_TYPE: String = "application/divina+json"
+private const val WEBPUB_MEDIA_TYPE: String = "application/webpub+json"
+private const val WEBPUB_STREAM_BUFFER_SIZE: Int = 64 * 1_024
