@@ -1,5 +1,7 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.ContentRestrictions
+import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.ServerAlreadyClaimedException
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
@@ -46,6 +48,9 @@ class UserLifecycle(
     email: String,
     rawPassword: String,
     roles: Set<UserRole> = setOf(UserRole.FILE_DOWNLOAD, UserRole.PAGE_STREAMING),
+    sharedLibraryIds: Set<LibraryId> = emptySet(),
+    sharesAllLibraries: Boolean = true,
+    restrictions: ContentRestrictions = ContentRestrictions(),
   ): User {
     require(rawPassword.isNotBlank()) { "User password must not be blank" }
     if (users.findByEmailIgnoreCaseOrNull(email) != null) {
@@ -58,6 +63,9 @@ class UserLifecycle(
         email = email,
         passwordHash = passwordHasher.hash(rawPassword),
         roles = roles,
+        sharedLibraryIds = sharedLibraryIds,
+        sharesAllLibraries = sharesAllLibraries,
+        restrictions = restrictions,
         createdAtMillis = nowMillis,
       )
     try {
@@ -66,6 +74,38 @@ class UserLifecycle(
       throw UserEmailAlreadyExistsException(email)
     }
     return requireNotNull(users.findByIdOrNull(user.id))
+  }
+
+  fun findAll(): List<User> = users.findAll()
+
+  fun findByIdOrNull(id: UserId): User? = users.findByIdOrNull(id)
+
+  fun updateUser(user: User): User {
+    requireNotNull(users.findByIdOrNull(user.id)) { "User not found: ${user.id.value}" }
+    val updated = user.copy(updatedAtMillis = now())
+    users.update(updated)
+    return requireNotNull(users.findByIdOrNull(user.id))
+  }
+
+  fun updatePassword(
+    id: UserId,
+    rawPassword: String,
+  ): User {
+    require(rawPassword.isNotBlank()) { "User password must not be blank" }
+    val existing = requireNotNull(users.findByIdOrNull(id)) { "User not found: ${id.value}" }
+    val updated =
+      existing.copy(
+        passwordHash = passwordHasher.hash(rawPassword),
+        updatedAtMillis = now(),
+      )
+    users.update(updated)
+    return requireNotNull(users.findByIdOrNull(id))
+  }
+
+  fun deleteUser(id: UserId): Boolean {
+    if (users.findByIdOrNull(id) == null) return false
+    users.delete(id)
+    return true
   }
 
   fun authenticate(

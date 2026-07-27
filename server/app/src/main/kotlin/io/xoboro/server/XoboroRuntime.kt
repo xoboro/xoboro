@@ -3,6 +3,7 @@ package io.xoboro.server
 import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
@@ -37,6 +38,7 @@ class XoboroRuntime private constructor(
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
   val userLifecycle: UserLifecycle,
+  val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
 
@@ -167,6 +169,7 @@ class XoboroRuntime private constructor(
           heartbeat = createdHeartbeat,
           workerPool = createdWorkerPool,
           userLifecycle = userLifecycle,
+          libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()
           createdLibraryScanScheduler.start()
