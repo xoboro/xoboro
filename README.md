@@ -79,6 +79,32 @@ mise exec -- ./gradlew :server:app:run
 The initial health endpoint is available at `http://localhost:25600/health`.
 Readiness is available at `http://localhost:25600/ready`.
 
+### Docker Compose
+
+Copy the environment template, point `XOBORO_MEDIA_PATH` at an existing host
+directory, and start Xoboro:
+
+```shell
+cp .env.example .env
+docker compose up -d
+docker compose ps
+```
+
+The first start builds the local multi-stage image. The SQLite database, fonts,
+and generated state persist in the `xoboro-config` volume. Media is exposed
+read-only at `/media`; create local libraries with a root below
+`file:///media`. Rebuild source changes with:
+
+```shell
+docker compose up -d --build
+```
+
+Images built from every merged `main` revision are published for amd64 and
+arm64 as `ghcr.io/xoboro/xoboro:latest` and `:main`. Set `XOBORO_IMAGE` to a
+published tag to run it instead of the default local tag. Because the repository
+is private, authenticate with a GitHub token that can read packages before
+pulling.
+
 Runtime defaults are safe for local development and can be overridden without
 editing source:
 

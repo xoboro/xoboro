@@ -150,8 +150,8 @@ Status:
 | Metadata and locks migration | PARTIAL | Series/book fields, locks, relations, media/page/file indexes, embedded artwork, page-hash policy, history, and full-text index rebuild migrate in one transaction; external artwork is intentionally rediscovered and production comparison is pending |
 | Progress migration | PARTIAL | Per-book and per-series progress plus bounded gzip locator conversion migrate with synthetic verification; differential reader and sync-client comparison pending |
 | Collections and read-list migration | PARTIAL | Collection/read-list identity, metadata, ordering, and membership migrate with synthetic verification; production snapshot comparison pending |
-| Docker amd64 and arm64 | TODO | |
-| Compose deployment | TODO | |
+| Docker amd64 and arm64 | PARTIAL | Pinned Temurin 26 multi-stage, non-root, health-checked image and GHCR buildx workflow with amd64/arm64 manifest, SBOM, and provenance; registry publication verification pending |
+| Compose deployment | PARTIAL | Plain `docker compose up -d`, persistent configuration volume, read-only media bind, read-only root filesystem, bounded tmpfs, dropped capabilities, graceful shutdown, and context-aware health check; Linux CI smoke and rollback drill pending |
 | Reverse-proxy and base-path support | PARTIAL | Restart-applied, database- or environment-configured base path mounts all current routes; forwarded-header trust policy and proxy integration tests pending |
 | Mac mini production comparison | TODO | |
 | Rollback verification | TODO | |
