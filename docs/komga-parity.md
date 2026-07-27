@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. One hundred forty-one operations are partially implemented and none are yet
+167 schemas. One hundred fifty-seven operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V19 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V20 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -96,8 +96,9 @@ Status:
 | Filtering, sorting, and alphabetical groups | PARTIAL | Allowlisted SQL sorting, escaped full-text matching, legacy library/publisher/language/genre/tag filters, stable pagination, alphabetical groups, and SQL-level referential filters with authorization/content restrictions; recursive search conditions and differential tests pending |
 | Latest, new, updated, on-deck, keep-reading | PARTIAL | Book latest/on-deck and Series latest/new/updated use explicit database sorts, access filtering, and durable per-series progress aggregates; keep-reading pending |
 | Collections and manual ordering | PARTIAL | Durable ordered membership, case-insensitive unique names, transactional CRUD, access-filtered list/detail/reverse-membership routes, filtered indicators, member pagination, cascade behavior, and REST integration tests; thumbnails, metadata import, and differential filters pending |
-| Read lists and manual ordering | PARTIAL | Durable ordered membership and summaries, transactional CRUD, access-filtered list/detail/book/sibling/reverse-membership routes, filtered indicators, cascade behavior, and REST integration tests; archive download, progress adapters, ComicRack import, and differential filters pending |
-| ComicRack CBL import | TODO | |
+| Read lists and manual ordering | PARTIAL | Durable ordered membership and summaries, transactional CRUD, access-filtered list/detail/book/sibling/reverse-membership routes, filtered indicators, cascade behavior, archive streaming, Mihon progress adapters, and REST integration tests; differential filters pending |
+| ComicRack CBL import | PARTIAL | Bounded XXE-safe CBL parsing, exact Komga error codes, duplicate-name reporting, volume aliases, and chunked set-based case/leading-zero-insensitive matching with route and persistence tests; differential fixtures pending |
+| Historical events | PARTIAL | Durable event/property transactions, stable allowlisted paging, batched property hydration, administrator REST projection, and source file import/deletion event emission; complete Komga event coverage and differential timestamp behavior pending |
 | Referential authors, genres, tags, languages, publishers | PARTIAL | Komga v1/v2 author, role/name, genre, sharing-label, book/series/combined tag, language, publisher, age-rating, and release-year routes use direct distinct SQL with access restrictions before paging/aggregation; differential ordering and edge filters pending |
 
 ## Users and security
@@ -123,15 +124,15 @@ Status:
 |---|---|---|
 | Page-based progress | PARTIAL | Durable per-user page/completed/read-date/device rows, transactional series aggregates, page-bound validation, Book DTO projection, and REST integration tests; device mutation, SSE, and differential tests pending |
 | R2 locator and EPUB progression | PARTIAL | Durable per-user Readium locator/device/timestamp state, stale-write conflict rejection, authenticated GET/PUT contracts, persisted EPUB positions, position-list contract, and DiViNa/EPUB integration tests; advanced locator reconciliation and differential fixtures pending |
-| Mark read and unread by book or series | PARTIAL | Book PATCH/DELETE and set-based Series POST/DELETE routes enforce catalog access and update durable aggregates; bulk and protocol adapters pending |
+| Mark read and unread by book or series | PARTIAL | Book PATCH/DELETE and set-based Series POST/DELETE routes plus Mihon ReadList index and Series number-sort adapters enforce catalog access and update durable aggregates; bulk and differential adapters pending |
 | Previous and next book semantics | PARTIAL | Stable metadata number, relative-path, and ID tie-breaking in SQL with access checks and boundary tests; differential and read-state semantics pending |
-| Sync points and conflict behavior | TODO | |
+| Sync points and conflict behavior | PARTIAL | Durable user/API-key-scoped sync points, restart persistence, foreign-key cleanup, and authenticated complete or selected-key deletion; Kobo creation/conflict behavior pending |
 
 ## Interfaces and protocols
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | 150 of 165 operations have an implementation in progress, including security/settings/library surfaces, catalog reads, media/WebPub delivery, organization, metadata, artwork, target maintenance, source-aware file lifecycle, archives, filesystem discovery, and transient analysis; differential completion and remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | 157 of 165 operations have an implementation in progress, including security/settings/library surfaces, catalog reads, media/WebPub delivery, organization, metadata, artwork, target maintenance, source-aware file lifecycle, archives, filesystem discovery, transient analysis, history, sync-point cleanup, ComicRack matching, and Mihon progress adapters; differential completion and the remaining eight operations pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

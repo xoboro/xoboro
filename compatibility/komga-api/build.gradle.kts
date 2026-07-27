@@ -21,6 +21,7 @@ dependencies {
   implementation(libs.ktor.serialization.kotlinx.json)
 
   testImplementation(kotlin("test-junit5"))
+  testImplementation(project(":server:metadata"))
   testImplementation(project(":server:persistence"))
   testImplementation(project(":server:security"))
   testImplementation(libs.ktor.server.test.host)
