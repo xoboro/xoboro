@@ -21,7 +21,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | TODO | |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V5 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V6 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, lease recovery, retry, dead-letter, and concurrent-claim tests |
 | Structured logs, health, readiness, metrics | PARTIAL | `/health` contract test |
@@ -32,13 +32,13 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| CBZ and ZIP | TODO | |
+| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, content partitioning, persisted page/file state, stable error codes, and restart test; delivery/worker pending |
 | CBR, RAR, and RAR5 | TODO | |
 | PDF | TODO | |
 | EPUB 2 and EPUB 3 | TODO | |
-| Content and extension detection | TODO | |
-| Natural page ordering | TODO | |
-| Page dimensions and media profiles | TODO | |
+| Content and extension detection | PARTIAL | Tika entry-content detection and corrupt/empty archive tests; outer signatures and non-ZIP formats pending |
+| Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixture; RAR/PDF/EPUB pending |
+| Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
 | Cover and thumbnail generation | TODO | |
 | Page streaming and conversion | TODO | |
 | Book, series, and read-list downloads | TODO | |

@@ -14,6 +14,7 @@ kotlin {
 
 dependencies {
   implementation(project(":core:application"))
+  implementation(project(":server:media"))
 
   testImplementation(kotlin("test-junit5"))
 }

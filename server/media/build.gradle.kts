@@ -13,16 +13,11 @@ kotlin {
 }
 
 dependencies {
-  implementation(project(":core:application"))
   implementation(project(":core:domain"))
-  implementation(libs.flyway.core)
-  implementation(libs.hikari)
-  implementation(libs.jooq)
-  implementation(libs.sqlite.jdbc)
+  implementation(libs.natural.comparator)
+  implementation(libs.tika.core)
 
   testImplementation(kotlin("test-junit5"))
-  testImplementation(project(":server:media"))
-  testImplementation(project(":server:sources:local"))
 }
 
 tasks.test {
