@@ -10,12 +10,13 @@ therefore locks those routes separately from the 165-operation REST baseline.
 | Kobo | 15 | `2add95ed52e455c4c16ea4983d26c6dd1d9ba05c90b8c675cd5e6baa0b9a168b` |
 | KOReader | 4 | `dd7d69c6c255e1269ca91b1161eac50419208b2b4be772bfad1f4a1b5752b9dc` |
 | SSE | 1 | `643833b6a4b4efdd002a94b728ae462c807f38255325a37eb7c61dce7dd239b6` |
-| Total | 64 | |
+| OAuth2 browser flow | 2 | `a837ccf22aecb57137d9bfd23361e1132e3e7044cce000c33b361f02daa2598f` |
+| Total | 66 | |
 
 The route inventory test treats expanded mapping arrays and the five Kobo
 catch-all HTTP methods as distinct observable operations.
 
 Together with the REST baseline, the current externally addressable contract
-contains 229 HTTP operations. This does not include scheduled jobs, database
+contains 231 HTTP operations. This does not include scheduled jobs, database
 migration behavior, file-format semantics, or configuration behavior, which
 have their own parity gates.

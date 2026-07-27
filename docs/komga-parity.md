@@ -10,9 +10,12 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Twenty-eight operations are partially implemented and none are yet
+167 schemas. Twenty-nine operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
+
+The non-OpenAPI inventory contains 66 operations, including the two OAuth2
+browser-flow routes.
 
 Status:
 
@@ -108,7 +111,7 @@ Status:
 | Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation; Spring-compatible signed remember-me tokens, durable and live-rotatable server key, dynamically configurable cookie duration, password invalidation, restored-session issuance, and logout cleanup tests; OAuth pending |
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
-| OAuth2 providers | TODO | |
+| OAuth2 providers | PARTIAL | Anonymous provider discovery, Spring-compatible registration environment binding, authorization-code redirect and token exchange, one-time state plus browser-bound CSRF correlation, OIDC nonce and RSA ID-token verification, issuer/audience/authorized-party/time validation, verified-email policy, GitHub primary verified-email fallback, existing-account matching, optional account creation, Komga error codes, session issuance, failure redirects, and login activity source tests; EC-signed ID tokens, issuer discovery, forwarded-origin policy, and differential provider tests pending |
 | Authentication activity | PARTIAL | Durable success/failure ledger, password and API-key source recording, credential-safe failed-key fingerprinting, User-Agent/IP capture, current-user/admin pagination and sorting, API-key-filtered latest lookup, retention cutoff, cascade cleanup, and restart tests; sessions, OAuth, demo mode, proxy IP policy, and scheduled cleanup pending |
 | Per-user client settings | PARTIAL | Global and per-user namespaced string settings, anonymous visibility filtering, administrator authorization, user isolation, transactional upsert, selective deletion, cascade cleanup, restart persistence, validation, and six REST operation tests |
 | Announcements | PARTIAL | Komga JSON Feed retrieval with one-hour expire-after-access cache, single-flight refresh, unknown-field tolerance, administrator authorization, per-user durable read flags, duplicate-safe marking, user cascade cleanup, empty-feed 404 and upstream-error propagation, restart persistence, and two REST operation tests |

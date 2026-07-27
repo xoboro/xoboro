@@ -9,6 +9,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
 import io.xoboro.compatibility.komga.api.ClaimStatusDto
+import io.xoboro.compatibility.komga.api.OAuth2ClientDto
 import io.xoboro.compatibility.komga.api.UserDto
 import java.nio.file.Path
 import kotlin.test.Test
@@ -112,6 +113,10 @@ class ApplicationTest {
         }
 
       assertEquals(ClaimStatusDto(false), client.get("/api/v1/claim").body())
+      assertEquals(
+        emptyList<OAuth2ClientDto>(),
+        client.get("/api/v1/oauth2/providers").body(),
+      )
       val claimed =
         client.post("/api/v1/claim") {
           header("X-Komga-Email", "admin@example.invalid")

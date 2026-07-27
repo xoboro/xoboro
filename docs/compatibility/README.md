@@ -13,9 +13,9 @@ checksummed contract snapshot. Automated verification currently locks:
 - 167 wire schemas
 - the exact upstream version and SHA-256
 
-Twenty-eight operations have an Xoboro implementation in progress. They remain
+Twenty-nine operations have an Xoboro implementation in progress. They remain
 partial until differential response, authorization, validation, persistence,
-and error-envelope tests pass against the reference behavior. The other 137
+and error-envelope tests pass against the reference behavior. The other 136
 operations are unimplemented.
 
 ## Additional compatibility surfaces
@@ -23,8 +23,8 @@ operations are unimplemented.
 OpenAPI does not cover the entire server. Separate inventories and contract
 suites are required for:
 
-- [64 non-REST protocol operations](protocols.md) covering OPDS v1/v2, Kobo,
-  KOReader, and Server-Sent Events
+- [66 non-REST protocol operations](protocols.md) covering OPDS v1/v2, Kobo,
+  KOReader, Server-Sent Events, and OAuth2 browser callbacks
 - media container parsing and byte-range delivery
 - filesystem and scheduled lifecycle behavior
 - metadata import, aggregation, locking, and sidecars

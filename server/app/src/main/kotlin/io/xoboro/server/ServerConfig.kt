@@ -1,5 +1,6 @@
 package io.xoboro.server
 
+import io.xoboro.core.application.OAuth2ClientRegistration
 import java.nio.file.Path
 
 data class ServerConfig(
@@ -12,6 +13,9 @@ data class ServerConfig(
   val shutdownTimeoutMillis: Long,
   val configuredPort: Int? = port,
   val configuredContextPath: String? = null,
+  val oauth2Registrations: List<OAuth2ClientRegistration> = emptyList(),
+  val oauth2AccountCreation: Boolean = false,
+  val oidcEmailVerification: Boolean = true,
 ) {
   init {
     require(port in 1..65_535) { "Server port must be between 1 and 65535" }
@@ -77,6 +81,11 @@ data class ServerConfig(
         configuredContextPath =
           environment["XOBORO_CONTEXT_PATH"]
             ?.takeIf(String::isNotBlank),
+        oauth2Registrations = OAuth2EnvironmentConfig.registrations(environment),
+        oauth2AccountCreation =
+          environment.booleanValue("KOMGA_OAUTH2_ACCOUNT_CREATION", false),
+        oidcEmailVerification =
+          environment.booleanValue("KOMGA_OIDC_EMAIL_VERIFICATION", true),
       )
     }
 
@@ -97,6 +106,13 @@ data class ServerConfig(
     private fun Map<String, String>.optionalIntValue(key: String): Int? =
       get(key)?.toIntOrNull()
         ?: if (containsKey(key)) error("$key must be an integer") else null
+
+    private fun Map<String, String>.booleanValue(
+      key: String,
+      default: Boolean,
+    ): Boolean =
+      get(key)?.toBooleanStrictOrNull()
+        ?: if (containsKey(key)) error("$key must be true or false") else default
 
     private val CONTEXT_PATH_PATTERN = Regex("^/[\\w-/]*[a-zA-Z0-9]$")
   }
