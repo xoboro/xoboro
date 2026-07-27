@@ -58,6 +58,30 @@ class JooqReadProgressRepository(
         userId.value,
       )?.toSeriesProgress()
 
+  override fun findAllSeriesByIdsAndUserId(
+    seriesIds: Collection<SeriesId>,
+    userId: UserId,
+  ): List<SeriesReadProgress> =
+    seriesIds
+      .distinct()
+      .chunked(QUERY_BATCH_SIZE)
+      .flatMap { batch ->
+        val bindings = batch.map { it.value } + userId.value
+        database.dsl
+          .fetch(
+            """
+            SELECT read_progress_series.*,
+              CAST(last_read_at_ms AS TEXT) AS last_read_at_ms_64,
+              CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+              CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
+            FROM read_progress_series
+            WHERE series_id IN (${batch.placeholders()}) AND user_id = ?
+            ORDER BY series_id
+            """.trimIndent(),
+            *bindings.toTypedArray(),
+          ).map { it.toSeriesProgress() }
+      }
+
   override fun upsert(progress: ReadProgress) {
     database.transaction { transaction ->
       transaction.upsertProgress(progress)
@@ -237,6 +261,7 @@ class JooqReadProgressRepository(
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 
   private companion object {
+    const val QUERY_BATCH_SIZE = 500
     const val SELECT_PROGRESS =
       """
       SELECT read_progress.*,

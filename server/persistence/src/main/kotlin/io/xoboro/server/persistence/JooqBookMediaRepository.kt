@@ -50,6 +50,56 @@ class JooqBookMediaRepository(
     )
   }
 
+  override fun findAllByBookIds(bookIds: Collection<BookId>): List<BookMedia> =
+    bookIds
+      .distinct()
+      .chunked(QUERY_BATCH_SIZE)
+      .flatMap(::findBatch)
+
+  private fun findBatch(bookIds: List<BookId>): List<BookMedia> {
+    if (bookIds.isEmpty()) return emptyList()
+    val records =
+      database.dsl.fetch(
+        """
+        SELECT media.*,
+          CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+          CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
+        FROM media
+        WHERE book_id IN (${bookIds.placeholders()})
+        ORDER BY book_id
+        """.trimIndent(),
+        *bookIds.map { it.value }.toTypedArray(),
+      )
+    val pages = database.dsl.findPagesBatch(bookIds)
+    val files = database.dsl.findFilesBatch(bookIds)
+    val positions = database.dsl.findPositionsBatch(bookIds)
+    val toc = database.dsl.findNavigationBatch(bookIds, "TOC")
+    val landmarks = database.dsl.findNavigationBatch(bookIds, "LANDMARK")
+    val pageLists = database.dsl.findNavigationBatch(bookIds, "PAGE_LIST")
+    return records.map { record ->
+      val id = BookId(record.requiredString("book_id"))
+      BookMedia(
+        bookId = id,
+        status = MediaStatus.valueOf(record.requiredString("status")),
+        mediaType = record.get("media_type", String::class.java),
+        profile = record.get("profile", String::class.java)?.let(MediaProfile::valueOf),
+        pages = pages[id].orEmpty(),
+        pageCount = record.requiredInt("page_count"),
+        files = files[id].orEmpty(),
+        epubDivinaCompatible = record.requiredBoolean("epub_divina_compatible"),
+        epubIsKepub = record.requiredBoolean("epub_is_kepub"),
+        epubIsFixedLayout = record.requiredBoolean("epub_is_fixed_layout"),
+        toc = toc[id].orEmpty(),
+        landmarks = landmarks[id].orEmpty(),
+        pageList = pageLists[id].orEmpty(),
+        positions = positions[id].orEmpty(),
+        comment = record.get("comment", String::class.java),
+        createdAtMillis = record.requiredLongText("created_at_ms_64"),
+        updatedAtMillis = record.requiredLongText("updated_at_ms_64"),
+      )
+    }
+  }
+
   override fun upsert(media: BookMedia) {
     database.transaction { transaction ->
       transaction.execute(
@@ -103,6 +153,127 @@ class JooqBookMediaRepository(
 
   override fun deleteByBookId(bookId: BookId) {
     database.dsl.execute("DELETE FROM media WHERE book_id = ?", bookId.value)
+  }
+
+  private fun DSLContext.findPagesBatch(
+    bookIds: Collection<BookId>,
+  ): Map<BookId, List<BookPage>> =
+    fetch(
+      """
+      SELECT book_page.*,
+        CAST(file_size AS TEXT) AS file_size_64
+      FROM book_page
+      WHERE book_id IN (${bookIds.placeholders()})
+      ORDER BY book_id, number
+      """.trimIndent(),
+      *bookIds.map { it.value }.toTypedArray(),
+    ).groupBy(
+      { BookId(it.requiredString("book_id")) },
+      { record ->
+        val width = (record.get("width") as? Number)?.toInt()
+        val height = (record.get("height") as? Number)?.toInt()
+        BookPage(
+          number = record.requiredInt("number"),
+          fileName = record.requiredString("file_name"),
+          mediaType = record.requiredString("media_type"),
+          fileSize = record.nullableLongText("file_size_64"),
+          dimension =
+            if (width != null && height != null) {
+              Dimension(width, height)
+            } else {
+              null
+            },
+          fileHash = record.requiredString("file_hash"),
+        )
+      },
+    )
+
+  private fun DSLContext.findFilesBatch(
+    bookIds: Collection<BookId>,
+  ): Map<BookId, List<MediaFile>> =
+    fetch(
+      """
+      SELECT media_file.*,
+        CAST(file_size AS TEXT) AS file_size_64
+      FROM media_file
+      WHERE book_id IN (${bookIds.placeholders()})
+      ORDER BY book_id, number
+      """.trimIndent(),
+      *bookIds.map { it.value }.toTypedArray(),
+    ).groupBy(
+      { BookId(it.requiredString("book_id")) },
+      { record ->
+        MediaFile(
+          fileName = record.requiredString("file_name"),
+          mediaType = record.get("media_type", String::class.java),
+          fileSize = record.nullableLongText("file_size_64"),
+          kind = MediaFileKind.valueOf(record.requiredString("kind")),
+        )
+      },
+    )
+
+  private fun DSLContext.findPositionsBatch(
+    bookIds: Collection<BookId>,
+  ): Map<BookId, List<MediaPosition>> =
+    fetch(
+      """
+      SELECT *
+      FROM media_position
+      WHERE book_id IN (${bookIds.placeholders()})
+      ORDER BY book_id, position
+      """.trimIndent(),
+      *bookIds.map { it.value }.toTypedArray(),
+    ).groupBy(
+      { BookId(it.requiredString("book_id")) },
+      { record ->
+        MediaPosition(
+          href = record.requiredString("href"),
+          mediaType = record.requiredString("media_type"),
+          progression = record.requiredFloat("progression"),
+          position = record.requiredInt("position"),
+          totalProgression = record.requiredFloat("total_progression"),
+          koboSpan = record.get("kobo_span", String::class.java),
+        )
+      },
+    )
+
+  private fun DSLContext.findNavigationBatch(
+    bookIds: Collection<BookId>,
+    type: String,
+  ): Map<BookId, List<MediaNavigationEntry>> {
+    val rows =
+      fetch(
+        """
+        SELECT book_id, path, parent_path, title, href
+        FROM media_navigation_entry
+        WHERE book_id IN (${bookIds.placeholders()}) AND navigation_type = ?
+        ORDER BY book_id, path
+        """.trimIndent(),
+        *(bookIds.map { it.value } + type).toTypedArray(),
+      ).map { record ->
+        BookNavigationRow(
+          bookId = BookId(record.requiredString("book_id")),
+          row =
+            NavigationRow(
+              path = record.requiredString("path"),
+              parentPath = record.get("parent_path", String::class.java),
+              title = record.requiredString("title"),
+              href = record.get("href", String::class.java),
+            ),
+        )
+      }
+    return rows.groupBy(BookNavigationRow::bookId).mapValues { (_, bookRows) ->
+      val childrenByParent = bookRows.map(BookNavigationRow::row).groupBy(NavigationRow::parentPath)
+      fun descendants(parentPath: String?): List<MediaNavigationEntry> =
+        childrenByParent[parentPath].orEmpty().map { row ->
+          MediaNavigationEntry(
+            title = row.title,
+            href = row.href,
+            children = descendants(row.path),
+          )
+        }
+      descendants(null)
+    }
   }
 
   private fun DSLContext.findPages(bookId: BookId): List<BookPage> =
@@ -314,12 +485,23 @@ class JooqBookMediaRepository(
   private fun Record.nullableLongText(field: String): Long? =
     get(field, String::class.java)?.toLong()
 
+  private fun Collection<*>.placeholders(): String = joinToString(",") { "?" }
+
+  private data class BookNavigationRow(
+    val bookId: BookId,
+    val row: NavigationRow,
+  )
+
   private data class NavigationRow(
     val path: String,
     val parentPath: String?,
     val title: String,
     val href: String?,
   )
+
+  private companion object {
+    const val QUERY_BATCH_SIZE = 500
+  }
 }
 
 private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0

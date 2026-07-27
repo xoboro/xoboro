@@ -67,7 +67,7 @@ class JooqCatalogReadRepository(
           *bindings.toTypedArray(),
         ).map { BookId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
-      content = ids.mapNotNull { hydrateBook(it, access.userId) },
+      content = hydrateBooks(ids, access.userId),
       page = if (page.unpaged) 0 else page.page,
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
@@ -114,7 +114,7 @@ class JooqCatalogReadRepository(
           *filter.bindings.toTypedArray(),
         ).map { SeriesId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
-      content = ids.mapNotNull { hydrateSeries(it, access.userId) },
+      content = hydrateSeries(ids, access.userId),
       page = if (page.unpaged) 0 else page.page,
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
@@ -144,9 +144,9 @@ class JooqCatalogReadRepository(
         *filter.bindings.toTypedArray(),
       ) ?: return null
     return hydrateSeries(
-      SeriesId(requireNotNull(found.get("id", String::class.java))),
+      listOf(SeriesId(requireNotNull(found.get("id", String::class.java)))),
       access.userId,
-    )
+    ).singleOrNull()
   }
 
   override fun countSeriesByFirstCharacter(
@@ -264,108 +264,194 @@ class JooqCatalogReadRepository(
   private fun hydrateBook(
     id: BookId,
     userId: UserId?,
-  ): CatalogBook? {
-    val book = books.findByIdOrNull(id) ?: return null
-    val parent = series.findByIdOrNull(book.seriesId) ?: return null
-    val metadata = bookMetadata.findByBookIdOrNull(id) ?: return null
-    val parentMetadata = seriesMetadata.findBySeriesIdOrNull(parent.id) ?: return null
-    return CatalogBook(
-      book = book,
-      seriesTitle = parentMetadata.title,
-      seriesMetadata = parentMetadata,
-      metadata = metadata,
-      media = media.findByBookIdOrNull(id),
-      readProgress = userId?.let { readProgress.findByBookIdAndUserIdOrNull(id, it) },
-    )
+  ): CatalogBook? = hydrateBooks(listOf(id), userId).singleOrNull()
+
+  private fun hydrateBooks(
+    ids: List<BookId>,
+    userId: UserId?,
+  ): List<CatalogBook> {
+    if (ids.isEmpty()) return emptyList()
+    val items = books.findAllByIds(ids).associateBy { it.id }
+    val parentIds = items.values.map { it.seriesId }.distinct()
+    val parents = series.findAllByIds(parentIds).associateBy { it.id }
+    val metadata = bookMetadata.findAllByBookIds(ids).associateBy { it.bookId }
+    val parentMetadata =
+      seriesMetadata.findAllBySeriesIds(parentIds).associateBy { it.seriesId }
+    val mediaById = media.findAllByBookIds(ids).associateBy { it.bookId }
+    val progresses =
+      userId
+        ?.let { readProgress.findAllByBookIdsAndUserId(ids, it) }
+        .orEmpty()
+        .associateBy { it.bookId }
+    return ids.mapNotNull { id ->
+      val book = items[id] ?: return@mapNotNull null
+      val parent = parents[book.seriesId] ?: return@mapNotNull null
+      val parentDetails = parentMetadata[parent.id] ?: return@mapNotNull null
+      CatalogBook(
+        book = book,
+        seriesTitle = parentDetails.title,
+        seriesMetadata = parentDetails,
+        metadata = metadata[id] ?: return@mapNotNull null,
+        media = mediaById[id],
+        readProgress = progresses[id],
+      )
+    }
   }
 
   private fun hydrateSeries(
-    id: SeriesId,
+    ids: List<SeriesId>,
     userId: UserId?,
-  ): CatalogSeries? {
-    val item = series.findByIdOrNull(id) ?: return null
-    val metadata = seriesMetadata.findBySeriesIdOrNull(id) ?: return null
-    val summary =
-      database.dsl.fetchOne(
-        """
-        SELECT bm.summary, bm.number
-        FROM book b
-        JOIN book_metadata bm ON bm.book_id = b.id
-        WHERE b.series_id = ? AND b.deleted_at_ms IS NULL
-        ORDER BY bm.number_sort, b.relative_uri, b.id
-        LIMIT 1
-        """.trimIndent(),
-        id.value,
+  ): List<CatalogSeries> {
+    if (ids.isEmpty()) return emptyList()
+    val items = series.findAllByIds(ids).associateBy { it.id }
+    val metadata = seriesMetadata.findAllBySeriesIds(ids).associateBy { it.seriesId }
+    val aggregations = loadBookMetadataAggregations(ids, items)
+    val progresses =
+      userId
+        ?.let { readProgress.findAllSeriesByIdsAndUserId(ids, it) }
+        .orEmpty()
+        .associateBy { it.seriesId }
+    return ids.mapNotNull { id ->
+      val item = items[id] ?: return@mapNotNull null
+      CatalogSeries(
+        series = item,
+        metadata = metadata[id] ?: return@mapNotNull null,
+        booksMetadata = requireNotNull(aggregations[id]),
+        readProgress = progresses[id],
       )
-    val timestamps =
-      database.dsl.fetchOne(
-        """
-        SELECT
-          min(bm.created_at_ms) AS minimum_created,
-          max(bm.updated_at_ms) AS maximum_updated
-        FROM book b
-        JOIN book_metadata bm ON bm.book_id = b.id
-        WHERE b.series_id = ? AND b.deleted_at_ms IS NULL
-        """.trimIndent(),
-        id.value,
-      )
-    val authors =
-      database.dsl
-        .fetch(
-          """
-          SELECT DISTINCT author.name, author.role
-          FROM book b
-          JOIN book_metadata_author author ON author.book_id = b.id
-          WHERE b.series_id = ? AND b.deleted_at_ms IS NULL
-          ORDER BY lower(author.name), lower(author.role)
-          """.trimIndent(),
-          id.value,
-        ).map {
-          Author(
-            name = requireNotNull(it.get("name", String::class.java)),
-            role = requireNotNull(it.get("role", String::class.java)),
-          )
-        }
-    val tags =
-      database.dsl
-        .fetch(
-          """
-          SELECT DISTINCT tag.tag
-          FROM book b
-          JOIN book_metadata_tag tag ON tag.book_id = b.id
-          WHERE b.series_id = ? AND b.deleted_at_ms IS NULL
-          ORDER BY tag.tag
-          """.trimIndent(),
-          id.value,
-        ).mapTo(linkedSetOf()) { requireNotNull(it.get("tag", String::class.java)) }
-    val releaseDate =
-      database.dsl
-        .fetchOne(
-          """
-          SELECT max(bm.release_date) AS release_date
-          FROM book b
-          JOIN book_metadata bm ON bm.book_id = b.id
-          WHERE b.series_id = ? AND b.deleted_at_ms IS NULL
-          """.trimIndent(),
-          id.value,
-        )?.get("release_date", String::class.java)
-    return CatalogSeries(
-      series = item,
-      metadata = metadata,
-      booksMetadata =
+    }
+  }
+
+  private fun loadBookMetadataAggregations(
+    ids: Collection<SeriesId>,
+    items: Map<SeriesId, io.xoboro.core.domain.Series>,
+  ): Map<SeriesId, BookMetadataAggregation> {
+    val result =
+      items.mapValues { (_, item) ->
         BookMetadataAggregation(
-          authors = authors,
-          tags = tags,
-          releaseDate = releaseDate,
-          summary = summary?.get("summary", String::class.java).orEmpty(),
-          summaryNumber = summary?.get("number", String::class.java).orEmpty(),
-          createdAtMillis =
-            timestamps?.get("minimum_created").asLongOrNull() ?: item.createdAtMillis,
-          updatedAtMillis =
-            timestamps?.get("maximum_updated").asLongOrNull() ?: item.updatedAtMillis,
-        ),
-      readProgress = userId?.let { readProgress.findSeriesByIdAndUserIdOrNull(id, it) },
-    )
+          createdAtMillis = item.createdAtMillis,
+          updatedAtMillis = item.updatedAtMillis,
+        )
+      }.toMutableMap()
+    ids.distinct().chunked(QUERY_BATCH_SIZE).forEach { batch ->
+      val bindings = batch.map { it.value }.toTypedArray()
+      val stats =
+        database.dsl
+          .fetch(
+            """
+            WITH ranked_summary AS (
+              SELECT
+                b.series_id,
+                bm.summary,
+                bm.number,
+                row_number() OVER (
+                  PARTITION BY b.series_id
+                  ORDER BY bm.number_sort, b.relative_uri, b.id
+                ) AS summary_rank
+              FROM book b
+              JOIN book_metadata bm ON bm.book_id = b.id
+              WHERE b.series_id IN (${batch.placeholders()})
+                AND b.deleted_at_ms IS NULL
+                AND trim(bm.summary) <> ''
+            ),
+            aggregation AS (
+              SELECT
+                b.series_id,
+                min(bm.release_date) AS release_date,
+                min(bm.created_at_ms) AS minimum_created,
+                max(bm.updated_at_ms) AS maximum_updated
+              FROM book b
+              JOIN book_metadata bm ON bm.book_id = b.id
+              WHERE b.series_id IN (${batch.placeholders()})
+                AND b.deleted_at_ms IS NULL
+              GROUP BY b.series_id
+            )
+            SELECT
+              aggregation.series_id,
+              aggregation.release_date,
+              CAST(aggregation.minimum_created AS TEXT) AS minimum_created_64,
+              CAST(aggregation.maximum_updated AS TEXT) AS maximum_updated_64,
+              ranked_summary.summary,
+              ranked_summary.number
+            FROM aggregation
+            LEFT JOIN ranked_summary
+              ON ranked_summary.series_id = aggregation.series_id
+              AND ranked_summary.summary_rank = 1
+            """.trimIndent(),
+            *(bindings + bindings),
+          ).associateBy { SeriesId(requireNotNull(it.get("series_id", String::class.java))) }
+      val authors =
+        database.dsl
+          .fetch(
+            """
+            WITH ranked_author AS (
+              SELECT
+                b.series_id,
+                author.name,
+                author.role,
+                bm.number_sort,
+                b.relative_uri,
+                b.id AS book_id,
+                author.ordinal,
+                row_number() OVER (
+                  PARTITION BY b.series_id, author.role, author.name
+                  ORDER BY bm.number_sort, b.relative_uri, b.id, author.ordinal
+                ) AS duplicate_rank
+              FROM book b
+              JOIN book_metadata bm ON bm.book_id = b.id
+              JOIN book_metadata_author author ON author.book_id = b.id
+              WHERE b.series_id IN (${batch.placeholders()})
+                AND b.deleted_at_ms IS NULL
+            )
+            SELECT series_id, name, role
+            FROM ranked_author
+            WHERE duplicate_rank = 1
+            ORDER BY series_id, number_sort, relative_uri, book_id, ordinal
+            """.trimIndent(),
+            *bindings,
+          ).groupBy(
+            { SeriesId(requireNotNull(it.get("series_id", String::class.java))) },
+            {
+              Author(
+                name = requireNotNull(it.get("name", String::class.java)),
+                role = requireNotNull(it.get("role", String::class.java)),
+              )
+            },
+          )
+      val tags =
+        database.dsl
+          .fetch(
+            """
+            SELECT DISTINCT b.series_id, tag.tag
+            FROM book b
+            JOIN book_metadata_tag tag ON tag.book_id = b.id
+            WHERE b.series_id IN (${batch.placeholders()})
+              AND b.deleted_at_ms IS NULL
+            ORDER BY b.series_id, tag.tag
+            """.trimIndent(),
+            *bindings,
+          ).groupBy(
+            { SeriesId(requireNotNull(it.get("series_id", String::class.java))) },
+            { requireNotNull(it.get("tag", String::class.java)) },
+          ).mapValues { (_, values) -> values.toSet() }
+      batch.forEach { id ->
+        val current = result[id] ?: return@forEach
+        val row = stats[id]
+        result[id] =
+          current.copy(
+            authors = authors[id].orEmpty(),
+            tags = tags[id].orEmpty(),
+            releaseDate = row?.get("release_date", String::class.java),
+            summary = row?.get("summary", String::class.java).orEmpty(),
+            summaryNumber = row?.get("number", String::class.java).orEmpty(),
+            createdAtMillis = row?.get("minimum_created_64", String::class.java)?.toLong()
+              ?: current.createdAtMillis,
+            updatedAtMillis = row?.get("maximum_updated_64", String::class.java)?.toLong()
+              ?: current.updatedAtMillis,
+          )
+      }
+    }
+    return result
   }
 
   private fun bookFilter(
@@ -759,6 +845,7 @@ class JooqCatalogReadRepository(
   )
 
   companion object {
+    private const val QUERY_BATCH_SIZE = 500
     private val SEARCH_TOKEN = Regex("[\\p{L}\\p{N}]+")
   }
 }

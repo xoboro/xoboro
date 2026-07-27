@@ -154,11 +154,17 @@ data class SeriesMetadata(
 interface BookMetadataRepository {
   fun findByBookIdOrNull(bookId: BookId): BookMetadata?
 
+  fun findAllByBookIds(bookIds: Collection<BookId>): List<BookMetadata> =
+    bookIds.distinct().mapNotNull(::findByBookIdOrNull)
+
   fun upsert(metadata: BookMetadata)
 }
 
 interface SeriesMetadataRepository {
   fun findBySeriesIdOrNull(seriesId: SeriesId): SeriesMetadata?
+
+  fun findAllBySeriesIds(seriesIds: Collection<SeriesId>): List<SeriesMetadata> =
+    seriesIds.distinct().mapNotNull(::findBySeriesIdOrNull)
 
   fun upsert(metadata: SeriesMetadata)
 }

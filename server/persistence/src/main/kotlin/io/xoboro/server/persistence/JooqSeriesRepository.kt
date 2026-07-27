@@ -13,6 +13,18 @@ class JooqSeriesRepository(
   override fun findByIdOrNull(id: SeriesId): Series? =
     database.dsl.fetchOne("$SELECT_SERIES WHERE id = ?", id.value)?.toSeries()
 
+  override fun findAllByIds(ids: Collection<SeriesId>): List<Series> =
+    ids
+      .distinct()
+      .chunked(QUERY_BATCH_SIZE)
+      .flatMap { batch ->
+        database.dsl
+          .fetch(
+            "$SELECT_SERIES WHERE id IN (${batch.placeholders()}) ORDER BY id",
+            *batch.map { it.value }.toTypedArray(),
+          ).map { it.toSeries() }
+      }
+
   override fun findAllByLibraryId(libraryId: LibraryId): List<Series> =
     database.dsl
       .fetch(
@@ -152,7 +164,10 @@ class JooqSeriesRepository(
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 
+  private fun Collection<*>.placeholders(): String = joinToString(",") { "?" }
+
   companion object {
+    private const val QUERY_BATCH_SIZE = 500
     private const val SELECT_SERIES =
       """
       SELECT series.*,
