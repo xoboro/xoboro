@@ -2,6 +2,7 @@ package io.xoboro.server
 
 import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.ApiKeyLifecycle
+import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.ClientSettingsLifecycle
@@ -14,6 +15,7 @@ import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqApiKeyRepository
+import io.xoboro.server.persistence.JooqAnnouncementReadRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
@@ -55,6 +57,7 @@ class XoboroRuntime private constructor(
   val userSessionLifecycle: UserSessionLifecycle,
   val rememberMeTokenService: RememberMeTokenService,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
+  val announcementLifecycle: AnnouncementLifecycle,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -154,6 +157,11 @@ class XoboroRuntime private constructor(
           )
         val clientSettingsLifecycle =
           ClientSettingsLifecycle(JooqClientSettingsRepository(database))
+        val announcementLifecycle =
+          AnnouncementLifecycle(
+            feedProvider = HttpAnnouncementFeedProvider.komgaCompatible(),
+            reads = JooqAnnouncementReadRepository(database),
+          )
         val catalogScanner =
           CatalogScanner(
             inventories = listOf(LocalSourceInventory()),
@@ -235,6 +243,7 @@ class XoboroRuntime private constructor(
           userSessionLifecycle = userSessionLifecycle,
           rememberMeTokenService = rememberMeTokenService,
           clientSettingsLifecycle = clientSettingsLifecycle,
+          announcementLifecycle = announcementLifecycle,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()
