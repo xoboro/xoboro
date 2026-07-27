@@ -26,7 +26,8 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V12 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V13 clean-install and V1-to-current upgrade tests |
+| Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
