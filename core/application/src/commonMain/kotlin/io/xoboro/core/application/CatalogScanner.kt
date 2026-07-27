@@ -1,8 +1,10 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.SeriesId
 
 data class ScanSessionId(
   val value: String,
@@ -72,6 +74,52 @@ data class CatalogReconciliationResult(
       "A reconciliation is partial exactly when inventory entries failed"
     }
   }
+}
+
+enum class CatalogMutationKind {
+  ADDED,
+  UPDATED,
+  DELETED,
+}
+
+sealed interface CatalogMutationEvent {
+  val kind: CatalogMutationKind
+  val libraryId: LibraryId
+
+  data class Book(
+    override val kind: CatalogMutationKind,
+    val bookId: BookId,
+    val seriesId: SeriesId,
+    override val libraryId: LibraryId,
+  ) : CatalogMutationEvent
+
+  data class Series(
+    override val kind: CatalogMutationKind,
+    val seriesId: SeriesId,
+    override val libraryId: LibraryId,
+  ) : CatalogMutationEvent
+}
+
+fun interface CatalogMutationEventPublisher {
+  fun publish(event: CatalogMutationEvent)
+}
+
+data class CatalogImportEvent(
+  val bookId: BookId?,
+  val sourceFile: String,
+  val success: Boolean,
+  val message: String? = null,
+) {
+  init {
+    require(sourceFile.isNotBlank()) { "Import source file must not be blank" }
+    require(message == null || message.isNotBlank()) {
+      "Import failure message must be null or non-blank"
+    }
+  }
+}
+
+fun interface CatalogImportEventPublisher {
+  fun publish(event: CatalogImportEvent)
 }
 
 interface CatalogReconciliationStore {

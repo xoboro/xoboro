@@ -174,6 +174,26 @@ data class KomgaBookSseDto(
 )
 
 @Serializable
+data class KomgaBookImportSseDto(
+  val bookId: String? = null,
+  val sourceFile: String,
+  val success: Boolean,
+  val message: String? = null,
+)
+
+@Serializable
+data class KomgaCollectionSseDto(
+  val collectionId: String,
+  val seriesIds: List<String>,
+)
+
+@Serializable
+data class KomgaReadListSseDto(
+  val readListId: String,
+  val bookIds: List<String>,
+)
+
+@Serializable
 data class KomgaReadProgressSseDto(
   val bookId: String,
   val userId: String,
@@ -188,6 +208,31 @@ data class KomgaReadProgressSeriesSseDto(
 @Serializable
 data class KomgaSessionExpiredSseDto(
   val userId: String,
+)
+
+@Serializable
+data class KomgaThumbnailBookSseDto(
+  val bookId: String,
+  val seriesId: String,
+  val selected: Boolean,
+)
+
+@Serializable
+data class KomgaThumbnailSeriesSseDto(
+  val seriesId: String,
+  val selected: Boolean,
+)
+
+@Serializable
+data class KomgaThumbnailCollectionSseDto(
+  val collectionId: String,
+  val selected: Boolean,
+)
+
+@Serializable
+data class KomgaThumbnailReadListSseDto(
+  val readListId: String,
+  val selected: Boolean,
 )
 
 private fun KomgaSseEvent.toServerSentEvent(): ServerSentEvent =

@@ -25,6 +25,7 @@ class MetadataRefreshLifecycleTest {
   @Test
   fun `applies ordered provider patches while preserving locked fields`() {
     val repositories = Repositories()
+    val events = mutableListOf<CatalogMutationEvent>()
     repositories.bookMetadata.upsert(
       BookMetadata(
         bookId = BOOK_ID,
@@ -78,6 +79,7 @@ class MetadataRefreshLifecycleTest {
             },
           ),
         currentTimeMillis = { 100 },
+        eventPublisher = events::add,
       )
 
     val book = requireNotNull(lifecycle.refreshBook(BOOK_ID))
@@ -93,6 +95,22 @@ class MetadataRefreshLifecycleTest {
     assertEquals("Locked publisher", series.publisher)
     assertEquals(12, series.totalBookCount)
     assertEquals(100, series.updatedAtMillis)
+    assertEquals(
+      listOf(
+        CatalogMutationEvent.Book(
+          CatalogMutationKind.UPDATED,
+          BOOK_ID,
+          SERIES_ID,
+          LIBRARY_ID,
+        ),
+        CatalogMutationEvent.Series(
+          CatalogMutationKind.UPDATED,
+          SERIES_ID,
+          LIBRARY_ID,
+        ),
+      ),
+      events,
+    )
   }
 
   @Test

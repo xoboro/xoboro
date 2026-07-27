@@ -1,6 +1,7 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.CatalogCandidate
+import io.xoboro.core.application.CatalogMutationEvent
 import io.xoboro.core.application.ScanSessionId
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.Library
@@ -71,6 +72,51 @@ class JooqCatalogReconciliationStoreTest {
       assertEquals(0L, repeated.movedBooks)
       assertEquals(0L, fixture.taskCount())
       assertTrue(fixture.candidateTableIsEmpty())
+    }
+  }
+
+  @Test
+  fun `publishes committed catalog mutations once`() {
+    withStore("events") { fixture ->
+      fixture.scan(listOf(candidate("Series/001.cbz", "identity-1")))
+
+      assertEquals(
+        listOf(
+          "BOOK:ADDED",
+          "SERIES:ADDED",
+        ),
+        fixture.eventKinds(),
+      )
+      assertTrue(fixture.eventsObservedAfterCommit.all { it })
+      fixture.events.clear()
+
+      fixture.scan(
+        listOf(
+          candidate("Series/001.cbz", "identity-1").copy(fileSize = 200),
+          candidate("Series/002.cbz", "identity-2"),
+        ),
+      )
+
+      assertEquals(
+        listOf(
+          "BOOK:ADDED",
+          "BOOK:UPDATED",
+          "SERIES:UPDATED",
+        ),
+        fixture.eventKinds(),
+      )
+      fixture.events.clear()
+
+      fixture.scan(emptyList())
+
+      assertEquals(
+        listOf(
+          "BOOK:DELETED",
+          "BOOK:DELETED",
+          "SERIES:DELETED",
+        ),
+        fixture.eventKinds(),
+      )
     }
   }
 
@@ -356,8 +402,27 @@ class JooqCatalogReconciliationStoreTest {
     val database: XoboroDatabase,
   ) {
     private var sessionNumber = 0
+    val events = mutableListOf<CatalogMutationEvent>()
+    val eventsObservedAfterCommit = mutableListOf<Boolean>()
     val store =
-      JooqCatalogReconciliationStore(database) {
+      JooqCatalogReconciliationStore(
+        database = database,
+        eventPublisher = { event ->
+          events += event
+          eventsObservedAfterCommit +=
+            database.dsl
+              .fetchOne(
+                """
+                SELECT
+                  (SELECT count(*) FROM catalog_scan_candidate) = 0
+                  AND NOT EXISTS (
+                    SELECT 1 FROM catalog_scan_session WHERE status <> 'COMPLETED'
+                  )
+                """.trimIndent(),
+              )
+              ?.get(0, Boolean::class.java) == true
+        },
+      ) {
         sessionNumber += 1
         "scan-$sessionNumber"
       }
@@ -396,6 +461,16 @@ class JooqCatalogReconciliationStoreTest {
         ?.get(0)
         ?.let { it as Number }
         ?.toLong() == 0L
+
+    fun eventKinds(): List<String> =
+      events.map {
+        val entity =
+          when (it) {
+            is CatalogMutationEvent.Book -> "BOOK"
+            is CatalogMutationEvent.Series -> "SERIES"
+          }
+        "$entity:${it.kind}"
+      }.sorted()
   }
 
   private fun candidate(
