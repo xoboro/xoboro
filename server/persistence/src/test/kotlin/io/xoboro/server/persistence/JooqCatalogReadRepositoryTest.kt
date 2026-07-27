@@ -15,11 +15,16 @@ import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ContentRestrictions
+import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.ReadList
+import io.xoboro.core.domain.ReadListId
+import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.Series
+import io.xoboro.core.domain.SeriesCollection
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.core.domain.User
@@ -73,6 +78,210 @@ class JooqCatalogReadRepositoryTest {
           ?.value,
       )
       assertNull(catalog.findPreviousBookOrNull(BookId("book-1"), CatalogAccess()))
+    }
+  }
+
+  @Test
+  fun `supports Komga book and series sort aliases with user progress`() {
+    withCatalog("sort-aliases") { database ->
+      val userId = UserId("sort-reader")
+      JooqUserRepository(database).insert(
+        User(
+          id = userId,
+          email = "sort-reader@example.invalid",
+          passwordHash = "synthetic-password-hash",
+          createdAtMillis = 1,
+        ),
+      )
+      database.transaction { transaction ->
+        listOf(
+          Triple("book-1", "ERROR", 1),
+          Triple("book-2", "READY", 9),
+          Triple("book-3", "UNKNOWN", 4),
+        ).forEach { (bookId, status, pages) ->
+          transaction.execute(
+            """
+            INSERT INTO media (
+              book_id, status, media_type, profile, page_count, comment,
+              created_at_ms, updated_at_ms
+            ) VALUES (?, ?, 'application/zip', 'DIVINA', ?, ?, 1, 1)
+            """.trimIndent(),
+            bookId,
+            status,
+            pages,
+            "Synthetic $status",
+          )
+        }
+      }
+      val progresses = JooqReadProgressRepository(database)
+      progresses.upsertAll(
+        listOf(
+          ReadProgress(
+            bookId = BookId("book-1"),
+            userId = userId,
+            page = 1,
+            completed = false,
+            readAtMillis = 30,
+            updatedAtMillis = 40,
+          ),
+          ReadProgress(
+            bookId = BookId("book-2"),
+            userId = userId,
+            page = 1,
+            completed = false,
+            readAtMillis = 20,
+            updatedAtMillis = 50,
+          ),
+          ReadProgress(
+            bookId = BookId("book-b-1"),
+            userId = userId,
+            page = 1,
+            completed = false,
+            readAtMillis = 100,
+          ),
+        ),
+      )
+      val metadata = JooqBookMetadataRepository(database)
+      listOf(
+        "book-1" to "2020-01-01",
+        "book-2" to "2022-01-01",
+        "book-3" to "2021-01-01",
+        "book-b-1" to "2018-01-01",
+      ).forEachIndexed { index, (bookId, date) ->
+        metadata.upsert(
+          requireNotNull(metadata.findByBookIdOrNull(BookId(bookId))).copy(
+            releaseDate = date,
+            updatedAtMillis = 101 + index.toLong(),
+          ),
+        )
+      }
+      JooqReadListRepository(database).insert(
+        ReadList(
+          id = ReadListId("sort-read-list"),
+          name = "Synthetic sort order",
+          bookIds = listOf(BookId("book-3"), BookId("book-1"), BookId("book-2")),
+          createdAtMillis = 1,
+        ),
+      )
+      JooqReadListRepository(database).insert(
+        ReadList(
+          id = ReadListId("other-sort-read-list"),
+          name = "Conflicting synthetic sort order",
+          bookIds = listOf(BookId("book-2"), BookId("book-1"), BookId("book-3")),
+          createdAtMillis = 1,
+        ),
+      )
+      JooqSeriesCollectionRepository(database).insert(
+        SeriesCollection(
+          id = CollectionId("sort-collection"),
+          name = "Synthetic sort collection",
+          ordered = true,
+          seriesIds = listOf(SeriesId("series-b"), SeriesId("series-a")),
+          createdAtMillis = 1,
+        ),
+      )
+      JooqSeriesCollectionRepository(database).insert(
+        SeriesCollection(
+          id = CollectionId("other-sort-collection"),
+          name = "Conflicting synthetic sort collection",
+          ordered = true,
+          seriesIds = listOf(SeriesId("series-a"), SeriesId("series-b")),
+          createdAtMillis = 1,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+      val access = CatalogAccess(userId = userId)
+
+      fun sortedBooks(
+        property: String,
+        direction: CatalogSortDirection,
+      ): List<String> =
+        catalog
+          .findBooks(
+            query =
+              BookCatalogQuery(
+                seriesId = SeriesId("series-a"),
+                condition =
+                  CatalogSearchCondition.Predicate(
+                    CatalogSearchField.READ_LIST_ID,
+                    CatalogSearchOperator.IS,
+                    "sort-read-list",
+                  ),
+              ),
+            access = access,
+            page = CatalogPageRequest(sorts = listOf(CatalogSort(property, direction))),
+          ).content
+          .map { it.book.id.value }
+
+      assertEquals(
+        listOf("book-2", "book-3", "book-1"),
+        sortedBooks("media.pagesCount", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("book-2", "book-3", "book-1"),
+        sortedBooks("metadata.releaseDate", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("book-1", "book-2", "book-3"),
+        sortedBooks("readProgress.readDate", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("book-2", "book-1", "book-3"),
+        sortedBooks("readProgress.lastModified", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("book-3", "book-1", "book-2"),
+        sortedBooks("readList.number", CatalogSortDirection.ASC),
+      )
+      listOf(
+        "createdDate",
+        "lastModifiedDate",
+        "fileSize",
+        "size",
+        "url",
+        "media.status",
+        "media.comment",
+        "media.mediaType",
+        "metadata.title",
+        "metadata.numberSort",
+        "series",
+      ).forEach { property ->
+        assertEquals(3, sortedBooks(property, CatalogSortDirection.ASC).size)
+      }
+
+      fun sortedSeries(
+        property: String,
+        direction: CatalogSortDirection,
+      ): List<String> =
+        catalog
+          .findSeries(
+            query =
+              SeriesCatalogQuery(
+                condition =
+                  CatalogSearchCondition.Predicate(
+                    CatalogSearchField.COLLECTION_ID,
+                    CatalogSearchOperator.IS,
+                    "sort-collection",
+                  ),
+              ),
+            access = access,
+            page = CatalogPageRequest(sorts = listOf(CatalogSort(property, direction))),
+          ).content
+          .map { it.series.id.value }
+
+      assertEquals(
+        listOf("series-b", "series-a"),
+        sortedSeries("readDate", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("series-a", "series-b"),
+        sortedSeries("booksMetadata.releaseDate", CatalogSortDirection.DESC),
+      )
+      assertEquals(
+        listOf("series-b", "series-a"),
+        sortedSeries("collection.number", CatalogSortDirection.ASC),
+      )
+      assertEquals(2, sortedSeries("random", CatalogSortDirection.ASC).size)
     }
   }
 
