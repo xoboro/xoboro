@@ -39,7 +39,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(3, database.migrationResult.migrationsExecuted)
+      assertEquals(4, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -89,10 +89,46 @@ class XoboroDatabaseTest {
         statement.setLong(5, 1L)
         statement.executeUpdate()
       }
+      connection.prepareStatement(
+        """
+        INSERT INTO series
+          (id, library_id, relative_uri, name, sort_title, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+      ).use { statement ->
+        statement.setString(1, "legacy-series")
+        statement.setString(2, "legacy-library")
+        statement.setString(3, "legacy-series-path")
+        statement.setString(4, "Legacy synthetic series")
+        statement.setString(5, "Legacy synthetic series")
+        statement.setLong(6, 1L)
+        statement.setLong(7, 1L)
+        statement.executeUpdate()
+      }
+      connection.prepareStatement(
+        """
+        INSERT INTO book (
+          id, library_id, series_id, relative_uri, name, media_kind, file_size,
+          file_modified_ms, created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+      ).use { statement ->
+        statement.setString(1, "legacy-book")
+        statement.setString(2, "legacy-library")
+        statement.setString(3, "legacy-series")
+        statement.setString(4, "legacy-series-path/book.cbz")
+        statement.setString(5, "Legacy synthetic book")
+        statement.setString(6, "COMIC_ARCHIVE")
+        statement.setLong(7, 1L)
+        statement.setLong(8, 1L)
+        statement.setLong(9, 1L)
+        statement.setLong(10, 1L)
+        statement.executeUpdate()
+      }
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(2, database.migrationResult.migrationsExecuted)
+      assertEquals(3, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -103,6 +139,18 @@ class XoboroDatabaseTest {
         "EVERY_6H",
         database.dsl
           .fetchOne("SELECT scan_interval FROM library WHERE id = ?", "legacy-library")
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "legacy-series-path",
+        database.dsl
+          .fetchOne("SELECT source_item_id FROM series WHERE id = ?", "legacy-series")
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "legacy-series-path/book.cbz",
+        database.dsl
+          .fetchOne("SELECT source_item_id FROM book WHERE id = ?", "legacy-book")
           ?.get(0, String::class.java),
       )
     }

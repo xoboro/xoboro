@@ -9,6 +9,7 @@ class SourceInventoryTest {
     assertFailsWith<IllegalArgumentException> {
       SourceFile(
         itemId = "item",
+        identity = null,
         relativePath = "book.cbz",
         name = "book.cbz",
         extension = "CBZ",
