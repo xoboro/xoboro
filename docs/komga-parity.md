@@ -21,7 +21,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V8 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V9 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
@@ -103,7 +103,7 @@ Status:
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
 | OAuth2 providers | TODO | |
-| Authentication activity | TODO | |
+| Authentication activity | PARTIAL | Durable success/failure ledger, password and API-key source recording, credential-safe failed-key fingerprinting, User-Agent/IP capture, current-user/admin pagination and sorting, API-key-filtered latest lookup, retention cutoff, cascade cleanup, and restart tests; sessions, OAuth, demo mode, proxy IP policy, and scheduled cleanup pending |
 | Per-user client settings | TODO | |
 | Announcements | TODO | |
 
@@ -121,7 +121,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` plus `/api/v2/users` current-user, administration, restriction, and password contracts with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` plus `/api/v2/users` current-user, administration, restriction, password, API-key, and authentication-activity contracts with production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic and `X-API-Key` authentication, multi-provider principal propagation, failure, deletion invalidation, and current-user tests; browser sessions and remember-me pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

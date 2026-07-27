@@ -2,6 +2,7 @@ package io.xoboro.server
 
 import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.ApiKeyLifecycle
+import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -10,6 +11,7 @@ import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqApiKeyRepository
+import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqDurableTaskQueue
@@ -42,6 +44,7 @@ class XoboroRuntime private constructor(
   private val workerPool: TaskWorkerPool,
   val userLifecycle: UserLifecycle,
   val apiKeyLifecycle: ApiKeyLifecycle,
+  val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -105,6 +108,11 @@ class XoboroRuntime private constructor(
             tokenEncoder = Sha512TokenEncoder(),
             apiKeyIdFactory = { TsidCreator.getTsid256().toString() },
             plainTextKeyFactory = { UUID.randomUUID().toString().replace("-", "") },
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val authenticationActivityLifecycle =
+          AuthenticationActivityLifecycle(
+            activities = JooqAuthenticationActivityRepository(database),
             currentTimeMillis = System::currentTimeMillis,
           )
         val catalogScanner =
@@ -184,6 +192,7 @@ class XoboroRuntime private constructor(
           workerPool = createdWorkerPool,
           userLifecycle = userLifecycle,
           apiKeyLifecycle = apiKeyLifecycle,
+          authenticationActivityLifecycle = authenticationActivityLifecycle,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()

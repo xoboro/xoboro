@@ -396,7 +396,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondNotFound()
   respondError(HttpStatusCode.NotFound, HttpStatusCode.NotFound.description)
 }
 
-private suspend fun io.ktor.server.application.ApplicationCall.respondError(
+internal suspend fun io.ktor.server.application.ApplicationCall.respondError(
   status: HttpStatusCode,
   message: String,
 ) {
