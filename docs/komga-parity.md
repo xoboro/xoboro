@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Twenty-nine operations are partially implemented and none are yet
+167 schemas. Thirty-six operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -58,9 +58,9 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository, routed source validation, and canonical local/symlink overlap tests; REST pending |
+| Library CRUD and non-overlapping roots | PARTIAL | Komga v1 list/get/create/PATCH/deprecated PUT/delete routes, full settings DTO, selected-library visibility, administrator-only root disclosure and mutation, durable lifecycle wiring, local path validation, duplicate/overlap rejection, and contract tests; non-local source administration and differential tests pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
-| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling, bounded local inventory/reconciliation, and real-runtime execution tests; REST trigger and library CRUD wiring pending |
+| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, highest-priority manual REST trigger, bounded local inventory/reconciliation, and real-runtime execution tests; exact maintenance jobs and differential tests pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | TODO | |
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, and server settings contracts with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, server settings, and seven library CRUD/scan operations with production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

@@ -11,11 +11,20 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.ClientSettingsLifecycle
+import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryEvent
+import io.xoboro.core.application.LibraryLifecycle
+import io.xoboro.core.application.LibraryMaintenanceQueue
+import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
+import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
+import io.xoboro.core.domain.Library
+import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.MediaItemRepository
 import io.xoboro.server.media.AnalyzeBook
@@ -39,6 +48,7 @@ import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
+import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
@@ -74,6 +84,8 @@ class XoboroRuntime private constructor(
   val serverSettingsLifecycle: ServerSettingsLifecycle,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
+  val libraryAdministrationLifecycle: LibraryAdministrationLifecycle,
+  val libraryScanRequester: LibraryScanRequester,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
@@ -249,6 +261,68 @@ class XoboroRuntime private constructor(
               ),
           )
         libraryScanScheduler = createdLibraryScanScheduler
+        val libraryMaintenanceQueue =
+          object : LibraryMaintenanceQueue {
+            override fun scanLibrary(id: LibraryId) {
+              scanEmitter.scanLibrary(id)
+            }
+
+            override fun reschedulePeriodicScan(library: Library) {
+              createdLibraryScanScheduler.schedule(library)
+            }
+
+            override fun hashBooksWithoutFileHash(id: LibraryId) {
+              scanEmitter.scanLibrary(id, deep = true)
+            }
+
+            override fun hashBooksWithoutKoreaderHash(id: LibraryId) {
+              scanEmitter.scanLibrary(id, deep = true)
+            }
+
+            override fun hashBooksWithMissingPageHash(id: LibraryId) {
+              scanEmitter.scanLibrary(id, deep = true)
+            }
+
+            override fun repairExtensions(id: LibraryId) {
+              scanEmitter.scanLibrary(id, deep = true)
+            }
+
+            override fun convertBooksToCbz(id: LibraryId) {
+              scanEmitter.scanLibrary(id, deep = true)
+            }
+          }
+        val libraryAdministrationLifecycle =
+          LibraryAdministrationLifecycle(
+            libraries = libraries,
+            lifecycle =
+              LibraryLifecycle(
+                repository = libraries,
+                rootAccess =
+                  RoutingLibraryRootAccess(
+                    listOf(LocalLibraryRootInspector()),
+                  ),
+                maintenanceQueue = libraryMaintenanceQueue,
+                eventPublisher = { event ->
+                  when (event) {
+                    is LibraryEvent.Added ->
+                      createdLibraryScanScheduler.schedule(event.library)
+                    is LibraryEvent.Deleted ->
+                      createdLibraryScanScheduler.cancel(event.library.id)
+                    is LibraryEvent.Updated -> Unit
+                  }
+                },
+              ),
+            libraryIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val libraryScanRequester =
+          LibraryScanRequester { libraryId, deep ->
+            scanEmitter.scanLibrary(
+              libraryId = libraryId,
+              deep = deep,
+              priority = TaskPriority.HIGHEST,
+            )
+          }
         val analyzeBook =
           AnalyzeBook(
             books = books,
@@ -310,6 +384,8 @@ class XoboroRuntime private constructor(
           serverSettingsLifecycle = serverSettingsLifecycle,
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
+          libraryAdministrationLifecycle = libraryAdministrationLifecycle,
+          libraryScanRequester = libraryScanRequester,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,

@@ -3,12 +3,18 @@ package io.xoboro.server
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.basicAuth
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
 import io.xoboro.compatibility.komga.api.ClaimStatusDto
+import io.xoboro.compatibility.komga.api.LibraryCreationDto
+import io.xoboro.compatibility.komga.api.LibraryDto
 import io.xoboro.compatibility.komga.api.OAuth2ClientDto
 import io.xoboro.compatibility.komga.api.UserDto
 import java.nio.file.Path
@@ -125,6 +131,23 @@ class ApplicationTest {
       assertEquals(HttpStatusCode.OK, claimed.status)
       assertTrue(claimed.body<UserDto>().id.matches(Regex("[0-9A-HJKMNP-TV-Z]{13}")))
       assertEquals(ClaimStatusDto(true), client.get("/api/v1/claim").body())
+
+      val root = java.nio.file.Files.createDirectories(tempDirectory.resolve("runtime-library"))
+      val library =
+        client.post("/api/v1/libraries") {
+          basicAuth("admin@example.invalid", "synthetic-password")
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(LibraryCreationDto("Synthetic runtime library", root.toString()))
+        }
+      assertEquals(HttpStatusCode.OK, library.status)
+      val created = library.body<LibraryDto>()
+      assertEquals(root.toString(), created.root)
+      assertEquals(
+        created,
+        client.get("/api/v1/libraries/${created.id}") {
+          basicAuth("admin@example.invalid", "synthetic-password")
+        }.body(),
+      )
     }
 
     assertFalse(runtime.isReady())
