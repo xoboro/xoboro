@@ -44,6 +44,7 @@ core/
   domain/            Platform-neutral domain model
 server/
   app/               Ktor application entry point
+  media/             Media analysis and source materialization ports
   persistence/       SQLite migrations and jOOQ persistence adapters
   sources/local/     Local filesystem source adapter
 compatibility/       Komga API and protocol adapters

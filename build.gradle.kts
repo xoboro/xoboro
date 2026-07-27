@@ -14,6 +14,7 @@ tasks.named("check") {
   dependsOn(":core:application:check")
   dependsOn(":core:domain:check")
   dependsOn(":server:app:check")
+  dependsOn(":server:media:check")
   dependsOn(":server:persistence:check")
   dependsOn(":server:sources:local:check")
 }
