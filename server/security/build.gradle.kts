@@ -14,6 +14,7 @@ kotlin {
 
 dependencies {
   implementation(project(":core:application"))
+  implementation(project(":core:domain"))
   implementation(libs.spring.security.crypto)
   implementation(libs.commons.logging)
 

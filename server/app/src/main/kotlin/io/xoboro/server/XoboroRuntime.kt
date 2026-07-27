@@ -5,6 +5,7 @@ import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.ZipMediaAnalyzer
@@ -19,6 +20,7 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
@@ -45,6 +47,7 @@ class XoboroRuntime private constructor(
   val userLifecycle: UserLifecycle,
   val apiKeyLifecycle: ApiKeyLifecycle,
   val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
+  val userSessionLifecycle: UserSessionLifecycle,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -76,6 +79,7 @@ class XoboroRuntime private constructor(
 
   companion object {
     private val logger = Logger.getLogger(XoboroRuntime::class.java.name)
+    const val DEFAULT_SESSION_TIMEOUT_MILLIS: Long = 7L * 24 * 60 * 60 * 1_000
 
     fun open(config: ServerConfig): XoboroRuntime {
       val database =
@@ -94,21 +98,33 @@ class XoboroRuntime private constructor(
         val media = JooqBookMediaRepository(database)
         val queue = JooqDurableTaskQueue(database)
         val userRepository = JooqUserRepository(database)
+        val tokenEncoder = Sha512TokenEncoder()
+        val sessionRepository = InMemoryUserSessionRepository()
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
             passwordHasher = BCryptPasswordHasher(),
             userIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            invalidateUserSessions = { sessionRepository.deleteByUserId(it) },
           )
         val apiKeyLifecycle =
           ApiKeyLifecycle(
             users = userRepository,
             apiKeys = JooqApiKeyRepository(database),
-            tokenEncoder = Sha512TokenEncoder(),
+            tokenEncoder = tokenEncoder,
             apiKeyIdFactory = { TsidCreator.getTsid256().toString() },
             plainTextKeyFactory = { UUID.randomUUID().toString().replace("-", "") },
             currentTimeMillis = System::currentTimeMillis,
+          )
+        val userSessionLifecycle =
+          UserSessionLifecycle(
+            users = userRepository,
+            sessions = sessionRepository,
+            tokenEncoder = tokenEncoder,
+            plainTokenFactory = { UUID.randomUUID().toString().replace("-", "") },
+            currentTimeMillis = System::currentTimeMillis,
+            inactivityTimeoutMillis = DEFAULT_SESSION_TIMEOUT_MILLIS,
           )
         val authenticationActivityLifecycle =
           AuthenticationActivityLifecycle(
@@ -193,6 +209,7 @@ class XoboroRuntime private constructor(
           userLifecycle = userLifecycle,
           apiKeyLifecycle = apiKeyLifecycle,
           authenticationActivityLifecycle = authenticationActivityLifecycle,
+          userSessionLifecycle = userSessionLifecycle,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()

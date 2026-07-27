@@ -13,9 +13,9 @@ checksummed contract snapshot. Automated verification currently locks:
 - 167 wire schemas
 - the exact upstream version and SHA-256
 
-Fifteen operations have an Xoboro implementation in progress. They remain
+Eighteen operations have an Xoboro implementation in progress. They remain
 partial until differential response, authorization, validation, persistence,
-and error-envelope tests pass against the reference behavior. The other 150
+and error-envelope tests pass against the reference behavior. The other 147
 operations are unimplemented.
 
 ## Additional compatibility surfaces
