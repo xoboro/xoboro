@@ -32,13 +32,17 @@ import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.SeriesMetadata
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.WebLink
+import java.net.URI
+import java.nio.file.Path
 import java.time.Instant
 import java.util.Locale
 import kotlin.math.ceil
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
 
 fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
@@ -58,7 +62,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
             fullTextSearch = call.request.queryParameters["search"],
             deleted = false,
           )
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(query, principal.user.catalogAccess(), call.catalogPageRequest())
             .toBookPageDto(principal.user),
@@ -68,7 +72,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
         val parsed = call.parseSearchCondition(search, CatalogSearchTarget.BOOK) ?: return@post
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(
               query =
@@ -84,7 +88,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/latest") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(
               query = BookCatalogQuery(deleted = false),
@@ -98,7 +102,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/ondeck") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(
               query =
@@ -121,7 +125,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
           call.respond(HttpStatusCode.Forbidden)
           return@get
         }
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(
               query = BookCatalogQuery(deleted = false, duplicatesOnly = true),
@@ -143,7 +147,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         if (item == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
-          call.respond(item.toDto(principal.user))
+          call.respondCatalog(item.toDto(principal.user))
         }
       }
       get("/{bookId}/previous") {
@@ -156,7 +160,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         if (item == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
-          call.respond(item.toDto(principal.user))
+          call.respondCatalog(item.toDto(principal.user))
         }
       }
       get("/{bookId}/next") {
@@ -169,14 +173,14 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         if (item == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
-          call.respond(item.toDto(principal.user))
+          call.respondCatalog(item.toDto(principal.user))
         }
       }
     }
     route("/api/v1/series") {
       get {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findSeries(
               query = call.deprecatedSeriesQuery(),
@@ -189,7 +193,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
         val parsed = call.parseSearchCondition(search, CatalogSearchTarget.SERIES) ?: return@post
-        call.respond(
+        call.respondCatalog(
           catalog
             .findSeries(
               query =
@@ -205,7 +209,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/alphabetical-groups") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .countSeriesByFirstCharacter(
               call.deprecatedSeriesQuery(),
@@ -217,7 +221,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
         val parsed = call.parseSearchCondition(search, CatalogSearchTarget.SERIES) ?: return@post
-        call.respond(
+        call.respondCatalog(
           catalog
             .countSeriesByFirstCharacter(
               SeriesCatalogQuery(
@@ -231,7 +235,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/latest") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findSeries(
               query =
@@ -250,7 +254,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/new") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findSeries(
               query =
@@ -269,7 +273,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       }
       get("/updated") {
         val principal = call.catalogPrincipal()
-        call.respond(
+        call.respondCatalog(
           catalog
             .findSeries(
               query =
@@ -297,7 +301,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
         if (item == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
-          call.respond(item.toDto(principal.user))
+          call.respondCatalog(item.toDto(principal.user))
         }
       }
       get("/{seriesId}/books") {
@@ -308,7 +312,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        call.respond(
+        call.respondCatalog(
           catalog
             .findBooks(
               query = BookCatalogQuery(seriesId = seriesId, deleted = false),
@@ -515,6 +519,10 @@ data class KomgaSortDto(
 private fun ApplicationCall.catalogPrincipal(): KomgaPrincipal =
   requireNotNull(principal<KomgaPrincipal>()) { "Catalog routes require authentication" }
 
+private suspend inline fun <reified T> ApplicationCall.respondCatalog(body: T) {
+  respond(KOMGA_CATALOG_RESPONSE_JSON.encodeToJsonElement(body))
+}
+
 internal fun User.catalogAccess(): CatalogAccess =
   CatalogAccess(
     userId = id,
@@ -597,7 +605,12 @@ internal fun CatalogBook.toDto(user: User): KomgaBookDto =
     seriesTitle = seriesTitle,
     libraryId = book.libraryId.value,
     name = book.name,
-    url = if (user.isAdmin) book.sourceItemId else book.relativePath.substringAfterLast('/'),
+    url =
+      if (user.isAdmin) {
+        book.sourceItemId.toKomgaSourcePath()
+      } else {
+        book.relativePath.substringAfterLast('/')
+      },
     number = book.number,
     created = book.createdAtMillis.toWireTime(),
     lastModified = book.updatedAtMillis.toWireTime(),
@@ -630,8 +643,8 @@ private fun BookMedia?.toDto(): KomgaMediaDto =
     mediaProfile = this?.profile?.name.orEmpty(),
     pagesCount = this?.pageCount ?: 0,
     comment = this?.comment.orEmpty(),
-    epubDivinaCompatible = this?.profile?.name == "DIVINA",
-    epubIsKepub = false,
+    epubDivinaCompatible = this?.epubDivinaCompatible ?: false,
+    epubIsKepub = this?.epubIsKepub ?: false,
   )
 
 private fun BookMetadata.toDto(): KomgaBookMetadataDto =
@@ -663,7 +676,7 @@ internal fun CatalogSeries.toDto(user: User): KomgaSeriesDto =
     id = series.id.value,
     libraryId = series.libraryId.value,
     name = series.name,
-    url = if (user.isAdmin) series.sourceItemId else "",
+    url = if (user.isAdmin) series.sourceItemId.toKomgaSourcePath() else "",
     created = series.createdAtMillis.toWireTime(),
     lastModified = series.updatedAtMillis.toWireTime(),
     fileLastModified = series.fileModifiedAtMillis.toWireTime(),
@@ -743,7 +756,8 @@ internal fun CatalogPage<CatalogSeries>.toSeriesPageDto(
 
 internal fun <T, R> CatalogPage<T>.toPageDto(mapped: List<R>): KomgaPageDto<R> {
   val totalPages = ceil(totalElements.toDouble() / size).toInt()
-  val sort = KomgaSortDto(empty = false, sorted = true, unsorted = false)
+  val hasSort = sorts.isNotEmpty()
+  val sort = KomgaSortDto(empty = !hasSort, sorted = hasSort, unsorted = !hasSort)
   return KomgaPageDto(
     content = mapped,
     pageable =
@@ -768,6 +782,18 @@ internal fun <T, R> CatalogPage<T>.toPageDto(mapped: List<R>): KomgaPageDto<R> {
 }
 
 private fun Long.toWireTime(): String = Instant.ofEpochMilli(this).toString()
+
+private fun String.toKomgaSourcePath(): String =
+  runCatching {
+    val uri = URI(this)
+    if (uri.scheme == "file") Path.of(uri).toString() else this
+  }.getOrDefault(this)
+
+internal val KOMGA_CATALOG_RESPONSE_JSON =
+  Json {
+    explicitNulls = true
+    encodeDefaults = true
+  }
 
 private fun Long.toHumanSize(): String {
   if (this < 1_024) return "$this B"

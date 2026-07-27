@@ -18,6 +18,7 @@ dependencies {
   implementation(libs.flyway.core)
   implementation(libs.hikari)
   implementation(libs.jooq)
+  implementation(libs.natural.comparator)
   implementation(libs.sqlite.jdbc)
 
   testImplementation(kotlin("test-junit5"))

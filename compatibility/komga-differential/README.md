@@ -12,6 +12,13 @@ Run the committed anonymous suite:
 --suite compatibility/komga-differential/suites/komga-1.25.0-anonymous.json"
 ```
 
+The CI workflow also builds a two-page synthetic CBZ, claims both fresh
+servers, scans the same mounted library, and runs
+`komga-1.25.0-catalog.json`. The catalog suite keeps generated identifiers and
+timestamps out of comparison while checking library settings, page envelopes,
+metadata, media analysis, natural numbering, source paths, and alphabetical
+groups.
+
 Each case defines a method, origin-relative path, optional headers/body, and a
 comparison policy. Status and normalized content type are compared by default.
 Additional headers are opt-in. JSON is compared structurally, text uses

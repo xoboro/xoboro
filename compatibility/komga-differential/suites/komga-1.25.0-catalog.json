@@ -1,0 +1,57 @@
+{
+  "version": "1.25.0",
+  "cases": [
+    {
+      "name": "authenticated libraries",
+      "path": "/api/v1/libraries",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/*/id"
+        ]
+      }
+    },
+    {
+      "name": "synthetic series catalog",
+      "path": "/api/v1/series?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic book catalog",
+      "path": "/api/v1/books?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/seriesId",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic alphabetical groups",
+      "path": "/api/v1/series/alphabetical-groups",
+      "comparison": {
+        "bodyMode": "JSON"
+      }
+    }
+  ]
+}
