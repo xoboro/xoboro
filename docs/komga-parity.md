@@ -23,7 +23,7 @@ Status:
 | Configuration and environment overrides | TODO | |
 | SQLite schema and migrations | PARTIAL | Flyway V1-V2 clean-install and upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability tests |
-| Durable prioritized task queue | TODO | |
+| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, lease recovery, retry, dead-letter, and concurrent-claim tests |
 | Structured logs, health, readiness, metrics | PARTIAL | `/health` contract test |
 | Server-Sent Events | TODO | |
 | Backup and restore | TODO | |
