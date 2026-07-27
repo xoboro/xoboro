@@ -42,6 +42,7 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.tsid.creator)
   runtimeOnly(libs.logback.classic)
+  runtimeOnly(libs.logstash.logback.encoder)
 
   testImplementation(kotlin("test-junit5"))
   testImplementation(libs.ktor.server.test.host)

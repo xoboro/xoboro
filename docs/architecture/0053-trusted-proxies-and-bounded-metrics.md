@@ -28,6 +28,10 @@ raw request URLs or identifiers.
   durable queue size, worker count, and uptime.
 - Never place paths, query strings, user/catalog identifiers, errors, tokens,
   or forwarding values in metric labels or values.
+- Emit one JSON object per log event with stable service, timestamp, level,
+  logger, thread, message, and exception fields. HTTP access messages include
+  method, path, and status but deliberately omit query strings so login codes
+  and other credentials cannot enter routine request logs.
 
 ## Consequences
 

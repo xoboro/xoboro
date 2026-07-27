@@ -2,6 +2,7 @@
 kotlin = "2.4.10"
 ktor = "3.5.1"
 logback = "1.6.0"
+logstash-logback-encoder = "9.0"
 flyway = "12.11.0"
 hikari = "7.1.0"
 jooq = "3.19.36"
@@ -35,6 +36,7 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-logback-encoder" }
 flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
 hikari = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
