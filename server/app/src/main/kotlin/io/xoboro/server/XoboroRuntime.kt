@@ -20,6 +20,8 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataRefreshLifecycle
+import io.xoboro.core.application.MetadataEditingLifecycle
+import io.xoboro.core.application.MetadataFacetRepository
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
@@ -52,6 +54,7 @@ import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
+import io.xoboro.server.persistence.JooqMetadataFacetRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
 import io.xoboro.server.persistence.JooqReadListRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
@@ -115,6 +118,8 @@ class XoboroRuntime private constructor(
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
+  val metadataEditingLifecycle: MetadataEditingLifecycle,
+  val metadataFacetRepository: MetadataFacetRepository,
   val bookContentAccess: BookContentAccess,
   val organizationLifecycle: OrganizationLifecycle,
   val seriesCollectionRepository: SeriesCollectionRepository,
@@ -202,6 +207,15 @@ class XoboroRuntime private constructor(
             media = media,
             readProgress = readProgresses,
           )
+        val metadataEditing =
+          MetadataEditingLifecycle(
+            books = books,
+            series = series,
+            bookMetadata = bookMetadata,
+            seriesMetadata = seriesMetadata,
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val metadataFacets = JooqMetadataFacetRepository(database)
         val readProgressLifecycle =
           ReadProgressLifecycle(
             books = books,
@@ -514,6 +528,8 @@ class XoboroRuntime private constructor(
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
+          metadataEditingLifecycle = metadataEditing,
+          metadataFacetRepository = metadataFacets,
           bookContentAccess = bookContentAccess,
           organizationLifecycle = organizationLifecycle,
           seriesCollectionRepository = collections,

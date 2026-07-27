@@ -3,6 +3,7 @@ package io.xoboro.server
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
 import io.xoboro.compatibility.komga.api.komgaMediaRoutes
+import io.xoboro.compatibility.komga.api.komgaMetadataRoutes
 import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
@@ -23,6 +24,8 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.MetadataEditingLifecycle
+import io.xoboro.core.application.MetadataFacetRepository
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
@@ -82,6 +85,8 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
+    metadataEditingLifecycle = runtime.metadataEditingLifecycle,
+    metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
     organizationLifecycle = runtime.organizationLifecycle,
     seriesCollectionRepository = runtime.seriesCollectionRepository,
@@ -108,6 +113,8 @@ fun Application.xoboroModule(
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
+  metadataEditingLifecycle: MetadataEditingLifecycle? = null,
+  metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
   organizationLifecycle: OrganizationLifecycle? = null,
   seriesCollectionRepository: SeriesCollectionRepository? = null,
@@ -184,6 +191,9 @@ fun Application.xoboroModule(
         )
       }
       catalogReadRepository?.let(::komgaCatalogRoutes)
+      if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
+        komgaMetadataRoutes(metadataEditingLifecycle, metadataFacetRepository)
+      }
       if (catalogReadRepository != null && bookContentAccess != null) {
         komgaMediaRoutes(catalogReadRepository, bookContentAccess)
       }
