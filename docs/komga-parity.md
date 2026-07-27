@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V20 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V22 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -81,7 +81,7 @@ Status:
 | Mylar metadata | PARTIAL | Source-aware bounded `series.json` import supports textual/formatted descriptions, title, publisher, year/volume naming, status, age rating, and issue count with synthetic tests; complete schema and differential fixtures pending |
 | Series sidecars, including series.json | PARTIAL | Canonical-root containment, traversal and size guards, setting-aware provider selection, durable per-library refresh, and real-runtime persistence tests; artwork sidecars and remote sources pending |
 | One-shot detection | PARTIAL | Configured-directory, root-series, and candidate derivation tests; metadata aggregation pending |
-| ISBN barcode detection | TODO | |
+| ISBN barcode detection | PARTIAL | Setting-aware EAN-13 decoding scans at most the final three pages in reverse then the first three, excludes EPUB, validates 978/979 ISBN prefixes and check digits, uses bounded source-subsampled images, isolates damaged pages, closes streams, and has generated synthetic barcode tests; differential image fixtures pending |
 | Series aggregation | PARTIAL | Transactional path grouping, book counts, restore/delete, partial-scan safety, ordered metadata providers, and lock-preserving book/series merge tests; full Komga aggregation precedence pending |
 | Field locks and manual patches | PARTIAL | Durable normalized lock sets, refresh-time lock preservation, presence-sensitive book/series REST patches, explicit-null clearing, administrator authorization, and persistence/route tests; differential validation and event emission pending |
 | Bulk metadata updates | PARTIAL | Komga-compatible book-ID-to-patch map skips missing targets and updates valid metadata; aggregation events and differential validation pending |

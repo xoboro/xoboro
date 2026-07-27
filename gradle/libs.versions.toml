@@ -18,6 +18,7 @@ jsoup = "1.21.1"
 jspecify = "1.0.0"
 pdfbox = "3.0.5"
 junrar = "8.0.0"
+zxing = "3.5.4"
 
 [libraries]
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
@@ -49,6 +50,7 @@ jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

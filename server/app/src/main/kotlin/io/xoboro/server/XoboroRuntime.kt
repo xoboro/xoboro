@@ -107,6 +107,7 @@ import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.metadata.ComicInfoMetadataProvider
 import io.xoboro.server.metadata.EpubMetadataProvider
+import io.xoboro.server.metadata.IsbnBarcodeMetadataProvider
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
 import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
@@ -636,6 +637,8 @@ class XoboroRuntime private constructor(
           ComicInfoMetadataProvider(listOf(localMediaAccess))
         val epubMetadataProvider =
           EpubMetadataProvider(listOf(localMediaAccess))
+        val isbnBarcodeMetadataProvider =
+          IsbnBarcodeMetadataProvider(bookContentAccess)
         val metadataRefreshLifecycle =
           MetadataRefreshLifecycle(
             libraries = libraries,
@@ -643,7 +646,12 @@ class XoboroRuntime private constructor(
             series = series,
             bookMetadata = bookMetadata,
             seriesMetadata = seriesMetadata,
-            bookProviders = listOf(comicInfoMetadataProvider, epubMetadataProvider),
+            bookProviders =
+              listOf(
+                comicInfoMetadataProvider,
+                epubMetadataProvider,
+                isbnBarcodeMetadataProvider,
+              ),
             seriesProviders =
               listOf(
                 comicInfoMetadataProvider,
