@@ -410,7 +410,19 @@ class BookContentService(
           require(width.toLong() * height <= MAX_DECODED_PIXELS) {
             "Book page exceeds the decoded image safety limit"
           }
-          reader.read(0)
+          val readParameters =
+            reader.defaultReadParam.apply {
+              request.maximumDimension
+                ?.let { maximum ->
+                  ceil(maxOf(width, height).toDouble() / maximum)
+                    .toInt()
+                    .coerceAtLeast(1)
+                }?.takeIf { it > 1 }
+                ?.let { subsampling ->
+                  setSourceSubsampling(subsampling, subsampling, 0, 0)
+                }
+            }
+          reader.read(0, readParameters)
         } finally {
           reader.dispose()
         }
