@@ -8,6 +8,7 @@ import io.xoboro.compatibility.komga.api.komgaMetadataRoutes
 import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
+import io.xoboro.compatibility.komga.api.komgaArtworkRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
@@ -18,6 +19,7 @@ import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
+import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
@@ -82,6 +84,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     oauth2LoginLifecycle = runtime.oauth2LoginLifecycle,
     clientSettingsLifecycle = runtime.clientSettingsLifecycle,
     announcementLifecycle = runtime.announcementLifecycle,
+    artworkLifecycle = runtime.artworkLifecycle,
     serverSettingsLifecycle = runtime.serverSettingsLifecycle,
     libraryAdministrationLifecycle = runtime.libraryAdministrationLifecycle,
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
@@ -111,6 +114,7 @@ fun Application.xoboroModule(
   oauth2LoginLifecycle: OAuth2LoginLifecycle? = null,
   clientSettingsLifecycle: ClientSettingsLifecycle? = null,
   announcementLifecycle: AnnouncementLifecycle? = null,
+  artworkLifecycle: ArtworkLifecycle? = null,
   serverSettingsLifecycle: ServerSettingsLifecycle? = null,
   libraryAdministrationLifecycle: LibraryAdministrationLifecycle? = null,
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
@@ -186,6 +190,21 @@ fun Application.xoboroModule(
       }
       clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
       announcementLifecycle?.let(::komgaAnnouncementRoutes)
+      if (
+        artworkLifecycle != null &&
+        catalogReadRepository != null &&
+        bookContentAccess != null &&
+        seriesCollectionRepository != null &&
+        readListRepository != null
+      ) {
+        komgaArtworkRoutes(
+          artwork = artworkLifecycle,
+          catalog = catalogReadRepository,
+          content = requireNotNull(bookContentAccess),
+          collections = seriesCollectionRepository,
+          readLists = readListRepository,
+        )
+      }
       serverSettingsLifecycle?.let(::komgaServerSettingsRoutes)
       libraryAdministrationLifecycle?.let { libraries ->
         komgaLibraryRoutes(
