@@ -2,6 +2,7 @@ package io.xoboro.core.application
 
 data class SourceFile(
   val itemId: String,
+  val identity: String?,
   val relativePath: String,
   val name: String,
   val extension: String,
@@ -10,6 +11,9 @@ data class SourceFile(
 ) {
   init {
     require(itemId.isNotBlank()) { "Source item ID must not be blank" }
+    require(identity == null || identity.isNotBlank()) {
+      "Source identity must be null or non-blank"
+    }
     require(relativePath.isNotBlank()) { "Source relative path must not be blank" }
     require(name.isNotBlank()) { "Source file name must not be blank" }
     require(extension == extension.lowercase()) { "Source extension must be lowercase" }
