@@ -24,6 +24,49 @@ interface LibraryRootAccess {
   ): Boolean
 }
 
+interface LibraryRootInspector {
+  val sourceId: String
+
+  fun typeOf(itemId: String): RootType
+
+  fun isSameOrAncestor(
+    possibleAncestorItemId: String,
+    possibleDescendantItemId: String,
+  ): Boolean
+}
+
+class UnknownLibrarySourceException(
+  sourceId: String,
+) : IllegalArgumentException("Unknown library source: $sourceId")
+
+class RoutingLibraryRootAccess(
+  inspectors: Collection<LibraryRootInspector>,
+) : LibraryRootAccess {
+  private val inspectorsBySourceId = inspectors.associateBy(LibraryRootInspector::sourceId)
+
+  init {
+    require(inspectors.none { it.sourceId.isBlank() }) { "Root inspector source IDs must not be blank" }
+    require(inspectorsBySourceId.size == inspectors.size) {
+      "Root inspector source IDs must be unique"
+    }
+  }
+
+  override fun typeOf(root: SourceLocation): RootType =
+    inspector(root.sourceId).typeOf(root.itemId)
+
+  override fun isSameOrAncestor(
+    possibleAncestor: SourceLocation,
+    possibleDescendant: SourceLocation,
+  ): Boolean {
+    if (possibleAncestor.sourceId != possibleDescendant.sourceId) return false
+    return inspector(possibleAncestor.sourceId)
+      .isSameOrAncestor(possibleAncestor.itemId, possibleDescendant.itemId)
+  }
+
+  private fun inspector(sourceId: String): LibraryRootInspector =
+    inspectorsBySourceId[sourceId] ?: throw UnknownLibrarySourceException(sourceId)
+}
+
 interface LibraryMaintenanceQueue {
   fun scanLibrary(id: LibraryId)
 

@@ -14,6 +14,7 @@ WebDAV, and other NAS protocols without embedding protocol code in use cases.
 - Keep library lifecycle behavior in the portable application module.
 - Represent a root as a source identity plus an opaque item identity.
 - Delegate existence, directory, and ancestry checks to a `LibraryRootAccess` port.
+- Route that port by stable source ID; each source owns its opaque item-ID semantics.
 - Compare ancestry only between roots owned by the same source.
 - Delegate scans and maintenance work to a queue port; use cases never perform
   long-running media work inline.
@@ -26,6 +27,8 @@ their corresponding background operations.
 ## Consequences
 
 Local and network sources can implement their own canonical path and hierarchy rules.
+The local adapter accepts `file:` URIs and resolves real paths before ancestry checks,
+so symbolic-link aliases cannot bypass overlap validation.
 The lifecycle remains reusable by the server and future native clients. A server
 composition layer must provide durable queue, event, and source adapters before exposing
 the write API.

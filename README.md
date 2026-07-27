@@ -45,6 +45,7 @@ core/
 server/
   app/               Ktor application entry point
   persistence/       SQLite migrations and jOOQ persistence adapters
+  sources/local/     Local filesystem source adapter
 compatibility/       Komga API and protocol adapters
 docs/                Architecture, parity, testing, and design records
 third-party/         Third-party license notices

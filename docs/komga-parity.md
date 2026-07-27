@@ -49,7 +49,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository and source-aware name/root lifecycle tests; REST pending |
+| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository, routed source validation, and canonical local/symlink overlap tests; REST pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement and media-setting round-trip tests |
 | Startup, periodic, manual, and deep scan | PARTIAL | Lifecycle queue ports and scan-trigger compatibility tests; durable worker pending |
 | Incremental add/change/move/delete detection | TODO | |
