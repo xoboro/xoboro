@@ -34,5 +34,6 @@ Running the Ktor entry point now creates an upgrade-safe SQLite database and act
 processes durable analysis work. Relative defaults work for development and Docker
 volumes, while production can set every operational path and timing through `XOBORO_*`.
 
-Library scan scheduling, HTTP library management, metrics, and graceful in-flight task
-reporting remain later server capabilities.
+HTTP library management, metrics, and graceful in-flight task reporting remain later
+server capabilities. Startup and periodic scan scheduling are specified separately in
+ADR 0012.
