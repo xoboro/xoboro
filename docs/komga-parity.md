@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Eighty-one operations are partially implemented and none are yet
+167 schemas. Ninety-seven operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -82,8 +82,8 @@ Status:
 | One-shot detection | PARTIAL | Configured-directory, root-series, and candidate derivation tests; metadata aggregation pending |
 | ISBN barcode detection | TODO | |
 | Series aggregation | PARTIAL | Transactional path grouping, book counts, restore/delete, partial-scan safety, ordered metadata providers, and lock-preserving book/series merge tests; full Komga aggregation precedence pending |
-| Field locks and manual patches | PARTIAL | Durable normalized lock sets and refresh-time lock preservation for book and series metadata with repository round-trip tests; manual REST patches and lock mutation pending |
-| Bulk metadata updates | TODO | |
+| Field locks and manual patches | PARTIAL | Durable normalized lock sets, refresh-time lock preservation, presence-sensitive book/series REST patches, explicit-null clearing, administrator authorization, and persistence/route tests; differential validation and event emission pending |
+| Bulk metadata updates | PARTIAL | Komga-compatible book-ID-to-patch map skips missing targets and updates valid metadata; aggregation events and differential validation pending |
 | Multiple thumbnails and selection | TODO | |
 
 ## Catalog and organization
@@ -92,12 +92,12 @@ Status:
 |---|---|---|
 | Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, database-paged read model, Komga DTOs, detail and series-book REST routes, and transactional/integration tests; read progress and differential tests pending |
 | Full-text search | TODO | |
-| Filtering, sorting, and alphabetical groups | PARTIAL | Allowlisted SQL sorting, escaped full-text matching, legacy library/publisher/language/genre/tag filters, stable pagination, and both alphabetical-group routes with tests; recursive search conditions and referential filters pending |
+| Filtering, sorting, and alphabetical groups | PARTIAL | Allowlisted SQL sorting, escaped full-text matching, legacy library/publisher/language/genre/tag filters, stable pagination, alphabetical groups, and SQL-level referential filters with authorization/content restrictions; recursive search conditions and differential tests pending |
 | Latest, new, updated, on-deck, keep-reading | PARTIAL | Book latest/on-deck and Series latest/new/updated use explicit database sorts, access filtering, and durable per-series progress aggregates; keep-reading pending |
 | Collections and manual ordering | PARTIAL | Durable ordered membership, case-insensitive unique names, transactional CRUD, access-filtered list/detail/reverse-membership routes, filtered indicators, member pagination, cascade behavior, and REST integration tests; thumbnails, metadata import, and differential filters pending |
 | Read lists and manual ordering | PARTIAL | Durable ordered membership and summaries, transactional CRUD, access-filtered list/detail/book/sibling/reverse-membership routes, filtered indicators, cascade behavior, and REST integration tests; archive download, progress adapters, ComicRack import, and differential filters pending |
 | ComicRack CBL import | TODO | |
-| Referential authors, genres, tags, languages, publishers | TODO | |
+| Referential authors, genres, tags, languages, publishers | PARTIAL | Komga v1/v2 author, role/name, genre, sharing-label, book/series/combined tag, language, publisher, age-rating, and release-year routes use direct distinct SQL with access restrictions before paging/aggregation; differential ordering and edge filters pending |
 
 ## Users and security
 
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, sixteen collection/read-list operations, and production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, sixteen collection/read-list operations, three metadata mutations, thirteen referential reads, and production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
