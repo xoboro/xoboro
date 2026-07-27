@@ -8,6 +8,7 @@ jooq = "3.19.36"
 sqlite = "3.53.2.1"
 tika = "2.9.1"
 natural-comparator = "1.1"
+kotlinx-serialization = "1.11.0"
 
 [libraries]
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
@@ -25,6 +26,7 @@ jooq = { module = "org.jooq:jooq", version.ref = "jooq" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
 tika-core = { module = "org.apache.tika:tika-core", version.ref = "tika" }
 natural-comparator = { module = "net.grey-panther:natural-comparator", version.ref = "natural-comparator" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
