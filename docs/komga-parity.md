@@ -95,12 +95,12 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Initial administrator claim | PARTIAL | Anonymous GET status and header-based POST claim contracts, atomic single-winner persistence, all-role DTO, TSID identity, BCrypt hashing, null omission, validation, and real-runtime restart tests; automated initial-user configuration pending |
-| Multi-user CRUD and password reset | PARTIAL | Case-insensitive identity, default roles, create/authenticate lifecycle, and atomic relation persistence tests; REST CRUD and password reset pending |
+| Multi-user CRUD and password reset | PARTIAL | Case-insensitive identity, default roles, create/authenticate lifecycle, atomic relation persistence, and authenticated current-user REST tests; admin CRUD and password reset pending |
 | Roles and authorization | PARTIAL | Komga role model and durable assignment tests; HTTP authorization pending |
 | Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
 | Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, and persistence tests; catalog query enforcement pending |
 | Sessions and remember-me | TODO | |
-| Basic authentication | TODO | |
+| Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | TODO | |
 | OAuth2 providers | TODO | |
 | Authentication activity | TODO | |
@@ -121,8 +121,8 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` GET/POST compatibility tests and production runtime wiring; remaining controllers pending |
-| Komga authentication and session semantics | TODO | |
+| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` GET/POST and authenticated `/api/v2/users/me` compatibility tests with production runtime wiring; remaining controllers pending |
+| Komga authentication and session semantics | PARTIAL | Basic authentication and principal propagation tests; browser sessions and remember-me pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
 | OPDS v2 and authentication document | TODO | |
