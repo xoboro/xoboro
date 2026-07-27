@@ -12,10 +12,11 @@ class KomgaProtocolContractInventoryTest {
     assertEquals(15, KOBO.size)
     assertEquals(4, KOREADER.size)
     assertEquals(1, SSE.size)
+    assertEquals(2, OAUTH_BROWSER.size)
 
-    val all = OPDS_V1 + OPDS_V2 + KOBO + KOREADER + SSE
-    assertEquals(64, all.size)
-    assertEquals(64, all.toSet().size)
+    val all = OPDS_V1 + OPDS_V2 + KOBO + KOREADER + SSE + OAUTH_BROWSER
+    assertEquals(66, all.size)
+    assertEquals(66, all.toSet().size)
     assertTrue(all.none { endpoint -> endpoint.path.any { it in '\uAC00'..'\uD7A3' } })
   }
 
@@ -115,5 +116,11 @@ class KomgaProtocolContractInventoryTest {
       )
 
     val SSE = setOf(get("/sse/v1/events"))
+
+    val OAUTH_BROWSER =
+      setOf(
+        get("/oauth2/authorization/{registrationId}"),
+        get("/login/oauth2/code/{registrationId}"),
+      )
   }
 }
