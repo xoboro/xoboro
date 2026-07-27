@@ -17,6 +17,7 @@ import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
+import io.xoboro.compatibility.komga.api.komgaOpdsRoutes
 import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
 import io.xoboro.compatibility.komga.api.komgaFileSystemRoutes
 import io.xoboro.compatibility.komga.api.komgaFileLifecycleRoutes
@@ -350,6 +351,25 @@ fun Application.xoboroModule(
           catalogReadRepository,
           readProgressLifecycle,
           bookContentAccess,
+        )
+      }
+      if (
+        catalogReadRepository != null &&
+        libraryRepository != null &&
+        seriesCollectionRepository != null &&
+        readListRepository != null &&
+        artworkLifecycle != null &&
+        bookContentAccess != null &&
+        readProgressLifecycle != null
+      ) {
+        komgaOpdsRoutes(
+          catalog = catalogReadRepository,
+          libraries = libraryRepository,
+          collections = seriesCollectionRepository,
+          readLists = readListRepository,
+          artwork = artworkLifecycle,
+          content = bookContentAccess,
+          progress = readProgressLifecycle,
         )
       }
       oauth2LoginLifecycle?.let { oauth2 ->

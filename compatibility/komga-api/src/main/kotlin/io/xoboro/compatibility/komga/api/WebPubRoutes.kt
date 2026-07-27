@@ -147,64 +147,10 @@ fun Route.komgaWebPubRoutes(
         }
       }
       get("/progression") {
-        val principal = requireNotNull(call.principal<KomgaPrincipal>())
-        val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        if (catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess()) == null) {
-          call.respond(HttpStatusCode.NotFound)
-          return@get
-        }
-        val saved = progress.findBook(bookId, principal.user.id)
-        if (saved == null) {
-          call.respond(HttpStatusCode.NoContent)
-        } else {
-          call.respondText(
-            WEBPUB_JSON.encodeToString(saved.toProgressionDto()),
-            PROGRESSION_CONTENT_TYPE,
-          )
-        }
+        call.respondProgression(catalog, progress)
       }
       put("/progression") {
-        val principal = requireNotNull(call.principal<KomgaPrincipal>())
-        val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
-        if (item == null) {
-          call.respond(HttpStatusCode.NotFound)
-          return@put
-        }
-        val request = call.receive<R2ProgressionDto>()
-        val position = request.locator.locations?.position
-        val modified =
-          runCatching { Instant.parse(request.modified).toEpochMilli() }.getOrNull()
-        if (position == null || modified == null) {
-          call.respond(
-            HttpStatusCode.BadRequest,
-            mapOf("error" to "Progression requires a valid modified timestamp and position"),
-          )
-          return@put
-        }
-        val locatorJson = WEBPUB_JSON.encodeToString(request.locator)
-        try {
-          progress.updateBookProgression(
-            bookId = bookId,
-            userId = principal.user.id,
-            page = position,
-            modifiedAtMillis = modified,
-            deviceId = request.device.id,
-            deviceName = request.device.name,
-            locatorJson = locatorJson,
-          )
-          call.respond(HttpStatusCode.NoContent)
-        } catch (failure: IllegalStateException) {
-          call.respond(
-            HttpStatusCode.Conflict,
-            mapOf("error" to (failure.message ?: "Stale progression")),
-          )
-        } catch (failure: IllegalArgumentException) {
-          call.respond(
-            HttpStatusCode.BadRequest,
-            mapOf("error" to (failure.message ?: "Invalid progression")),
-          )
-        }
+        call.updateProgression(catalog, progress)
       }
     }
   }
@@ -325,7 +271,7 @@ data class R2PositionsDto(
   val positions: List<R2LocatorDto>,
 )
 
-private suspend fun ApplicationCall.respondManifest(catalog: CatalogReadRepository) {
+internal suspend fun ApplicationCall.respondManifest(catalog: CatalogReadRepository) {
   val principal = requireNotNull(principal<KomgaPrincipal>())
   val bookId = BookId(requireNotNull(parameters["bookId"]))
   val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
@@ -338,13 +284,7 @@ private suspend fun ApplicationCall.respondManifest(catalog: CatalogReadReposito
     respond(HttpStatusCode.NotFound)
     return
   }
-  val manifest =
-    when (analyzed.profile) {
-      MediaProfile.DIVINA -> item.toDivinaManifest(apiBaseUrl())
-      MediaProfile.EPUB -> item.toEpubManifest(apiBaseUrl())
-      MediaProfile.PDF -> item.toPdfManifest(apiBaseUrl())
-      null -> null
-    }
+  val manifest = item.toWebPubManifest(apiBaseUrl())
   if (manifest == null) {
     respond(HttpStatusCode.NotFound)
     return
@@ -355,7 +295,7 @@ private suspend fun ApplicationCall.respondManifest(catalog: CatalogReadReposito
   respondText(WEBPUB_JSON.encodeToString(manifest), contentType)
 }
 
-private suspend fun ApplicationCall.respondProfileManifest(
+internal suspend fun ApplicationCall.respondProfileManifest(
   catalog: CatalogReadRepository,
   requestedProfile: MediaProfile,
 ) {
@@ -394,6 +334,82 @@ private suspend fun ApplicationCall.respondProfileManifest(
     else WEBPUB_CONTENT_TYPE,
   )
 }
+
+internal suspend fun ApplicationCall.respondProgression(
+  catalog: CatalogReadRepository,
+  progress: ReadProgressLifecycle,
+) {
+  val principal = requireNotNull(principal<KomgaPrincipal>())
+  val bookId = BookId(requireNotNull(parameters["bookId"]))
+  if (catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess()) == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val saved = progress.findBook(bookId, principal.user.id)
+  if (saved == null) {
+    respond(HttpStatusCode.NoContent)
+  } else {
+    respondText(
+      WEBPUB_JSON.encodeToString(saved.toProgressionDto()),
+      PROGRESSION_CONTENT_TYPE,
+    )
+  }
+}
+
+internal suspend fun ApplicationCall.updateProgression(
+  catalog: CatalogReadRepository,
+  progress: ReadProgressLifecycle,
+) {
+  val principal = requireNotNull(principal<KomgaPrincipal>())
+  val bookId = BookId(requireNotNull(parameters["bookId"]))
+  val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
+  if (item == null) {
+    respond(HttpStatusCode.NotFound)
+    return
+  }
+  val request = receive<R2ProgressionDto>()
+  val position = request.locator.locations?.position
+  val modified =
+    runCatching { Instant.parse(request.modified).toEpochMilli() }.getOrNull()
+  if (position == null || modified == null) {
+    respond(
+      HttpStatusCode.BadRequest,
+      mapOf("error" to "Progression requires a valid modified timestamp and position"),
+    )
+    return
+  }
+  val locatorJson = WEBPUB_JSON.encodeToString(request.locator)
+  try {
+    progress.updateBookProgression(
+      bookId = bookId,
+      userId = principal.user.id,
+      page = position,
+      modifiedAtMillis = modified,
+      deviceId = request.device.id,
+      deviceName = request.device.name,
+      locatorJson = locatorJson,
+    )
+    respond(HttpStatusCode.NoContent)
+  } catch (failure: IllegalStateException) {
+    respond(
+      HttpStatusCode.Conflict,
+      mapOf("error" to (failure.message ?: "Stale progression")),
+    )
+  } catch (failure: IllegalArgumentException) {
+    respond(
+      HttpStatusCode.BadRequest,
+      mapOf("error" to (failure.message ?: "Invalid progression")),
+    )
+  }
+}
+
+internal fun CatalogBook.toWebPubManifest(apiBaseUrl: String): WPPublicationDto? =
+  when (media?.profile) {
+    MediaProfile.DIVINA -> toDivinaManifest(apiBaseUrl)
+    MediaProfile.EPUB -> toEpubManifest(apiBaseUrl)
+    MediaProfile.PDF -> toPdfManifest(apiBaseUrl)
+    null -> null
+  }
 
 private fun CatalogBook.toDivinaManifest(apiBaseUrl: String): WPPublicationDto {
   val analyzed = requireNotNull(media)

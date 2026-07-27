@@ -14,7 +14,7 @@ The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
-The non-OpenAPI inventory contains 66 operations, including the two OAuth2
+The non-OpenAPI inventory contains 70 operations, including the two OAuth2
 browser-flow routes.
 
 Status:
@@ -135,8 +135,8 @@ Status:
 | Komga REST API v1/v2 | PARTIAL | All 165 pinned operations have an implementation in progress, including management info, font resources, release discovery, durable poster regeneration, and atomic duplicate-page removal; differential certification and exact schema/error completion pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
-| OPDS v1 | TODO | |
-| OPDS v2 and authentication document | TODO | |
+| OPDS v1 | PARTIAL | All 18 Atom/OpenSearch catalog, browse, acquisition, thumbnail, and page operations use access-filtered catalog data and streamed media with synthetic route coverage; differential XML, caching, and failure fixtures pending |
+| OPDS v2 and authentication document | PARTIAL | All 30 feed, browse, search, artwork, page, profile manifest, authentication-document, and progression operations reuse shared WebPub/progress boundaries with synthetic integration coverage; exact unauthorized document and differential fixtures pending |
 | Kobo Sync and KEPUB | TODO | |
 | KOReader Sync | PARTIAL | All four routes, `X-Auth-User` API-key authentication, role enforcement, duplicate/missing fingerprint behavior, exact partial-MD5 generation, PDF/DiViNa page progress, both EPUB locator forms, durable Readium conversion, and synthetic integration tests; reference differential fixtures pending |
 | SSE event contracts | PARTIAL | Authenticated Ktor SSE stream, Komga event names and JSON DTOs, bounded subscribers, heartbeat, administrator task status, user isolation, and Library/read-progress publishers; remaining event producers and differential reconnect behavior pending |
