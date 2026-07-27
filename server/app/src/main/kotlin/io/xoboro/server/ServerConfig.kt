@@ -10,6 +10,8 @@ data class ServerConfig(
   val taskFailurePollMillis: Long,
   val taskLeaseMillis: Long,
   val shutdownTimeoutMillis: Long,
+  val configuredPort: Int? = port,
+  val configuredContextPath: String? = null,
 ) {
   init {
     require(port in 1..65_535) { "Server port must be between 1 and 65535" }
@@ -18,6 +20,12 @@ data class ServerConfig(
     require(taskFailurePollMillis > 0) { "Task failure poll duration must be positive" }
     require(taskLeaseMillis >= 3) { "Task lease duration must be at least 3 ms" }
     require(shutdownTimeoutMillis > 0) { "Shutdown timeout must be positive" }
+    configuredPort?.let {
+      require(it in 1..65_535) { "Configured server port must be between 1 and 65535" }
+    }
+    configuredContextPath?.let {
+      require(CONTEXT_PATH_PATTERN.matches(it)) { "Configured server context path is invalid" }
+    }
   }
 
   companion object {
@@ -42,8 +50,9 @@ data class ServerConfig(
             if (path.isAbsolute) path.normalize() else normalizedWorkingDirectory.resolve(path).normalize()
           }
           ?: normalizedWorkingDirectory.resolve("config/xoboro.sqlite")
+      val configuredPort = environment.optionalIntValue("XOBORO_PORT")
       return ServerConfig(
-        port = environment.intValue("XOBORO_PORT", DEFAULT_PORT),
+        port = configuredPort ?: DEFAULT_PORT,
         databasePath = databasePath,
         workerCount =
           environment.intValue(
@@ -64,6 +73,10 @@ data class ServerConfig(
             "XOBORO_SHUTDOWN_TIMEOUT_MILLIS",
             DEFAULT_SHUTDOWN_TIMEOUT_MILLIS,
           ),
+        configuredPort = configuredPort,
+        configuredContextPath =
+          environment["XOBORO_CONTEXT_PATH"]
+            ?.takeIf(String::isNotBlank),
       )
     }
 
@@ -80,5 +93,11 @@ data class ServerConfig(
     ): Long =
       get(key)?.toLongOrNull()
         ?: if (containsKey(key)) error("$key must be an integer") else default
+
+    private fun Map<String, String>.optionalIntValue(key: String): Int? =
+      get(key)?.toIntOrNull()
+        ?: if (containsKey(key)) error("$key must be an integer") else null
+
+    private val CONTEXT_PATH_PATTERN = Regex("^/[\\w-/]*[a-zA-Z0-9]$")
   }
 }

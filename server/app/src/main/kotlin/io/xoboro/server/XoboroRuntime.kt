@@ -7,6 +7,7 @@ import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
+import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -58,15 +59,20 @@ class XoboroRuntime private constructor(
   val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
   val userSessionLifecycle: UserSessionLifecycle,
   val rememberMeTokenService: RememberMeTokenService,
+  val serverSettingsLifecycle: ServerSettingsLifecycle,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
+  val effectiveServerPort: Int,
+  val effectiveServerContextPath: String?,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
 
   fun isReady(): Boolean =
     !closed.get() && database.isAvailable()
+
+  fun taskWorkerCount(): Int = workerPool.workerCount()
 
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
@@ -93,9 +99,6 @@ class XoboroRuntime private constructor(
   companion object {
     private val logger = Logger.getLogger(XoboroRuntime::class.java.name)
     const val DEFAULT_SESSION_TIMEOUT_MILLIS: Long = 7L * 24 * 60 * 60 * 1_000
-    const val DEFAULT_REMEMBER_ME_TIMEOUT_MILLIS: Long = 365L * 24 * 60 * 60 * 1_000
-    const val DEFAULT_REMEMBER_ME_MAX_AGE_SECONDS: Int = 365 * 24 * 60 * 60
-    private const val REMEMBER_ME_KEY_SETTING: String = "REMEMBER_ME_KEY"
 
     fun open(config: ServerConfig): XoboroRuntime {
       val database =
@@ -118,6 +121,22 @@ class XoboroRuntime private constructor(
         val tokenEncoder = Sha512TokenEncoder()
         val sessionRepository = InMemoryUserSessionRepository()
         val settings = JooqServerSettingRepository(database)
+        val effectiveServerPort = settings.find("SERVER_PORT")?.toInt() ?: config.port
+        val effectiveServerContextPath =
+          settings.find("SERVER_CONTEXT_PATH") ?: config.configuredContextPath
+        val serverSettingsLifecycle =
+          ServerSettingsLifecycle(
+            store = settings,
+            configuredServerPort = config.configuredPort,
+            effectiveServerPort = { effectiveServerPort },
+            configuredServerContextPath = config.configuredContextPath,
+            effectiveServerContextPath = { effectiveServerContextPath },
+            defaultTaskPoolSize = config.workerCount,
+            rememberMeKeyFactory = { UUID.randomUUID().toString().replace("-", "") },
+            onTaskPoolSizeChanged = { workerCount ->
+              workerPool?.resize(workerCount)
+            },
+          )
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
@@ -147,12 +166,9 @@ class XoboroRuntime private constructor(
         val rememberMeTokenService =
           SpringCompatibleRememberMeTokenService(
             users = userRepository,
-            secretKey =
-              settings.findOrCreate(REMEMBER_ME_KEY_SETTING) {
-                UUID.randomUUID().toString().replace("-", "")
-              },
+            secretKeyProvider = serverSettingsLifecycle::rememberMeKey,
             currentTimeMillis = System::currentTimeMillis,
-            tokenValidityMillis = DEFAULT_REMEMBER_ME_TIMEOUT_MILLIS,
+            tokenValidityMillisProvider = serverSettingsLifecycle::rememberMeDurationMillis,
           )
         val authenticationActivityLifecycle =
           AuthenticationActivityLifecycle(
@@ -226,7 +242,7 @@ class XoboroRuntime private constructor(
             runner = worker,
             policy =
               TaskWorkerPoolPolicy(
-                workerCount = config.workerCount,
+                workerCount = serverSettingsLifecycle.snapshot().taskPoolSize,
                 idlePollMillis = config.taskPollMillis,
                 failurePollMillis = config.taskFailurePollMillis,
                 shutdownTimeoutMillis = config.shutdownTimeoutMillis,
@@ -246,10 +262,13 @@ class XoboroRuntime private constructor(
           authenticationActivityLifecycle = authenticationActivityLifecycle,
           userSessionLifecycle = userSessionLifecycle,
           rememberMeTokenService = rememberMeTokenService,
+          serverSettingsLifecycle = serverSettingsLifecycle,
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
+          effectiveServerPort = effectiveServerPort,
+          effectiveServerContextPath = effectiveServerContextPath,
         ).also {
           createdWorkerPool.start()
           createdLibraryScanScheduler.start()

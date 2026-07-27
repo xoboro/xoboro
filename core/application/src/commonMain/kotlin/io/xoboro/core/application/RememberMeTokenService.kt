@@ -6,4 +6,6 @@ interface RememberMeTokenService {
   fun issue(user: User): String
 
   fun authenticate(encodedToken: String): User?
+
+  fun maxAgeSeconds(): Int
 }

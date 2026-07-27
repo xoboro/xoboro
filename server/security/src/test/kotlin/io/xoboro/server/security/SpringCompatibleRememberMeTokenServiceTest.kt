@@ -42,6 +42,35 @@ class SpringCompatibleRememberMeTokenServiceTest {
     assertNull(service.authenticate("malformed-token"))
   }
 
+  @Test
+  fun `uses the current secret and duration without restarting`() {
+    val user = syntheticUser()
+    val users = MutableSingleUserRepository { user }
+    var secret = "synthetic-key-1"
+    var validityMillis = 5_000L
+    val service =
+      SpringCompatibleRememberMeTokenService(
+        users = users,
+        secretKeyProvider = { secret },
+        currentTimeMillis = { 1_000 },
+        tokenValidityMillisProvider = { validityMillis },
+      )
+
+    val firstToken = service.issue(user)
+    assertEquals(5, service.maxAgeSeconds())
+    assertEquals(user, service.authenticate(firstToken))
+
+    secret = "synthetic-key-2"
+    assertNull(service.authenticate(firstToken))
+
+    validityMillis = 8_000
+    assertEquals(8, service.maxAgeSeconds())
+    val decoded =
+      String(Base64.getDecoder().decode(service.issue(user)), StandardCharsets.UTF_8)
+        .split(':')
+    assertEquals("9000", decoded[1])
+  }
+
   private fun expectedSignature(
     user: User,
     expiry: Long,
