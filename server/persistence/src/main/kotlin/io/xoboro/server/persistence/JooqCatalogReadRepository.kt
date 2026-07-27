@@ -1,7 +1,6 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.BookCatalogQuery
-import io.xoboro.core.application.BookMetadataAggregation
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogGroupCount
@@ -17,7 +16,6 @@ import io.xoboro.core.domain.BookMediaRepository
 import io.xoboro.core.domain.BookMetadataRepository
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.ContentRestrictions
-import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.ReadProgressRepository
@@ -37,6 +35,7 @@ class JooqCatalogReadRepository(
   currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : CatalogReadRepository {
   private val structuredSearch = CatalogStructuredSearch(currentTimeMillis)
+  private val bookMetadataAggregations = JooqBookMetadataAggregationRepository(database)
 
   override fun findBooks(
     query: BookCatalogQuery,
@@ -98,8 +97,17 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
     page: CatalogPageRequest,
   ): CatalogPage<CatalogSeries> {
+    bookMetadataAggregations.refreshAllDirty()
     val filter = seriesFilter(query, access)
-    val total = count("series s JOIN series_metadata sm ON sm.series_id = s.id", filter)
+    val total =
+      count(
+        """
+        series s
+        JOIN series_metadata sm ON sm.series_id = s.id
+        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+        """.trimIndent(),
+        filter,
+      )
     val ids =
       database.dsl
         .fetch(
@@ -107,6 +115,7 @@ class JooqCatalogReadRepository(
           SELECT s.id
           FROM series s
           JOIN series_metadata sm ON sm.series_id = s.id
+          JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
           WHERE ${filter.sql}
           ORDER BY ${seriesOrder(page.sorts)}
           ${page.limitClause(filter.bindings)}
@@ -126,6 +135,7 @@ class JooqCatalogReadRepository(
     id: SeriesId,
     access: CatalogAccess,
   ): CatalogSeries? {
+    bookMetadataAggregations.refreshDirty(listOf(id))
     val filter =
       seriesFilter(
         SeriesCatalogQuery(deleted = null),
@@ -139,6 +149,7 @@ class JooqCatalogReadRepository(
         SELECT s.id
         FROM series s
         JOIN series_metadata sm ON sm.series_id = s.id
+        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
         WHERE ${filter.sql}
         """.trimIndent(),
         *filter.bindings.toTypedArray(),
@@ -153,6 +164,7 @@ class JooqCatalogReadRepository(
     query: SeriesCatalogQuery,
     access: CatalogAccess,
   ): List<CatalogGroupCount> {
+    bookMetadataAggregations.refreshAllDirty()
     val filter = seriesFilter(query, access)
     return database.dsl
       .fetch(
@@ -165,6 +177,7 @@ class JooqCatalogReadRepository(
           count(*) AS group_count
         FROM series s
         JOIN series_metadata sm ON sm.series_id = s.id
+        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
         WHERE ${filter.sql}
         GROUP BY group_name
         ORDER BY group_name
@@ -305,7 +318,7 @@ class JooqCatalogReadRepository(
     if (ids.isEmpty()) return emptyList()
     val items = series.findAllByIds(ids).associateBy { it.id }
     val metadata = seriesMetadata.findAllBySeriesIds(ids).associateBy { it.seriesId }
-    val aggregations = loadBookMetadataAggregations(ids, items)
+    val aggregations = bookMetadataAggregations.findAllBySeriesIds(ids)
     val progresses =
       userId
         ?.let { readProgress.findAllSeriesByIdsAndUserId(ids, it) }
@@ -320,138 +333,6 @@ class JooqCatalogReadRepository(
         readProgress = progresses[id],
       )
     }
-  }
-
-  private fun loadBookMetadataAggregations(
-    ids: Collection<SeriesId>,
-    items: Map<SeriesId, io.xoboro.core.domain.Series>,
-  ): Map<SeriesId, BookMetadataAggregation> {
-    val result =
-      items.mapValues { (_, item) ->
-        BookMetadataAggregation(
-          createdAtMillis = item.createdAtMillis,
-          updatedAtMillis = item.updatedAtMillis,
-        )
-      }.toMutableMap()
-    ids.distinct().chunked(QUERY_BATCH_SIZE).forEach { batch ->
-      val bindings = batch.map { it.value }.toTypedArray()
-      val stats =
-        database.dsl
-          .fetch(
-            """
-            WITH ranked_summary AS (
-              SELECT
-                b.series_id,
-                bm.summary,
-                bm.number,
-                row_number() OVER (
-                  PARTITION BY b.series_id
-                  ORDER BY bm.number_sort, b.relative_uri, b.id
-                ) AS summary_rank
-              FROM book b
-              JOIN book_metadata bm ON bm.book_id = b.id
-              WHERE b.series_id IN (${batch.placeholders()})
-                AND b.deleted_at_ms IS NULL
-                AND trim(bm.summary) <> ''
-            ),
-            aggregation AS (
-              SELECT
-                b.series_id,
-                min(bm.release_date) AS release_date,
-                min(bm.created_at_ms) AS minimum_created,
-                max(bm.updated_at_ms) AS maximum_updated
-              FROM book b
-              JOIN book_metadata bm ON bm.book_id = b.id
-              WHERE b.series_id IN (${batch.placeholders()})
-                AND b.deleted_at_ms IS NULL
-              GROUP BY b.series_id
-            )
-            SELECT
-              aggregation.series_id,
-              aggregation.release_date,
-              CAST(aggregation.minimum_created AS TEXT) AS minimum_created_64,
-              CAST(aggregation.maximum_updated AS TEXT) AS maximum_updated_64,
-              ranked_summary.summary,
-              ranked_summary.number
-            FROM aggregation
-            LEFT JOIN ranked_summary
-              ON ranked_summary.series_id = aggregation.series_id
-              AND ranked_summary.summary_rank = 1
-            """.trimIndent(),
-            *(bindings + bindings),
-          ).associateBy { SeriesId(requireNotNull(it.get("series_id", String::class.java))) }
-      val authors =
-        database.dsl
-          .fetch(
-            """
-            WITH ranked_author AS (
-              SELECT
-                b.series_id,
-                author.name,
-                author.role,
-                bm.number_sort,
-                b.relative_uri,
-                b.id AS book_id,
-                author.ordinal,
-                row_number() OVER (
-                  PARTITION BY b.series_id, author.role, author.name
-                  ORDER BY bm.number_sort, b.relative_uri, b.id, author.ordinal
-                ) AS duplicate_rank
-              FROM book b
-              JOIN book_metadata bm ON bm.book_id = b.id
-              JOIN book_metadata_author author ON author.book_id = b.id
-              WHERE b.series_id IN (${batch.placeholders()})
-                AND b.deleted_at_ms IS NULL
-            )
-            SELECT series_id, name, role
-            FROM ranked_author
-            WHERE duplicate_rank = 1
-            ORDER BY series_id, number_sort, relative_uri, book_id, ordinal
-            """.trimIndent(),
-            *bindings,
-          ).groupBy(
-            { SeriesId(requireNotNull(it.get("series_id", String::class.java))) },
-            {
-              Author(
-                name = requireNotNull(it.get("name", String::class.java)),
-                role = requireNotNull(it.get("role", String::class.java)),
-              )
-            },
-          )
-      val tags =
-        database.dsl
-          .fetch(
-            """
-            SELECT DISTINCT b.series_id, tag.tag
-            FROM book b
-            JOIN book_metadata_tag tag ON tag.book_id = b.id
-            WHERE b.series_id IN (${batch.placeholders()})
-              AND b.deleted_at_ms IS NULL
-            ORDER BY b.series_id, tag.tag
-            """.trimIndent(),
-            *bindings,
-          ).groupBy(
-            { SeriesId(requireNotNull(it.get("series_id", String::class.java))) },
-            { requireNotNull(it.get("tag", String::class.java)) },
-          ).mapValues { (_, values) -> values.toSet() }
-      batch.forEach { id ->
-        val current = result[id] ?: return@forEach
-        val row = stats[id]
-        result[id] =
-          current.copy(
-            authors = authors[id].orEmpty(),
-            tags = tags[id].orEmpty(),
-            releaseDate = row?.get("release_date", String::class.java),
-            summary = row?.get("summary", String::class.java).orEmpty(),
-            summaryNumber = row?.get("number", String::class.java).orEmpty(),
-            createdAtMillis = row?.get("minimum_created_64", String::class.java)?.toLong()
-              ?: current.createdAtMillis,
-            updatedAtMillis = row?.get("maximum_updated_64", String::class.java)?.toLong()
-              ?: current.updatedAtMillis,
-          )
-      }
-    }
-    return result
   }
 
   private fun bookFilter(
@@ -780,11 +661,16 @@ class JooqCatalogReadRepository(
         mapOf(
           "booksCount" to "s.book_count",
           "created" to "s.created_at_ms",
+          "createdDate" to "s.created_at_ms",
           "fileLastModified" to "s.file_modified_ms",
           "lastModified" to "s.updated_at_ms",
+          "lastModifiedDate" to "s.updated_at_ms",
           "name" to "s.name COLLATE NOCASE",
           "title" to "sm.title COLLATE NOCASE",
           "titleSort" to "sm.title_sort COLLATE NOCASE",
+          "metadata.titleSort" to "sm.title_sort COLLATE NOCASE",
+          "booksMetadata.releaseDate" to "ba.release_date",
+          "random" to "random()",
         ),
       fallback = "sm.title_sort COLLATE NOCASE ASC, s.id ASC",
     )
@@ -845,7 +731,6 @@ class JooqCatalogReadRepository(
   )
 
   companion object {
-    private const val QUERY_BATCH_SIZE = 500
     private val SEARCH_TOKEN = Regex("[\\p{L}\\p{N}]+")
   }
 }

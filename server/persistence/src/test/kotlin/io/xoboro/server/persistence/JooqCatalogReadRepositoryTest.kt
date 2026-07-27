@@ -237,6 +237,201 @@ class JooqCatalogReadRepositoryTest {
       assertEquals(setOf("first", "second", "third"), result.tags)
       assertEquals(1, result.createdAtMillis)
       assertEquals(12, result.updatedAtMillis)
+      assertEquals(
+        0,
+        database.dsl.fetchValue(
+          """
+          SELECT count(*)
+          FROM series_book_metadata_aggregation_dirty
+          WHERE series_id = 'series-a'
+          """.trimIndent(),
+          Int::class.java,
+        ),
+      )
+      assertEquals(
+        "First nonblank synthetic summary",
+        database.dsl.fetchValue(
+          """
+          SELECT summary
+          FROM series_book_metadata_aggregation
+          WHERE series_id = 'series-a'
+          """.trimIndent(),
+          String::class.java,
+        ),
+      )
+
+      val matching =
+        JooqCatalogReadRepository(database).findSeries(
+          query =
+            SeriesCatalogQuery(
+              condition =
+                CatalogSearchCondition.AllOf(
+                  listOf(
+                    predicate(
+                      CatalogSearchField.RELEASE_DATE,
+                      CatalogSearchOperator.BEFORE,
+                      "2020-06-01T00:00:00Z",
+                    ),
+                    predicate(
+                      CatalogSearchField.TAG,
+                      CatalogSearchOperator.IS,
+                      "third",
+                    ),
+                    CatalogSearchCondition.Predicate(
+                      field = CatalogSearchField.AUTHOR,
+                      operator = CatalogSearchOperator.IS,
+                      attributes = mapOf("name" to "Third Author", "role" to "writer"),
+                    ),
+                  ),
+                ),
+            ),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(),
+        )
+      assertEquals(listOf("series-a"), matching.content.map { it.series.id.value })
+
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-2"))).copy(
+          summary = "Refreshed synthetic summary",
+          releaseDate = "2019-01-01",
+          updatedAtMillis = 13,
+        ),
+      )
+      assertEquals(
+        1,
+        database.dsl.fetchValue(
+          """
+          SELECT count(*)
+          FROM series_book_metadata_aggregation_dirty
+          WHERE series_id = 'series-a'
+          """.trimIndent(),
+          Int::class.java,
+        ),
+      )
+      val refreshed =
+        requireNotNull(
+          JooqCatalogReadRepository(database)
+            .findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()),
+        ).booksMetadata
+      assertEquals("Refreshed synthetic summary", refreshed.summary)
+      assertEquals("2019-01-01", refreshed.releaseDate)
+      assertEquals(
+        0,
+        database.dsl.fetchValue(
+          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          Int::class.java,
+        ),
+      )
+
+      val books = JooqBookRepository(database)
+      books.update(
+        requireNotNull(books.findByIdOrNull(BookId("book-2"))).copy(
+          seriesId = SeriesId("series-b"),
+          relativePath = "series-b/moved-chapter.cbz",
+          updatedAtMillis = 14,
+        ),
+      )
+      assertEquals(
+        2,
+        database.dsl.fetchValue(
+          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          Int::class.java,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+      val oldParent =
+        requireNotNull(catalog.findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()))
+      val newParent =
+        requireNotNull(catalog.findSeriesByIdOrNull(SeriesId("series-b"), CatalogAccess()))
+      assertEquals("Later synthetic summary", oldParent.booksMetadata.summary)
+      assertEquals("Refreshed synthetic summary", newParent.booksMetadata.summary)
+      assertEquals(
+        0,
+        database.dsl.fetchValue(
+          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          Int::class.java,
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `repairs a dirty persisted aggregation after restart`() {
+    val path = tempDirectory.resolve("aggregation-restart.sqlite")
+    val seriesId = SeriesId("restart-series")
+    val bookId = BookId("restart-book")
+    XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      val libraryId = LibraryId("restart-library")
+      JooqLibraryRepository(database).insert(
+        Library(
+          id = libraryId,
+          name = "Synthetic restart library",
+          root = SourceLocation("local", "file:///synthetic/restart"),
+          createdAtMillis = 1,
+        ),
+      )
+      JooqSeriesRepository(database).insert(
+        Series(
+          id = seriesId,
+          libraryId = libraryId,
+          name = "Synthetic restart series",
+          relativePath = "restart-series",
+          sourceItemId = "file:///synthetic/restart/series",
+          fileModifiedAtMillis = 1,
+          bookCount = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      JooqBookRepository(database).insert(
+        Book(
+          id = bookId,
+          libraryId = libraryId,
+          seriesId = seriesId,
+          name = "Synthetic restart book",
+          relativePath = "restart-series/book.cbz",
+          sourceItemId = "file:///synthetic/restart/series/book.cbz",
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+          fileModifiedAtMillis = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(bookId)).copy(
+          summary = "Initial persisted summary",
+          updatedAtMillis = 2,
+        ),
+      )
+      JooqCatalogReadRepository(database).findSeriesByIdOrNull(seriesId, CatalogAccess())
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(bookId)).copy(
+          summary = "Restart repaired summary",
+          updatedAtMillis = 3,
+        ),
+      )
+      assertEquals(
+        1,
+        database.dsl.fetchValue(
+          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          Int::class.java,
+        ),
+      )
+    }
+
+    XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      val repaired =
+        requireNotNull(
+          JooqCatalogReadRepository(database)
+            .findSeriesByIdOrNull(seriesId, CatalogAccess()),
+        )
+      assertEquals("Restart repaired summary", repaired.booksMetadata.summary)
+      assertEquals(
+        0,
+        database.dsl.fetchValue(
+          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          Int::class.java,
+        ),
+      )
     }
   }
 
