@@ -410,6 +410,19 @@ class JooqCatalogReadRepository(
         bindings += userId.value
       }
     }
+    if (query.duplicatesOnly) {
+      parts +=
+        """
+        b.file_hash <> ''
+        AND EXISTS (
+          SELECT 1
+          FROM book duplicate
+          WHERE duplicate.id <> b.id
+            AND duplicate.file_hash = b.file_hash
+            AND duplicate.file_size = b.file_size
+        )
+        """.trimIndent()
+    }
     query.fullTextSearch?.trim()?.takeIf(String::isNotEmpty)?.let {
       parts +=
         """
@@ -578,6 +591,7 @@ class JooqCatalogReadRepository(
       mappings =
         mapOf(
           "created" to "b.created_at_ms",
+          "fileHash" to "b.file_hash",
           "fileLastModified" to "b.file_modified_ms",
           "lastModified" to "b.updated_at_ms",
           "name" to "b.name COLLATE NOCASE",

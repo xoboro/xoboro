@@ -17,6 +17,7 @@ dependencies {
   implementation(project(":core:domain"))
   implementation(libs.natural.comparator)
   implementation(libs.tika.core)
+  implementation(libs.cryptohash)
 
   testImplementation(kotlin("test-junit5"))
 }

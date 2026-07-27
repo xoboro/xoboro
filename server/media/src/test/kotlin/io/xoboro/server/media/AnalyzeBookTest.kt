@@ -50,9 +50,10 @@ class AnalyzeBookTest {
           return materialized(archive)
         }
       }
+    val bookRepository = InMemoryBookRepository(book)
     val analyzer =
       AnalyzeBook(
-        books = InMemoryBookRepository(book),
+        books = bookRepository,
         libraries = InMemoryLibraryRepository(library),
         accesses = listOf(access),
         media = mediaRepository,
@@ -66,6 +67,7 @@ class AnalyzeBookTest {
     assertEquals(MediaStatus.READY, result.status)
     assertEquals(10, result.pages.single().dimension?.width)
     assertEquals(result, mediaRepository.media)
+    assertTrue(requireNotNull(bookRepository.findByIdOrNull(book.id)).fileHash.isNotBlank())
   }
 
   @Test
@@ -77,6 +79,19 @@ class AnalyzeBookTest {
         BookMedia(
           bookId = book.id,
           status = MediaStatus.OUTDATED,
+          pages =
+            listOf(
+              io.xoboro.core.domain.BookPage(
+                number = 1,
+                fileName = "001.png",
+                mediaType = "image/png",
+                fileSize =
+                  java.util.zip.ZipFile(archive.toFile()).use {
+                    requireNotNull(it.getEntry("001.png")).size
+                  },
+                fileHash = "preserved-page-hash",
+              ),
+            ),
           createdAtMillis = 100,
           updatedAtMillis = 100,
         ),
@@ -106,6 +121,7 @@ class AnalyzeBookTest {
 
     assertEquals(100, result.createdAtMillis)
     assertEquals(200, result.updatedAtMillis)
+    assertEquals("preserved-page-hash", result.pages.single().fileHash)
   }
 
   @Test

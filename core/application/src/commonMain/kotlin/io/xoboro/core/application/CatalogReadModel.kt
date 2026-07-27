@@ -71,6 +71,7 @@ data class BookCatalogQuery(
   val fullTextSearch: String? = null,
   val deleted: Boolean? = false,
   val onDeck: Boolean = false,
+  val duplicatesOnly: Boolean = false,
 )
 
 data class SeriesCatalogQuery(

@@ -13,6 +13,7 @@ kotlinx-coroutines = "1.11.0"
 spring-security = "7.0.4"
 commons-logging = "1.4.0"
 tsid-creator = "5.2.6"
+cryptohash = "1.0.2"
 
 [libraries]
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
@@ -38,6 +39,7 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 spring-security-crypto = { module = "org.springframework.security:spring-security-crypto", version.ref = "spring-security" }
 commons-logging = { module = "commons-logging:commons-logging", version.ref = "commons-logging" }
 tsid-creator = { module = "com.github.f4b6a3:tsid-creator", version.ref = "tsid-creator" }
+cryptohash = { module = "com.appmattus.crypto:cryptohash", version.ref = "cryptohash" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
