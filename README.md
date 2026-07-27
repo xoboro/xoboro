@@ -46,6 +46,7 @@ server/
   app/               Ktor application entry point
   media/             Media analysis and source materialization ports
   persistence/       SQLite migrations and jOOQ persistence adapters
+  security/          Password hashing and authentication primitives
   sources/local/     Local filesystem source adapter
   tasks/             Leased durable worker runtime and task routing
 compatibility/       Komga API and protocol adapters
