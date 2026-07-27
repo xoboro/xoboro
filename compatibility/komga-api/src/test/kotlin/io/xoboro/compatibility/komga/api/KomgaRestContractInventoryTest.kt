@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(141, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(150, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(24, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(15, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -74,6 +74,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/authors/roles"),
         RestEndpoint("GET", "/api/v1/books"),
         RestEndpoint("GET", "/api/v1/books/duplicates"),
+        RestEndpoint("POST", "/api/v1/books/import"),
         RestEndpoint("PATCH", "/api/v1/books/metadata"),
         RestEndpoint("GET", "/api/v1/books/latest"),
         RestEndpoint("POST", "/api/v1/books/list"),
@@ -83,6 +84,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("PATCH", "/api/v1/books/{bookId}/metadata"),
         RestEndpoint("POST", "/api/v1/books/{bookId}/metadata/refresh"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file"),
+        RestEndpoint("DELETE", "/api/v1/books/{bookId}/file"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/file/*"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/manifest"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/manifest/divina"),
@@ -120,6 +122,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/collections/{id}/thumbnails/{thumbnailId}"),
         RestEndpoint("PUT", "/api/v1/collections/{id}/thumbnails/{thumbnailId}/selected"),
         RestEndpoint("GET", "/api/v1/genres"),
+        RestEndpoint("POST", "/api/v1/filesystem"),
         RestEndpoint("GET", "/api/v1/languages"),
         RestEndpoint("GET", "/api/v1/libraries"),
         RestEndpoint("POST", "/api/v1/libraries"),
@@ -143,6 +146,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("POST", "/api/v1/readlists"),
         RestEndpoint("DELETE", "/api/v1/readlists/{id}"),
         RestEndpoint("GET", "/api/v1/readlists/{id}"),
+        RestEndpoint("GET", "/api/v1/readlists/{id}/file"),
         RestEndpoint("PATCH", "/api/v1/readlists/{id}"),
         RestEndpoint("GET", "/api/v1/readlists/{id}/books"),
         RestEndpoint("GET", "/api/v1/readlists/{id}/books/{bookId}/next"),
@@ -162,6 +166,8 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/series/new"),
         RestEndpoint("GET", "/api/v1/series/updated"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}"),
+        RestEndpoint("DELETE", "/api/v1/series/{seriesId}/file"),
+        RestEndpoint("GET", "/api/v1/series/{seriesId}/file"),
         RestEndpoint("POST", "/api/v1/series/{seriesId}/analyze"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/books"),
         RestEndpoint("GET", "/api/v1/series/{seriesId}/collections"),
@@ -182,6 +188,9 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/tags/book"),
         RestEndpoint("GET", "/api/v1/tags/series"),
         RestEndpoint("DELETE", "/api/v1/tasks"),
+        RestEndpoint("POST", "/api/v1/transient-books"),
+        RestEndpoint("POST", "/api/v1/transient-books/{id}/analyze"),
+        RestEndpoint("GET", "/api/v1/transient-books/{id}/pages/{pageNumber}"),
         RestEndpoint("DELETE", "/api/v1/client-settings/global"),
         RestEndpoint("PATCH", "/api/v1/client-settings/global"),
         RestEndpoint("GET", "/api/v1/client-settings/global/list"),

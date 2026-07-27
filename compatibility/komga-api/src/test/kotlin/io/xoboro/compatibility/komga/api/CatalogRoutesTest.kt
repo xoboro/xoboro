@@ -56,6 +56,9 @@ import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
 import java.nio.file.Path
+import java.nio.file.Files
+import java.io.ByteArrayInputStream
+import java.util.zip.ZipInputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -119,12 +122,14 @@ class CatalogRoutesTest {
           installKomgaBasicAuthentication(users)
           routing {
             komgaClaimRoutes(users)
+            komgaFileSystemRoutes()
             komgaCatalogRoutes(catalog)
             komgaMediaRoutes(catalog, content)
             komgaPageHashRoutes(pageHashes, pageHashLifecycle, content)
             komgaReadProgressRoutes(catalog, progress)
             komgaWebPubRoutes(catalog, progress, content)
             komgaOrganizationRoutes(collections, readLists, organizations, catalog)
+            komgaArchiveRoutes(catalog, readLists, content)
           }
         }
         val client =
@@ -148,6 +153,30 @@ class CatalogRoutesTest {
         assertEquals(
           HttpStatusCode.Forbidden,
           client.get("/api/v1/books/book-1/pages/1") {
+            basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          }.status,
+        )
+
+        val browsable = tempDirectory.resolve("browsable")
+        Files.createDirectories(browsable.resolve("Synthetic folder"))
+        Files.writeString(browsable.resolve("synthetic.txt"), "synthetic")
+        Files.writeString(browsable.resolve(".hidden.txt"), "hidden")
+        val listing =
+          client.post("/api/v1/filesystem") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              DirectoryRequestDto(
+                path = browsable.toString(),
+                showFiles = true,
+              ),
+            )
+          }.body<DirectoryListingDto>()
+        assertEquals(listOf("Synthetic folder"), listing.directories.map(PathDto::name))
+        assertEquals(listOf("synthetic.txt"), listing.files.map(PathDto::name))
+        assertEquals(
+          HttpStatusCode.Forbidden,
+          client.post("/api/v1/filesystem") {
             basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
           }.status,
         )
@@ -501,6 +530,24 @@ class CatalogRoutesTest {
               basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
             }.body<List<KomgaReadListDto>>().map(KomgaReadListDto::id),
         )
+        val readListArchive =
+          client.get("/api/v1/readlists/${readList.id}/file") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, readListArchive.status)
+        assertEquals(
+          listOf("2 - synthetic.cbz"),
+          readListArchive.body<ByteArray>().zipEntryNames(),
+        )
+        val seriesArchive =
+          client.get("/api/v1/series/series-1/file") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, seriesArchive.status)
+        assertEquals(
+          listOf("synthetic.cbz"),
+          seriesArchive.body<ByteArray>().zipEntryNames(),
+        )
         assertEquals(
           HttpStatusCode.NoContent,
           client.patch("/api/v1/readlists/${readList.id}") {
@@ -756,6 +803,17 @@ class CatalogRoutesTest {
     const val RESTRICTED_PASSWORD = "SyntheticPassword2!"
     val KOMGA_JSON = Json { explicitNulls = false }
   }
+
+  private fun ByteArray.zipEntryNames(): List<String> =
+    ZipInputStream(ByteArrayInputStream(this)).use { archive ->
+      buildList {
+        while (true) {
+          val entry = archive.nextEntry ?: break
+          add(entry.name)
+          archive.closeEntry()
+        }
+      }
+    }
 
   private class SyntheticBookContentAccess : BookContentAccess {
     var closedStreams: Int = 0

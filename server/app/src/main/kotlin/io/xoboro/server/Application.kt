@@ -11,12 +11,16 @@ import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaWebPubRoutes
 import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaArtworkRoutes
+import io.xoboro.compatibility.komga.api.komgaArchiveRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
 import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
+import io.xoboro.compatibility.komga.api.komgaFileSystemRoutes
+import io.xoboro.compatibility.komga.api.komgaFileLifecycleRoutes
+import io.xoboro.compatibility.komga.api.komgaTransientBookRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -26,6 +30,7 @@ import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CatalogMaintenanceRequester
+import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
@@ -39,6 +44,7 @@ import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
+import io.xoboro.core.application.TransientBookLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -95,6 +101,8 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
     catalogMaintenanceRequester = runtime.catalogMaintenanceRequester,
+    catalogFileLifecycleRequester = runtime.catalogFileLifecycleRequester,
+    transientBookLifecycle = runtime.transientBookLifecycle,
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
@@ -127,6 +135,8 @@ fun Application.xoboroModule(
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
   catalogMaintenanceRequester: CatalogMaintenanceRequester? = null,
+  catalogFileLifecycleRequester: CatalogFileLifecycleRequester? = null,
+  transientBookLifecycle: TransientBookLifecycle? = null,
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
@@ -182,6 +192,7 @@ fun Application.xoboroModule(
         )
       }
       userLifecycle?.let {
+        komgaFileSystemRoutes()
         komgaClaimRoutes(it)
         komgaAuthenticatedUserRoutes(
           users = it,
@@ -223,6 +234,8 @@ fun Application.xoboroModule(
       }
       catalogReadRepository?.let(::komgaCatalogRoutes)
       catalogMaintenanceRequester?.let(::komgaCatalogMaintenanceRoutes)
+      catalogFileLifecycleRequester?.let(::komgaFileLifecycleRoutes)
+      transientBookLifecycle?.let(::komgaTransientBookRoutes)
       if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
         komgaMetadataRoutes(metadataEditingLifecycle, metadataFacetRepository)
       }
@@ -251,6 +264,17 @@ fun Application.xoboroModule(
           readLists = readListRepository,
           lifecycle = organizationLifecycle,
           catalog = catalogReadRepository,
+        )
+      }
+      if (
+        catalogReadRepository != null &&
+        readListRepository != null &&
+        bookContentAccess != null
+      ) {
+        komgaArchiveRoutes(
+          catalog = catalogReadRepository,
+          readLists = readListRepository,
+          content = bookContentAccess,
         )
       }
       if (catalogReadRepository != null && readProgressLifecycle != null) {

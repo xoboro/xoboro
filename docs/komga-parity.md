@@ -50,7 +50,7 @@ Status:
 | Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
 | Cover and thumbnail generation | PARTIAL | Durable owner-scoped Book/Series/Collection/ReadList artwork, bounded multipart upload, decoded-pixel safety, JPEG normalization/resizing, atomic selection, uploaded-only deletion, authenticated byte delivery, and first-visible-book page fallback; generated thumbnail persistence, sidecars, and differential caching pending |
 | Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, EPUB resource streaming, PDF JPEG rendering and raw single-page extraction, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, CSP, and resource-lifetime tests; PDF Accept negotiation and differential caching semantics pending |
-| Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming, single-byte-range responses, role/access enforcement, and wildcard filename compatibility; series/read-list archives pending |
+| Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming and single-byte-range responses; Series and ReadList ZIPs stream entries without whole-archive buffering with role/access enforcement and collision-safe names; differential archive metadata pending |
 | Incorrect extension repair | TODO | |
 | CBR/RAR to CBZ conversion | TODO | |
 
@@ -65,8 +65,9 @@ Status:
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
 | File, page, and KOReader hashes | PARTIAL | Komga-compatible seeded XXH3-128 whole-file hashes reuse source materialization; optional first/last-three page hashes persist during Comic analysis, JPEG pixels are normalized before hashing, and non-empty hashes are indexed; KOReader hash and differential fixtures pending |
-| Book and series lifecycle | TODO | |
-| File import, upgrade, and deletion | TODO | |
+| Book and series lifecycle | PARTIAL | Administrator Book/Series file deletion emits deduplicated, source-aware durable tasks and schedules catalog reconciliation; restore and differential events pending |
+| File import, upgrade, and deletion | PARTIAL | Administrator COPY/MOVE/HARDLINK imports and upgrades use canonical root containment, validated destination leaves, sibling temporary files, atomic replacement, retry-safe deletion, and durable tasks; non-local mutation adapters pending |
+| Filesystem and transient import discovery | PARTIAL | Administrator filesystem listing hides dot entries and validates absolute directories; session-scoped transient CBZ/ZIP, EPUB, and PDF discovery rejects Library overlap, reuses production analysis, and streams previews; differential envelopes and remote import pending |
 | Duplicate file detection | PARTIAL | Administrator Book route groups non-empty equal file hashes and sizes in SQLite with stable paging and Komga DTO projection; differential sorting pending |
 | Duplicate page detection and removal | PARTIAL | Known/unknown/match queries, action updates, live bounded thumbnails, SQL aggregation/paging, restart persistence, and administrator routes are implemented; atomic source mutation and automatic deletion remain pending |
 
@@ -130,7 +131,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, DiViNa manifest and Readium progression contracts, sixteen collection/read-list operations, three metadata mutations, thirteen referential reads, twenty-four artwork operations, four target maintenance operations, active-lease-safe task clearing, and production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | 150 of 165 operations have an implementation in progress, including security/settings/library surfaces, catalog reads, media/WebPub delivery, organization, metadata, artwork, target maintenance, source-aware file lifecycle, archives, filesystem discovery, and transient analysis; differential completion and remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
