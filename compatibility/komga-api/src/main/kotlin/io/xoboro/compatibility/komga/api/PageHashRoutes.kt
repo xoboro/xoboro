@@ -8,7 +8,7 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondOutputStream
+import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
@@ -198,18 +198,9 @@ private suspend fun ApplicationCall.respondPageHashThumbnail(
     return
   }
   try {
-    respondOutputStream(
-      contentType = ContentType.Image.JPEG,
-      status = HttpStatusCode.OK,
-      contentLength = opened.contentLength,
-    ) {
-      val buffer = ByteArray(STREAM_BUFFER_SIZE)
-      while (true) {
-        val read = opened.read(buffer)
-        if (read < 0) break
-        if (read > 0) write(buffer, 0, read)
-      }
-    }
+    val body = opened.readKomgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null)) return
+    respondBytes(body.bytes, ContentType.Image.JPEG)
   } finally {
     opened.close()
   }
@@ -222,4 +213,3 @@ private suspend fun ApplicationCall.requirePageHashAdministrator(): Boolean {
 }
 
 private const val KNOWN_HASH_THUMBNAIL_SIZE: Int = 1_000
-private const val STREAM_BUFFER_SIZE: Int = 16 * 1_024

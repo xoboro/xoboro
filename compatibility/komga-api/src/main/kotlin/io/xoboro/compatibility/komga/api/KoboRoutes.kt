@@ -10,6 +10,7 @@ import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -617,12 +618,9 @@ private suspend fun ApplicationCall.respondKoboThumbnail(
       ArtworkOwner(ArtworkOwnerKind.MEDIA_ITEM, book.book.id.value),
     )
   if (selected != null) {
-    respondOutputStream(
-      contentType = ContentType.parse(selected.artwork.mediaType),
-      contentLength = selected.bytes.size.toLong(),
-    ) {
-      write(selected.bytes)
-    }
+    val body = selected.bytes.komgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null)) return
+    respondBytes(body.bytes, ContentType.parse(selected.artwork.mediaType))
     return
   }
   val page =
@@ -637,7 +635,13 @@ private suspend fun ApplicationCall.respondKoboThumbnail(
   if (page == null) {
     respond(HttpStatusCode.NotFound)
   } else {
-    stream(page, inline = true)
+    try {
+      val body = page.readKomgaCachedBody()
+      if (respondNotModified(body, lastModifiedMillis = null)) return
+      respondBytes(body.bytes, ContentType.Image.JPEG)
+    } finally {
+      page.close()
+    }
   }
 }
 
