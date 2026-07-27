@@ -18,6 +18,7 @@ import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
 import io.xoboro.compatibility.komga.api.komgaOpdsRoutes
+import io.xoboro.compatibility.komga.api.komgaKoboRoutes
 import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
 import io.xoboro.compatibility.komga.api.komgaFileSystemRoutes
 import io.xoboro.compatibility.komga.api.komgaFileLifecycleRoutes
@@ -31,6 +32,7 @@ import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.compatibility.komga.api.komgaKoreaderSyncRoutes
 import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
+import io.xoboro.compatibility.komga.api.KepubContentAccess
 import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
 import io.xoboro.compatibility.komga.api.komgaSseRoutes
@@ -49,6 +51,7 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.MediaSyncLifecycle
 import io.xoboro.core.application.FontResourceCatalog
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.PageHashRepository
@@ -125,6 +128,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     sequentialReadProgressLifecycle = runtime.sequentialReadProgressLifecycle,
     historicalEventRepository = runtime.historicalEventRepository,
     syncPointRepository = runtime.syncPointRepository,
+    mediaSyncLifecycle = runtime.mediaSyncLifecycle,
     readListImportLifecycle = runtime.readListImportLifecycle,
     fontResourceCatalog = runtime.fontResourceCatalog,
     serverReleaseCatalog = runtime.serverReleaseCatalog,
@@ -132,6 +136,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
+    kepubContentAccess = runtime.kepubContentAccess,
     pageHashRepository = runtime.pageHashRepository,
     pageHashLifecycle = runtime.pageHashLifecycle,
     organizationLifecycle = runtime.organizationLifecycle,
@@ -169,6 +174,7 @@ fun Application.xoboroModule(
   sequentialReadProgressLifecycle: SequentialReadProgressLifecycle? = null,
   historicalEventRepository: HistoricalEventRepository? = null,
   syncPointRepository: SyncPointRepository? = null,
+  mediaSyncLifecycle: MediaSyncLifecycle? = null,
   readListImportLifecycle: ReadListImportLifecycle? = null,
   fontResourceCatalog: FontResourceCatalog? = null,
   serverReleaseCatalog: ServerReleaseCatalog? = null,
@@ -176,6 +182,7 @@ fun Application.xoboroModule(
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
+  kepubContentAccess: KepubContentAccess? = null,
   pageHashRepository: PageHashRepository? = null,
   pageHashLifecycle: PageHashLifecycle? = null,
   organizationLifecycle: OrganizationLifecycle? = null,
@@ -322,6 +329,24 @@ fun Application.xoboroModule(
           readLists = readListRepository,
           lifecycle = organizationLifecycle,
           catalog = catalogReadRepository,
+        )
+      }
+      if (
+        apiKeyLifecycle != null &&
+        mediaSyncLifecycle != null &&
+        catalogReadRepository != null &&
+        readProgressLifecycle != null &&
+        artworkLifecycle != null &&
+        bookContentAccess != null
+      ) {
+        komgaKoboRoutes(
+          apiKeys = apiKeyLifecycle,
+          sync = mediaSyncLifecycle,
+          catalog = catalogReadRepository,
+          progress = readProgressLifecycle,
+          artwork = artworkLifecycle,
+          content = bookContentAccess,
+          kepub = kepubContentAccess,
         )
       }
       if (
