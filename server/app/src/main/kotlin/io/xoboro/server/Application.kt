@@ -1,12 +1,14 @@
 package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
+import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
+import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
@@ -51,6 +53,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     userSessionLifecycle = runtime.userSessionLifecycle,
     rememberMeTokenService = runtime.rememberMeTokenService,
     rememberMeMaxAgeSeconds = XoboroRuntime.DEFAULT_REMEMBER_ME_MAX_AGE_SECONDS,
+    clientSettingsLifecycle = runtime.clientSettingsLifecycle,
     libraryRepository = runtime.libraryRepository,
   )
 }
@@ -64,6 +67,7 @@ fun Application.xoboroModule(
   userSessionLifecycle: UserSessionLifecycle? = null,
   rememberMeTokenService: RememberMeTokenService? = null,
   rememberMeMaxAgeSeconds: Int? = null,
+  clientSettingsLifecycle: ClientSettingsLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
@@ -123,6 +127,7 @@ fun Application.xoboroModule(
       }
       userSessionLifecycle?.let(::komgaSessionRoutes)
     }
+    clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
   }
 }
 
