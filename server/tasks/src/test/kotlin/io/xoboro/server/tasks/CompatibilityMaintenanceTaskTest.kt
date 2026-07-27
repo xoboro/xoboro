@@ -20,15 +20,18 @@ import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.media.SafeJpegArtworkProcessor
+import io.xoboro.server.media.RarToCbzConverter
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqArtworkRepository
 import io.xoboro.server.persistence.JooqBookRepository
+import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqPageHashRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
+import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -37,6 +40,8 @@ import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import java.util.zip.ZipFile
+import java.util.Base64
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -135,6 +140,117 @@ class CompatibilityMaintenanceTaskTest {
     }
   }
 
+  @Test
+  fun `repairs a signature mismatched archive without replacing its catalog identity`() {
+    val root = Files.createDirectories(temporaryDirectory.resolve("library-repair"))
+    val seriesDirectory = Files.createDirectories(root.resolve("Synthetic series"))
+    val archive = seriesDirectory.resolve("chapter.cbr")
+    ZipOutputStream(Files.newOutputStream(archive)).use { output ->
+      output.putNextEntry(ZipEntry("001.png"))
+      output.write(byteArrayOf(1, 2, 3))
+      output.closeEntry()
+    }
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("repair.sqlite"))).use {
+        database ->
+      seedCatalog(database, root, seriesDirectory, archive)
+      val books = JooqBookRepository(database)
+      val queue = JooqDurableTaskQueue(database)
+      val handler =
+        ArchiveMaintenanceTaskHandler(
+          books = books,
+          libraries = JooqLibraryRepository(database),
+          media = JooqBookMediaRepository(database),
+          accesses = listOf(LocalSourceMediaAccess()),
+          mutations = listOf(LocalSourceMutationAccess()),
+          converter = RarToCbzConverter(),
+          analysisEmitter = AnalyzeBookTaskEmitter(books, queue) { 20 },
+          scanEmitter = ScanLibraryTaskEmitter(queue) { 20 },
+          currentTimeMillis = { 20 },
+        )
+
+      handler.handle(
+        DurableTask(
+          id = "maintain-1",
+          type = ArchiveMaintenanceTaskHandler.TASK_TYPE,
+          payloadJson =
+            """{"bookId":"book-1","repairExtensions":true,"convertToCbz":false}""",
+          availableAtMillis = 1,
+        ),
+      )
+
+      val repaired = seriesDirectory.resolve("chapter.cbz")
+      assertTrue(Files.exists(repaired))
+      assertTrue(!Files.exists(archive))
+      val retained = requireNotNull(books.findByIdOrNull(BOOK_ID))
+      assertEquals(BOOK_ID, retained.id)
+      assertEquals("Synthetic series/chapter.cbz", retained.relativePath)
+      assertTrue(Files.isSameFile(repaired, Path.of(java.net.URI(retained.sourceItemId))))
+      assertEquals(2, queue.counts().pending)
+    }
+  }
+
+  @Test
+  fun `converts RAR to CBZ while retaining the media item and invalidating hashes`() {
+    val root = Files.createDirectories(temporaryDirectory.resolve("library-convert"))
+    val seriesDirectory = Files.createDirectories(root.resolve("Synthetic series"))
+    val archive = seriesDirectory.resolve("chapter.cbr")
+    Files.write(
+      archive,
+      Base64.getDecoder().decode(
+        "UmFyIRoHAQDz4YLrCwEFBwAGAQGAgIAATS800SUCAwuHAASHACC6fRl6gAAACUZJTEUxLlRYVAoDAgDwWYPlessBZmlsZTENCqOo3u8lAgMLhwAEhwAg48NfeIAAAAlGSUxFMi5UWFQKAwIAd+2G5XrLAWZpbGUyDQodd1ZRAwUEAA==",
+      ),
+    )
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("convert.sqlite"))).use {
+        database ->
+      seedCatalog(database, root, seriesDirectory, archive)
+      val books = JooqBookRepository(database)
+      books.update(
+        requireNotNull(books.findByIdOrNull(BOOK_ID)).copy(
+          fileHash = "old-content-hash",
+          fileHashKoreader = "old-reader-hash",
+        ),
+      )
+      val queue = JooqDurableTaskQueue(database)
+      val handler =
+        ArchiveMaintenanceTaskHandler(
+          books = books,
+          libraries = JooqLibraryRepository(database),
+          media = JooqBookMediaRepository(database),
+          accesses = listOf(LocalSourceMediaAccess()),
+          mutations = listOf(LocalSourceMutationAccess()),
+          converter = RarToCbzConverter(),
+          analysisEmitter = AnalyzeBookTaskEmitter(books, queue) { 20 },
+          scanEmitter = ScanLibraryTaskEmitter(queue) { 20 },
+          currentTimeMillis = { 20 },
+        )
+
+      handler.handle(
+        DurableTask(
+          id = "maintain-2",
+          type = ArchiveMaintenanceTaskHandler.TASK_TYPE,
+          payloadJson =
+            """{"bookId":"book-1","repairExtensions":false,"convertToCbz":true}""",
+          availableAtMillis = 1,
+        ),
+      )
+
+      val converted = seriesDirectory.resolve("chapter.cbz")
+      assertTrue(Files.exists(converted))
+      assertTrue(!Files.exists(archive))
+      ZipFile(converted.toFile()).use { output ->
+        assertEquals(
+          listOf("FILE1.TXT", "FILE2.TXT"),
+          output.entries().asSequence().map { it.name }.toList(),
+        )
+      }
+      val retained = requireNotNull(books.findByIdOrNull(BOOK_ID))
+      assertEquals(BOOK_ID, retained.id)
+      assertEquals("", retained.fileHash)
+      assertEquals("", retained.fileHashKoreader)
+      assertEquals(2, queue.counts().pending)
+    }
+  }
+
   private fun seedCatalog(
     database: XoboroDatabase,
     root: Path,
@@ -167,7 +283,8 @@ class CompatibilityMaintenanceTaskTest {
         libraryId = LIBRARY_ID,
         seriesId = SERIES_ID,
         name = "Synthetic chapter",
-        relativePath = "Synthetic series/chapter.cbz",
+        relativePath =
+          root.relativize(archive).iterator().asSequence().joinToString("/") { it.toString() },
         sourceItemId = archive.toUri().toString(),
         mediaKind = MediaKind.COMIC_ARCHIVE,
         fileModifiedAtMillis = 1,

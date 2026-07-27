@@ -1,5 +1,7 @@
 package io.xoboro.server.media
 
+import com.github.junrar.Archive
+import com.github.junrar.ArchiveOptions
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.MediaContentStream
@@ -71,8 +73,13 @@ class BookContentService(
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
     val materialized = access.materialize(library.root.itemId, book.sourceItemId)
     return when (book.mediaKind) {
-      MediaKind.COMIC_ARCHIVE, MediaKind.EPUB ->
-        openArchivePage(materialized, page, request)
+      MediaKind.COMIC_ARCHIVE ->
+        if (analyzed.mediaType == RarMediaAnalyzer.RAR_MEDIA_TYPE) {
+          openRarPage(materialized, page, request)
+        } else {
+          openArchivePage(materialized, page, request)
+        }
+      MediaKind.EPUB -> openArchivePage(materialized, page, request)
       MediaKind.PDF ->
         openPdfPage(materialized, pageNumber, request)
     }
@@ -282,6 +289,78 @@ class BookContentService(
       )
     } catch (failure: Throwable) {
       runCatching(materialized::close).exceptionOrNull()?.let(failure::addSuppressed)
+      throw failure
+    }
+  }
+
+  private fun openRarPage(
+    materialized: MaterializedMedia,
+    page: BookPage,
+    request: PageImageRequest,
+  ): OpenBookContent {
+    var materializationOwned = true
+    try {
+      val archive =
+        Archive(
+          materialized.path.toFile(),
+          ArchiveOptions
+            .builder()
+            .maxDictionarySize(RarMediaAnalyzer.DEFAULT_MAXIMUM_DICTIONARY_SIZE)
+            .build(),
+        )
+      var archiveOwned = true
+      try {
+        val header =
+          archive.fileHeaders.firstOrNull { it.fileName == page.fileName }
+            ?: throw IllegalStateException("Indexed page is missing from the RAR archive")
+        require(!header.isDirectory) { "Indexed page must not be a directory" }
+        if (request.format != null || request.maximumDimension != null) {
+          val converted =
+            archive.getInputStream(header).use { input ->
+              convertImage(input, request)
+            }
+          archiveOwned = false
+          try {
+            archive.close()
+          } finally {
+            materializationOwned = false
+            materialized.close()
+          }
+          return OpenBookContent(
+            input = ByteArrayInputStream(converted.bytes),
+            fileName = converted.fileName(page.fileName),
+            mediaType = converted.format.mediaType,
+            contentLength = converted.bytes.size.toLong(),
+            closeResources = {},
+          )
+        }
+        val opened =
+          OpenBookContent(
+            input = archive.getInputStream(header),
+            fileName = page.fileName.substringAfterLast('/').substringAfterLast('\\'),
+            mediaType = page.mediaType,
+            contentLength = header.fullUnpackSize.takeUnless { it < 0 },
+            closeResources = {
+              try {
+                archive.close()
+              } finally {
+                materialized.close()
+              }
+            },
+          )
+        archiveOwned = false
+        materializationOwned = false
+        return opened
+      } catch (failure: Throwable) {
+        if (archiveOwned) {
+          runCatching(archive::close).exceptionOrNull()?.let(failure::addSuppressed)
+        }
+        throw failure
+      }
+    } catch (failure: Throwable) {
+      if (materializationOwned) {
+        runCatching(materialized::close).exceptionOrNull()?.let(failure::addSuppressed)
+      }
       throw failure
     }
   }
