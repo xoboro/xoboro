@@ -39,9 +39,10 @@ Library
   the source.
 - Existing Komga rows receive a durable semantic discriminator. The initial
   migration maps comic archives to `Comic`, EPUB to `Novel`, and PDF to `Book`.
-- `MediaItemRepository` is the canonical library-facing read boundary.
-  `BookRepository` remains an internal Komga catalog compatibility boundary
-  while the remaining write lifecycle is migrated.
+- `media_item` is canonical storage and `MediaItemRepository` is the shared
+  Library-facing read boundary. Timeline items have an independent write port.
+  `BookRepository` remains the Komga document compatibility boundary and is
+  transactionally mirrored into the canonical row.
 - Existing media-item IDs stay unchanged. `BookId` is a source-compatible alias
   of the canonical `MediaItemId`.
 
@@ -54,7 +55,7 @@ Library
 
 ## Consequences
 
-Video and audio support can reuse libraries, users, restrictions, sources,
-tasks, search, and downloads. Format-specific analyzers and progress types
-remain separate, avoiding a wide base entity filled with unrelated nullable
-fields.
+Video and audio support can exist without synthetic Series or Book rows and can
+reuse libraries, users, restrictions, sources, tasks, search, and downloads.
+Format-specific analyzers and progress types remain separate, avoiding a wide
+base entity filled with unrelated nullable fields.

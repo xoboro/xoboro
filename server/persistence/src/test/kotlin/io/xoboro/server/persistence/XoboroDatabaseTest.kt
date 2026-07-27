@@ -32,6 +32,7 @@ class XoboroDatabaseTest {
             "library_scan_exclusion",
             "series",
             "book",
+            "media_item",
             "task",
             "catalog_scan_session",
             "catalog_scan_candidate",
@@ -78,7 +79,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(23, database.migrationResult.migrationsExecuted)
+      assertEquals(24, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -167,7 +168,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(22, database.migrationResult.migrationsExecuted)
+      assertEquals(23, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -196,6 +197,15 @@ class XoboroDatabaseTest {
         "COMIC",
         database.dsl
           .fetchOne("SELECT media_item_type FROM book WHERE id = ?", "legacy-book")
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "COMIC",
+        database.dsl
+          .fetchOne(
+            "SELECT media_item_type FROM media_item WHERE id = ?",
+            "legacy-book",
+          )
           ?.get(0, String::class.java),
       )
       assertEquals(
