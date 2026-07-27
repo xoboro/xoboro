@@ -28,6 +28,11 @@ import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
 import io.xoboro.compatibility.komga.api.komgaServerResourceRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
+import io.xoboro.compatibility.komga.api.komgaKoreaderSyncRoutes
+import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
+import io.xoboro.compatibility.komga.api.KomgaSseEventHub
+import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
+import io.xoboro.compatibility.komga.api.komgaSseRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.ArtworkLifecycle
@@ -72,6 +77,7 @@ import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.sse.SSE
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -131,6 +137,9 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     seriesCollectionRepository = runtime.seriesCollectionRepository,
     readListRepository = runtime.readListRepository,
     readProgressLifecycle = runtime.readProgressLifecycle,
+    koreaderSyncLifecycle = runtime.koreaderSyncLifecycle,
+    sseEventHub = runtime.sseEventHub,
+    sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
   )
@@ -172,6 +181,9 @@ fun Application.xoboroModule(
   seriesCollectionRepository: SeriesCollectionRepository? = null,
   readListRepository: ReadListRepository? = null,
   readProgressLifecycle: ReadProgressLifecycle? = null,
+  koreaderSyncLifecycle: KoreaderSyncLifecycle? = null,
+  sseEventHub: KomgaSseEventHub? = null,
+  sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
 ) {
@@ -204,6 +216,7 @@ fun Application.xoboroModule(
       )
     }
   }
+  install(SSE)
 
   routing {
     val routes: Route.() -> Unit = {
@@ -323,6 +336,10 @@ fun Application.xoboroModule(
       }
       if (catalogReadRepository != null && readProgressLifecycle != null) {
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
+      }
+      koreaderSyncLifecycle?.let(::komgaKoreaderSyncRoutes)
+      if (sseEventHub != null && sseTaskStatusProvider != null) {
+        komgaSseRoutes(sseEventHub, sseTaskStatusProvider)
       }
       if (
         catalogReadRepository != null &&

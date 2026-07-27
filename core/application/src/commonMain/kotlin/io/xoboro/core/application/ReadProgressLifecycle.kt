@@ -9,12 +9,42 @@ import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesRepository
 import io.xoboro.core.domain.UserId
 
+sealed interface ReadProgressEvent {
+  val userId: UserId
+
+  data class Changed(
+    val progress: ReadProgress,
+  ) : ReadProgressEvent {
+    override val userId: UserId = progress.userId
+  }
+
+  data class Deleted(
+    val bookId: BookId,
+    override val userId: UserId,
+  ) : ReadProgressEvent
+
+  data class SeriesChanged(
+    val seriesId: SeriesId,
+    override val userId: UserId,
+  ) : ReadProgressEvent
+
+  data class SeriesDeleted(
+    val seriesId: SeriesId,
+    override val userId: UserId,
+  ) : ReadProgressEvent
+}
+
+fun interface ReadProgressEventPublisher {
+  fun publish(event: ReadProgressEvent)
+}
+
 class ReadProgressLifecycle(
   private val books: BookRepository,
   private val series: SeriesRepository,
   private val media: BookMediaRepository,
   private val progresses: ReadProgressRepository,
   private val currentTimeMillis: () -> Long,
+  private val eventPublisher: ReadProgressEventPublisher = ReadProgressEventPublisher {},
 ) {
   fun updateBook(
     bookId: BookId,
@@ -57,6 +87,7 @@ class ReadProgressLifecycle(
       )
     progresses.upsert(progress)
     return progresses.findByBookIdAndUserIdOrNull(book.id, userId)
+      ?.also { eventPublisher.publish(ReadProgressEvent.Changed(it)) }
   }
 
   fun deleteBook(
@@ -64,7 +95,11 @@ class ReadProgressLifecycle(
     userId: UserId,
   ): Boolean {
     val book = books.findByIdOrNull(bookId) ?: return false
+    val existing = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
     progresses.delete(book.id, userId)
+    if (existing != null) {
+      eventPublisher.publish(ReadProgressEvent.Deleted(book.id, userId))
+    }
     return true
   }
 
@@ -115,6 +150,7 @@ class ReadProgressLifecycle(
       ),
     )
     return progresses.findByBookIdAndUserIdOrNull(book.id, userId)
+      ?.also { eventPublisher.publish(ReadProgressEvent.Changed(it)) }
   }
 
   fun markSeriesCompleted(
@@ -146,6 +182,7 @@ class ReadProgressLifecycle(
         )
       }
     progresses.upsertAll(updates)
+    eventPublisher.publish(ReadProgressEvent.SeriesChanged(seriesId, userId))
     return true
   }
 
@@ -155,6 +192,7 @@ class ReadProgressLifecycle(
   ): Boolean {
     if (series.findByIdOrNull(seriesId) == null) return false
     progresses.deleteBySeriesIdAndUserId(seriesId, userId)
+    eventPublisher.publish(ReadProgressEvent.SeriesDeleted(seriesId, userId))
     return true
   }
 

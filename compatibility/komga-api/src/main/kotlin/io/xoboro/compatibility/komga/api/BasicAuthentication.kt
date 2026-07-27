@@ -21,6 +21,7 @@ import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ApiKey
 import io.xoboro.core.domain.User
+import io.xoboro.core.domain.UserRole
 
 fun Application.installKomgaBasicAuthentication(
   users: UserLifecycle,
@@ -156,6 +157,26 @@ fun Application.installKomgaBasicAuthentication(
         }
       }
     }
+    provider(KOMGA_KOREADER_AUTHENTICATION) {
+      authenticate { context ->
+        val rawToken = context.call.request.header(KOMGA_KOREADER_AUTHENTICATION_HEADER)
+        val principal = rawToken?.let { apiKeys?.authenticate(it) }
+        if (principal == null || UserRole.KOREADER_SYNC !in principal.user.roles) {
+          context.challenge(
+            KOMGA_KOREADER_AUTHENTICATION,
+            AuthenticationFailedCause.InvalidCredentials,
+          ) { challenge, call ->
+            call.respond(HttpStatusCode.Forbidden)
+            challenge.complete()
+          }
+        } else {
+          context.principal(
+            KOMGA_KOREADER_AUTHENTICATION,
+            KomgaPrincipal(principal.user, principal.apiKey),
+          )
+        }
+      }
+    }
   }
 }
 
@@ -255,6 +276,8 @@ const val KOMGA_SESSION_COOKIE: String = "KOMGA-SESSION"
 const val KOMGA_SESSION_HEADER: String = "X-Auth-Token"
 const val KOMGA_REMEMBER_ME_AUTHENTICATION: String = "komga-remember-me"
 const val KOMGA_REMEMBER_ME_COOKIE: String = "komga-remember-me"
+const val KOMGA_KOREADER_AUTHENTICATION: String = "komga-koreader"
+const val KOMGA_KOREADER_AUTHENTICATION_HEADER: String = "X-Auth-User"
 const val AUTHENTICATION_SOURCE_API_KEY: String = "ApiKey"
 const val AUTHENTICATION_SOURCE_PASSWORD: String = "Password"
 const val AUTHENTICATION_SOURCE_REMEMBER_ME: String = "RememberMe"

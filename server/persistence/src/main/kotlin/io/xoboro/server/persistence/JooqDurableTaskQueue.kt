@@ -215,6 +215,23 @@ class JooqDurableTaskQueue(
     )
   }
 
+  fun countsByType(): Map<String, Int> =
+    database.dsl
+      .fetch(
+        """
+        SELECT task_type, count(*) AS task_count
+        FROM task
+        GROUP BY task_type
+        ORDER BY task_type
+        """.trimIndent(),
+      )
+      .associate { record ->
+        record.requiredString("task_type") to
+          requireNotNull(record.get("task_count") as? Number) {
+            "Database field 'task_count' must be numeric"
+          }.toInt()
+      }
+
   override fun clearUnclaimed(): Int =
     database.dsl.execute("DELETE FROM task WHERE state <> 'RUNNING'")
 

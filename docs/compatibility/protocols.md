@@ -13,6 +13,11 @@ therefore locks those routes separately from the 165-operation REST baseline.
 | OAuth2 browser flow | 2 | `a837ccf22aecb57137d9bfd23361e1132e3e7044cce000c33b361f02daa2598f` |
 | Total | 66 | |
 
+Seven operations currently have implementations in progress: all four KOReader
+routes, the authenticated SSE stream, and both OAuth2 browser-flow routes. They
+remain partial until differential fixtures certify exact response and failure
+behavior.
+
 The route inventory test treats expanded mapping arrays and the five Kobo
 catch-all HTTP methods as distinct observable operations.
 
