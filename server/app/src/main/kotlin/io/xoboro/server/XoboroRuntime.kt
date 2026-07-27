@@ -4,6 +4,7 @@ import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
@@ -16,6 +17,7 @@ import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
+import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
@@ -52,6 +54,7 @@ class XoboroRuntime private constructor(
   val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
   val userSessionLifecycle: UserSessionLifecycle,
   val rememberMeTokenService: RememberMeTokenService,
+  val clientSettingsLifecycle: ClientSettingsLifecycle,
   val libraryRepository: LibraryRepository,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
@@ -149,6 +152,8 @@ class XoboroRuntime private constructor(
             activities = JooqAuthenticationActivityRepository(database),
             currentTimeMillis = System::currentTimeMillis,
           )
+        val clientSettingsLifecycle =
+          ClientSettingsLifecycle(JooqClientSettingsRepository(database))
         val catalogScanner =
           CatalogScanner(
             inventories = listOf(LocalSourceInventory()),
@@ -229,6 +234,7 @@ class XoboroRuntime private constructor(
           authenticationActivityLifecycle = authenticationActivityLifecycle,
           userSessionLifecycle = userSessionLifecycle,
           rememberMeTokenService = rememberMeTokenService,
+          clientSettingsLifecycle = clientSettingsLifecycle,
           libraryRepository = libraries,
         ).also {
           createdWorkerPool.start()
