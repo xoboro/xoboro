@@ -137,7 +137,7 @@ Status:
 | OpenAPI document | TODO | |
 | OPDS v1 | PARTIAL | All 18 Atom/OpenSearch catalog, browse, acquisition, thumbnail, and page operations use access-filtered catalog data and streamed media with synthetic route coverage; differential XML, caching, and failure fixtures pending |
 | OPDS v2 and authentication document | PARTIAL | All 30 feed, browse, search, artwork, page, profile manifest, authentication-document, and progression operations reuse shared WebPub/progress boundaries with synthetic integration coverage; exact unauthorized document and differential fixtures pending |
-| Kobo Sync and KEPUB | TODO | |
+| Kobo Sync and KEPUB | PARTIAL | All 15 URL-token routes, role enforcement, initialization, device auth, access-filtered metadata/state/shelves, restart-safe incremental SQLite snapshots and continuation cursors, thumbnails, EPUB downloads, bounded external kepubify conversion with revision cache invalidation, and no-proxy catch-all behavior have synthetic integration coverage; Kobo Store proxy merging and differential device fixtures pending |
 | KOReader Sync | PARTIAL | All four routes, `X-Auth-User` API-key authentication, role enforcement, duplicate/missing fingerprint behavior, exact partial-MD5 generation, PDF/DiViNa page progress, both EPUB locator forms, durable Readium conversion, and synthetic integration tests; reference differential fixtures pending |
 | SSE event contracts | PARTIAL | Authenticated Ktor SSE stream, Komga event names and JSON DTOs, bounded subscribers, heartbeat, administrator task status, user isolation, and Library/read-progress publishers; remaining event producers and differential reconnect behavior pending |
 

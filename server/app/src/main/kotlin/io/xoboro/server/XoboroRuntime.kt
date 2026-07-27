@@ -26,6 +26,7 @@ import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataRefreshLifecycle
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.MediaSyncLifecycle
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.application.FontResourceCatalog
@@ -52,6 +53,7 @@ import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
+import io.xoboro.compatibility.komga.api.KepubContentAccess
 import io.xoboro.compatibility.komga.api.KomgaLibrarySseDto
 import io.xoboro.compatibility.komga.api.KomgaReadProgressSeriesSseDto
 import io.xoboro.compatibility.komga.api.KomgaReadProgressSseDto
@@ -80,6 +82,7 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
 import io.xoboro.server.persistence.JooqMediaItemFingerprintIndex
+import io.xoboro.server.persistence.JooqMediaSyncSnapshotRepository
 import io.xoboro.server.persistence.JooqMetadataFacetRepository
 import io.xoboro.server.persistence.JooqPageHashRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
@@ -167,6 +170,7 @@ class XoboroRuntime private constructor(
   val sequentialReadProgressLifecycle: SequentialReadProgressLifecycle,
   val historicalEventRepository: HistoricalEventRepository,
   val syncPointRepository: SyncPointRepository,
+  val mediaSyncLifecycle: MediaSyncLifecycle,
   val readListImportLifecycle: ReadListImportLifecycle,
   val fontResourceCatalog: FontResourceCatalog,
   val serverReleaseCatalog: ServerReleaseCatalog,
@@ -176,6 +180,7 @@ class XoboroRuntime private constructor(
   val pageHashRepository: PageHashRepository,
   val pageHashLifecycle: PageHashLifecycle,
   val bookContentAccess: BookContentAccess,
+  val kepubContentAccess: KepubContentAccess,
   val organizationLifecycle: OrganizationLifecycle,
   val seriesCollectionRepository: SeriesCollectionRepository,
   val readListRepository: ReadListRepository,
@@ -358,6 +363,15 @@ class XoboroRuntime private constructor(
           )
         val historicalEvents = JooqHistoricalEventRepository(database)
         val syncPoints = JooqSyncPointRepository(database)
+        val mediaSyncLifecycle =
+          MediaSyncLifecycle(
+            syncPoints = syncPoints,
+            snapshots = JooqMediaSyncSnapshotRepository(database),
+            catalog = catalogReads,
+            readLists = readLists,
+            syncPointIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val readListImports =
           ReadListImportLifecycle(
             parser = ComicRackReadListParser(),
@@ -568,6 +582,19 @@ class XoboroRuntime private constructor(
             media = media,
             accesses = listOf(localMediaAccess),
           )
+        val kepubContentAccess =
+          ExternalKepubContentAccess(
+            books = bookContentAccess,
+            executablePath = {
+              serverSettingsLifecycle.snapshot().kepubifyPath.effectiveValue
+            },
+            cacheDirectory =
+              config.databasePath
+                .toAbsolutePath()
+                .normalize()
+                .parent
+                .resolve("cache/kepub"),
+          )
         val comicInfoMetadataProvider =
           ComicInfoMetadataProvider(listOf(localMediaAccess))
         val metadataRefreshLifecycle =
@@ -748,6 +775,7 @@ class XoboroRuntime private constructor(
           sequentialReadProgressLifecycle = sequentialReadProgressLifecycle,
           historicalEventRepository = historicalEvents,
           syncPointRepository = syncPoints,
+          mediaSyncLifecycle = mediaSyncLifecycle,
           readListImportLifecycle = readListImports,
           fontResourceCatalog = LocalFontResourceCatalog(config.fontsDirectory),
           serverReleaseCatalog = GithubReleaseCatalog(createdOAuthHttpClient),
@@ -757,6 +785,7 @@ class XoboroRuntime private constructor(
           pageHashRepository = pageHashes,
           pageHashLifecycle = pageHashLifecycle,
           bookContentAccess = bookContentAccess,
+          kepubContentAccess = kepubContentAccess,
           organizationLifecycle = organizationLifecycle,
           seriesCollectionRepository = collections,
           readListRepository = readLists,

@@ -67,13 +67,17 @@ class XoboroDatabaseTest {
             "historical_event",
             "historical_event_property",
             "sync_point",
+            "media_sync_item",
+            "media_sync_read_list",
+            "media_sync_read_list_item",
+            "media_sync_progress",
           ),
         ),
       )
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(20, database.migrationResult.migrationsExecuted)
+      assertEquals(21, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -162,7 +166,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(19, database.migrationResult.migrationsExecuted)
+      assertEquals(20, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl

@@ -17,7 +17,7 @@ class KomgaProtocolContractInventoryTest {
     val all = OPDS_V1 + OPDS_V2 + KOBO + KOREADER + SSE + OAUTH_BROWSER
     assertEquals(70, all.size)
     assertEquals(70, all.toSet().size)
-    assertEquals(55, PARTIALLY_IMPLEMENTED.size)
+    assertEquals(70, PARTIALLY_IMPLEMENTED.size)
     assertTrue(PARTIALLY_IMPLEMENTED.all(all::contains))
     assertTrue(all.none { endpoint -> endpoint.path.any { it in '\uAC00'..'\uD7A3' } })
   }
@@ -129,6 +129,7 @@ class KomgaProtocolContractInventoryTest {
         get("/login/oauth2/code/{registrationId}"),
       )
 
-    val PARTIALLY_IMPLEMENTED = OPDS_V1 + OPDS_V2 + KOREADER + SSE + OAUTH_BROWSER
+    val PARTIALLY_IMPLEMENTED =
+      OPDS_V1 + OPDS_V2 + KOBO + KOREADER + SSE + OAUTH_BROWSER
   }
 }
