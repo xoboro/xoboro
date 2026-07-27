@@ -23,7 +23,7 @@ Status:
 | Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
 | SQLite schema and migrations | PARTIAL | Flyway V1-V6 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
-| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, worker-pool lifecycle, and runtime analysis tests; metrics pending |
+| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
 | Server-Sent Events | TODO | |
 | Backup and restore | TODO | |
@@ -51,7 +51,7 @@ Status:
 |---|---|---|
 | Library CRUD and non-overlapping roots | PARTIAL | Full settings repository, routed source validation, and canonical local/symlink overlap tests; REST pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
-| Startup, periodic, manual, and deep scan | PARTIAL | Lifecycle queue ports, scan triggers, bounded local inventory/reconciliation, deep-analysis scheduling, and active leased worker pool tests; scan task handlers/scheduler pending |
+| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling, bounded local inventory/reconciliation, and real-runtime execution tests; REST trigger and library CRUD wiring pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | TODO | |
