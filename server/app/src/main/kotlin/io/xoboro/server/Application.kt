@@ -18,6 +18,7 @@ import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
 import io.xoboro.compatibility.komga.api.komgaOpdsRoutes
+import io.xoboro.compatibility.komga.api.komgaOpenApiRoutes
 import io.xoboro.compatibility.komga.api.komgaKoboRoutes
 import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
 import io.xoboro.compatibility.komga.api.komgaFileSystemRoutes
@@ -270,6 +271,7 @@ fun Application.xoboroModule(
       get("/health") {
         call.respond(HealthResponse())
       }
+      komgaOpenApiRoutes()
       get("/ready") {
         val ready = readiness()
         call.respond(

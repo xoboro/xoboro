@@ -741,6 +741,29 @@ class CatalogRoutesTest {
         assertEquals(1, updatedSeriesProgress.booksUnreadCount)
         assertEquals(1F, updatedSeriesProgress.lastReadContinuousNumberSort)
 
+        val structuredSeries =
+          client
+            .post("/api/v1/series/list") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+              setBody(
+                Json.parseToJsonElement(
+                  """
+                  {
+                    "condition": {
+                      "allOf": [
+                        {"libraryId": {"operator": "is", "value": "library-1"}},
+                        {"title": {"operator": "contains", "value": "catalog"}},
+                        {"oneShot": {"operator": "isFalse"}}
+                      ]
+                    }
+                  }
+                  """.trimIndent(),
+                ),
+              )
+            }.body<KomgaPageDto<KomgaSeriesDto>>()
+        assertEquals(listOf("series-1"), structuredSeries.content.map(KomgaSeriesDto::id))
+
         assertEquals(
           HttpStatusCode.BadRequest,
           client.post("/api/v1/series/list") {

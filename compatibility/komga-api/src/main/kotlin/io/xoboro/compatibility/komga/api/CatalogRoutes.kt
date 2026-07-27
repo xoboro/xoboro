@@ -67,14 +67,15 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       post("/list") {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
-        if (!call.requireSupportedSearch(search)) return@post
+        val parsed = call.parseSearchCondition(search, CatalogSearchTarget.BOOK) ?: return@post
         call.respond(
           catalog
             .findBooks(
               query =
                 BookCatalogQuery(
                   fullTextSearch = search.string("fullTextSearch"),
-                  deleted = false,
+                  deleted = null,
+                  condition = parsed.condition,
                 ),
               access = principal.user.catalogAccess(),
               page = call.catalogPageRequest(),
@@ -187,14 +188,15 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       post("/list") {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
-        if (!call.requireSupportedSearch(search)) return@post
+        val parsed = call.parseSearchCondition(search, CatalogSearchTarget.SERIES) ?: return@post
         call.respond(
           catalog
             .findSeries(
               query =
                 SeriesCatalogQuery(
                   fullTextSearch = search.string("fullTextSearch"),
-                  deleted = false,
+                  deleted = null,
+                  condition = parsed.condition,
                 ),
               access = principal.user.catalogAccess(),
               page = call.catalogPageRequest(),
@@ -214,13 +216,14 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
       post("/list/alphabetical-groups") {
         val principal = call.catalogPrincipal()
         val search = call.receive<JsonObject>()
-        if (!call.requireSupportedSearch(search)) return@post
+        val parsed = call.parseSearchCondition(search, CatalogSearchTarget.SERIES) ?: return@post
         call.respond(
           catalog
             .countSeriesByFirstCharacter(
               SeriesCatalogQuery(
                 fullTextSearch = search.string("fullTextSearch"),
-                deleted = false,
+                deleted = null,
+                condition = parsed.condition,
               ),
               principal.user.catalogAccess(),
             ).map(CatalogGroupCount::toDto),
@@ -566,17 +569,23 @@ private fun ApplicationCall.queryLibraryIds(): Set<LibraryId> =
 private fun ApplicationCall.queryBoolean(name: String): Boolean? =
   request.queryParameters[name]?.toBooleanStrictOrNull()
 
-private suspend fun ApplicationCall.requireSupportedSearch(search: JsonObject): Boolean {
-  val condition = search["condition"]
-  if (condition != null && condition !is JsonNull) {
+private data class ParsedCatalogSearch(
+  val condition: io.xoboro.core.application.CatalogSearchCondition?,
+)
+
+private suspend fun ApplicationCall.parseSearchCondition(
+  search: JsonObject,
+  target: CatalogSearchTarget,
+): ParsedCatalogSearch? =
+  try {
+    ParsedCatalogSearch(search.parseCatalogSearchCondition(target))
+  } catch (failure: IllegalArgumentException) {
     respond(
       HttpStatusCode.BadRequest,
-      mapOf("error" to "Structured search conditions are not implemented yet"),
+      mapOf("error" to (failure.message ?: "Invalid structured search condition")),
     )
-    return false
+    null
   }
-  return true
-}
 
 private fun JsonObject.string(name: String): String? =
   get(name)?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull

@@ -83,6 +83,7 @@ class JooqBookMetadataRepository(
       transaction.replaceAuthors(metadata)
       transaction.replaceTags(metadata)
       transaction.replaceLinks(metadata)
+      transaction.rebuildBookAndParentSearchDocuments(metadata.bookId)
     }
   }
 

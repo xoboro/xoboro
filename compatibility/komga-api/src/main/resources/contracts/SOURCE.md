@@ -12,5 +12,6 @@ Komga is Copyright (c) 2019 Gauthier Roebroeck and is distributed under the
 MIT License. The preserved license is available at
 `third-party/licenses/KOMGA.txt` in this repository.
 
-The snapshot is test-only compatibility reference material. Update it only
-when the explicitly selected Komga compatibility baseline changes.
+The snapshot is both the checksum-locked compatibility reference and the
+document served by Xoboro at `/v3/api-docs`. Update it only when the explicitly
+selected Komga compatibility baseline changes.
