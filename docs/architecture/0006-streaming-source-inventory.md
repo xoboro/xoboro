@@ -31,5 +31,5 @@ visitor. It does not build Komga's scan-wide series/book/sidecar maps.
 Discovery memory is bounded by traversal state and downstream callback behavior rather
 than total library size. Reconciliation can batch database writes and schedule expensive
 work independently. Ordering is source-defined and must not be used as catalog ordering.
-Exact reconciliation, move detection, media filtering, and remote pagination remain
-follow-up capabilities.
+Exact reconciliation, move detection, and media filtering are specified by ADR 0008.
+Remote pagination remains a source-adapter capability.

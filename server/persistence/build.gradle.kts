@@ -21,6 +21,7 @@ dependencies {
   implementation(libs.sqlite.jdbc)
 
   testImplementation(kotlin("test-junit5"))
+  testImplementation(project(":server:sources:local"))
 }
 
 tasks.test {

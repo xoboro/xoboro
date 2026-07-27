@@ -89,14 +89,40 @@ class JooqDurableTaskQueueTest {
   @Test
   fun `reclaims an expired lease and dead-letters an exhausted task`() {
     withQueue("lease-recovery") { queue, _ ->
-      queue.enqueue(taskFixture(maxAttempts = 2), nowMillis = 1L)
+      val baseTime = 1_700_000_000_000L
+      queue.enqueue(
+        taskFixture(maxAttempts = 2, availableAtMillis = baseTime),
+        nowMillis = baseTime,
+      )
 
-      val first = queue.claim("worker-1", "lease-1", nowMillis = 10L, leaseDuration = 10L)
+      val first =
+        queue.claim(
+          "worker-1",
+          "lease-1",
+          nowMillis = baseTime,
+          leaseDuration = 10_000L,
+        )
       assertEquals(1, first?.attempt)
-      val second = queue.claim("worker-2", "lease-2", nowMillis = 20L, leaseDuration = 10L)
+      assertEquals(baseTime, first?.task?.availableAtMillis)
+      assertEquals(baseTime + 10_000L, first?.leaseExpiresAtMillis)
+      val second =
+        queue.claim(
+          "worker-2",
+          "lease-2",
+          nowMillis = baseTime + 10_000L,
+          leaseDuration = 10_000L,
+        )
       assertEquals(2, second?.attempt)
       assertEquals("worker-2", second?.leaseOwner)
-      assertNull(queue.claim("worker-3", "lease-3", nowMillis = 30L, leaseDuration = 10L))
+      assertEquals(baseTime + 20_000L, second?.leaseExpiresAtMillis)
+      assertNull(
+        queue.claim(
+          "worker-3",
+          "lease-3",
+          nowMillis = baseTime + 20_000L,
+          leaseDuration = 10_000L,
+        ),
+      )
       assertEquals(TaskCounts(pending = 0, running = 0, dead = 1), queue.counts())
     }
   }
@@ -220,6 +246,7 @@ class JooqDurableTaskQueueTest {
     priority: Int = TaskPriority.DEFAULT,
     groupId: String? = null,
     maxAttempts: Int = 3,
+    availableAtMillis: Long = 1L,
   ): DurableTask =
     DurableTask(
       id = id,
@@ -227,7 +254,7 @@ class JooqDurableTaskQueueTest {
       payloadJson = payload,
       priority = priority,
       groupId = groupId,
-      availableAtMillis = 1L,
+      availableAtMillis = availableAtMillis,
       maxAttempts = maxAttempts,
     )
 }

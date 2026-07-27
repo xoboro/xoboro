@@ -68,7 +68,8 @@ class JooqSeriesRepository(
   }
 
   override fun count(): Long =
-    database.dsl.fetchOne("SELECT count(*) FROM series")?.get(0, Long::class.java) ?: 0L
+    database.dsl.fetchOne("SELECT count(*) FROM series")?.get(0)?.let { it as Number }?.toLong()
+      ?: 0L
 
   private fun DSLContext.insertSeries(series: Series) {
     execute(
@@ -121,12 +122,12 @@ class JooqSeriesRepository(
       name = requiredString("name"),
       relativePath = requiredString("relative_uri"),
       sourceItemId = requiredString("source_item_id"),
-      fileModifiedAtMillis = requiredLong("file_modified_ms"),
+      fileModifiedAtMillis = requiredLongText("file_modified_ms_64"),
       bookCount = requiredInt("book_count"),
-      deletedAtMillis = get("deleted_at_ms", Long::class.java),
+      deletedAtMillis = nullableLongText("deleted_at_ms_64"),
       oneshot = requiredBoolean("oneshot"),
-      createdAtMillis = requiredLong("created_at_ms"),
-      updatedAtMillis = requiredLong("updated_at_ms"),
+      createdAtMillis = requiredLongText("created_at_ms_64"),
+      updatedAtMillis = requiredLongText("updated_at_ms_64"),
     )
 
   private fun Record.requiredString(field: String): String =
@@ -135,8 +136,12 @@ class JooqSeriesRepository(
   private fun Record.requiredInt(field: String): Int =
     requireNotNull(get(field, Int::class.java)) { "Database field '$field' must not be null" }
 
-  private fun Record.requiredLong(field: String): Long =
-    requireNotNull(get(field, Long::class.java)) { "Database field '$field' must not be null" }
+  private fun Record.requiredLongText(field: String): Long =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+      .toLong()
+
+  private fun Record.nullableLongText(field: String): Long? =
+    get(field, String::class.java)?.toLong()
 
   private fun Record.requiredBoolean(field: String): Boolean =
     when (val value = requiredInt(field)) {
@@ -148,6 +153,14 @@ class JooqSeriesRepository(
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 
   companion object {
-    private const val SELECT_SERIES = "SELECT * FROM series"
+    private const val SELECT_SERIES =
+      """
+      SELECT series.*,
+        CAST(file_modified_ms AS TEXT) AS file_modified_ms_64,
+        CAST(deleted_at_ms AS TEXT) AS deleted_at_ms_64,
+        CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+        CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
+      FROM series
+      """
   }
 }
