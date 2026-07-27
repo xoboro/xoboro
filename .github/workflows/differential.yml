@@ -184,6 +184,67 @@ jobs:
           --candidate http://127.0.0.1:25611 \
           --suite compatibility/komga-differential/suites/komga-1.25.0-media.json"
 
+      - name: Verify authenticated media revalidation
+        env:
+          SYNTHETIC_EMAIL: admin@example.invalid
+          SYNTHETIC_PASSWORD: xoboro-differential-only
+        run: |
+          for endpoint in \
+            pages \
+            pages/1 \
+            "pages/1?convert=jpeg" \
+            pages/1/thumbnail; do
+            for target in \
+              "25610:${KOMGA_REFERENCE_BOOK_ID}" \
+              "25611:${XOBORO_CANDIDATE_BOOK_ID}"; do
+              port="${target%%:*}"
+              book_id="${target#*:}"
+              url="http://127.0.0.1:${port}/api/v1/books/${book_id}/${endpoint}"
+              etag="$(
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --dump-header - --output /dev/null "${url}" |
+                  awk -F': ' 'tolower($1) == "etag" {
+                    sub("\r$", "", $2)
+                    print $2
+                  }'
+              )"
+              test -n "${etag}"
+              http_status="$(
+                curl --silent --output /dev/null --write-out '%{http_code}' \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --header "If-None-Match: ${etag}" "${url}"
+              )"
+              test "${http_status}" = "304"
+            done
+          done
+
+          for endpoint in pages/1 pages/1/thumbnail; do
+            for target in \
+              "25610:${KOMGA_REFERENCE_BOOK_ID}" \
+              "25611:${XOBORO_CANDIDATE_BOOK_ID}"; do
+              port="${target%%:*}"
+              book_id="${target#*:}"
+              url="http://127.0.0.1:${port}/api/v1/books/${book_id}/${endpoint}"
+              modified="$(
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --dump-header - --output /dev/null "${url}" |
+                  awk -F': ' 'tolower($1) == "last-modified" {
+                    sub("\r$", "", $2)
+                    print $2
+                  }'
+              )"
+              test -n "${modified}"
+              http_status="$(
+                curl --silent --output /dev/null --write-out '%{http_code}' \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --header "If-Modified-Since: ${modified}" "${url}"
+              )"
+              test "${http_status}" = "304"
+            done
+          done
+
       - name: Show server logs after failure
         if: failure()
         run: |

@@ -7,7 +7,7 @@
       "pathVariables": ["BOOK_ID"],
       "comparison": {
         "bodyMode": "JSON",
-        "headers": ["Content-Length"]
+        "headers": ["Content-Length", "ETag", "Last-Modified"]
       }
     },
     {
@@ -44,7 +44,8 @@
         "bodyMode": "BINARY",
         "headers": [
           "Content-Disposition",
-          "Content-Length"
+          "Content-Length",
+          "ETag"
         ]
       }
     },
@@ -56,7 +57,8 @@
         "bodyMode": "BINARY",
         "headers": [
           "Content-Disposition",
-          "Content-Length"
+          "Content-Length",
+          "ETag"
         ]
       }
     },
@@ -66,7 +68,7 @@
       "pathVariables": ["BOOK_ID"],
       "comparison": {
         "bodyMode": "BINARY",
-        "headers": ["Content-Length"]
+        "headers": ["Content-Length", "ETag"]
       }
     },
     {

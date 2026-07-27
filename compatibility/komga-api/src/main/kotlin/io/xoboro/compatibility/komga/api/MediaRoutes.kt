@@ -7,6 +7,7 @@ import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.header
 import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
@@ -24,6 +25,9 @@ import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.ByteArrayOutputStream
 
 fun Route.komgaMediaRoutes(
   catalog: CatalogReadRepository,
@@ -40,7 +44,8 @@ fun Route.komgaMediaRoutes(
       get {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        if (catalog.findBookByIdOrNull(bookId, principal.user.mediaAccess()) == null) {
+        val item = catalog.findBookByIdOrNull(bookId, principal.user.mediaAccess())
+        if (item == null) {
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
@@ -57,8 +62,13 @@ fun Route.komgaMediaRoutes(
         if (pages == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
-          call.response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
-          call.respond(pages.map(BookPage::toDto))
+          val body =
+            KOMGA_MEDIA_RESPONSE_JSON
+              .encodeToString(pages.map(BookPage::toDto))
+              .encodeToByteArray()
+              .komgaCachedBody()
+          if (call.respondNotModified(body, lastModifiedMillis = null)) return@get
+          call.respondBytes(body.bytes, ContentType.Application.Json)
         }
       }
       get("/{pageNumber}") {
@@ -140,6 +150,8 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
     )
     return
   }
+  val lastModified = item.media?.updatedAtMillis ?: item.book.updatedAtMillis
+  if (respondNotModifiedByTimestamp(lastModified)) return
   val requestedFormat =
     if (raw || deliveryRequest != null) {
       null
@@ -177,7 +189,8 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   }
   opened.useForResponse {
     val type = runCatching { ContentType.parse(it.mediaType) }.getOrDefault(ContentType.Application.OctetStream)
-    response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
+    val body = it.readCachedBody()
+    if (respondNotModified(body, lastModified)) return@useForResponse
     if (deliveryRequest == null) {
       response.header(
         HttpHeaders.ContentDisposition,
@@ -187,18 +200,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
         ),
       )
     }
-    respondOutputStream(
-      contentType = type,
-      status = HttpStatusCode.OK,
-      contentLength = it.contentLength,
-    ) {
-      val buffer = ByteArray(STREAM_BUFFER_SIZE)
-      while (true) {
-        val read = it.read(buffer)
-        if (read < 0) break
-        if (read > 0) write(buffer, 0, read)
-      }
-    }
+    respondBytes(body.bytes, type, HttpStatusCode.OK)
   }
 }
 
@@ -391,6 +393,22 @@ private suspend inline fun MediaContentStream.useForResponse(
   }
 }
 
+private fun MediaContentStream.readCachedBody(): KomgaCachedBody {
+  val initialCapacity =
+    contentLength
+      ?.coerceIn(0, MAXIMUM_EAGER_ALLOCATION.toLong())
+      ?.toInt()
+      ?: STREAM_BUFFER_SIZE
+  val output = ByteArrayOutputStream(initialCapacity)
+  val buffer = ByteArray(STREAM_BUFFER_SIZE)
+  while (true) {
+    val read = read(buffer)
+    if (read < 0) break
+    if (read > 0) output.write(buffer, 0, read)
+  }
+  return output.toByteArray().komgaCachedBody()
+}
+
 private fun User.mediaAccess(): CatalogAccess =
   CatalogAccess(
     userId = id,
@@ -413,7 +431,8 @@ private fun formatPageSize(bytes: Long): String =
   if (bytes < 1_024) "$bytes B" else "${bytes / 1_024} KiB"
 
 private const val STREAM_BUFFER_SIZE = 8 * 1_024
+private const val MAXIMUM_EAGER_ALLOCATION = 1024 * 1_024
 private const val PAGE_THUMBNAIL_MAXIMUM_DIMENSION = 300
-private const val KOMGA_PRIVATE_REVALIDATE = "max-age=0, must-revalidate, private"
 private const val RFC_5987_SAFE = "!#$&+-.^_`|~"
 private const val HEX = "0123456789ABCDEF"
+private val KOMGA_MEDIA_RESPONSE_JSON = Json { explicitNulls = false }
