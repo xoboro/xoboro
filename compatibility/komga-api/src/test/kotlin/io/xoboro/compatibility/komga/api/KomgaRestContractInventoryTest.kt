@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(59, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(65, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(106, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(100, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -73,7 +73,13 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("POST", "/api/v1/books/list"),
         RestEndpoint("GET", "/api/v1/books/ondeck"),
         RestEndpoint("GET", "/api/v1/books/{bookId}"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/file"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/file/*"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/next"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/pages"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/pages/{pageNumber}"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/pages/{pageNumber}/raw"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/pages/{pageNumber}/thumbnail"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/previous"),
         RestEndpoint("DELETE", "/api/v1/books/{bookId}/read-progress"),
         RestEndpoint("PATCH", "/api/v1/books/{bookId}/read-progress"),

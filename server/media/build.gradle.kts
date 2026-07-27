@@ -13,6 +13,7 @@ kotlin {
 }
 
 dependencies {
+  implementation(project(":core:application"))
   implementation(project(":core:domain"))
   implementation(libs.natural.comparator)
   implementation(libs.tika.core)

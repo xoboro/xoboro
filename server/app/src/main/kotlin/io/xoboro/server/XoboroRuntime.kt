@@ -9,6 +9,7 @@ import io.ktor.serialization.kotlinx.json.json
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
+import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ClientSettingsLifecycle
@@ -32,6 +33,7 @@ import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.MediaItemRepository
 import io.xoboro.server.media.AnalyzeBook
+import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
@@ -108,6 +110,7 @@ class XoboroRuntime private constructor(
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
+  val bookContentAccess: BookContentAccess,
   val readProgressLifecycle: ReadProgressLifecycle,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
@@ -375,6 +378,13 @@ class XoboroRuntime private constructor(
             currentTimeMillis = System::currentTimeMillis,
           )
         val localMediaAccess = LocalSourceMediaAccess()
+        val bookContentAccess =
+          BookContentService(
+            libraries = libraries,
+            books = books,
+            media = media,
+            accesses = listOf(localMediaAccess),
+          )
         val comicInfoMetadataProvider =
           ComicInfoMetadataProvider(listOf(localMediaAccess))
         val metadataRefreshLifecycle =
@@ -484,6 +494,7 @@ class XoboroRuntime private constructor(
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
+          bookContentAccess = bookContentAccess,
           readProgressLifecycle = readProgressLifecycle,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,

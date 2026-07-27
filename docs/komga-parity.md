@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Fifty-nine operations are partially implemented and none are yet
+167 schemas. Sixty-five operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -41,16 +41,16 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, stable error codes, and restart test; delivery pending |
+| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, exact-entry page streaming, original-file streaming, stable error codes, and restart tests; differential behavior pending |
 | CBR, RAR, and RAR5 | TODO | |
 | PDF | TODO | |
 | EPUB 2 and EPUB 3 | TODO | |
 | Content and extension detection | PARTIAL | Tika entry-content detection and corrupt/empty archive tests; outer signatures and non-ZIP formats pending |
 | Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixture; RAR/PDF/EPUB pending |
 | Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
-| Cover and thumbnail generation | TODO | |
-| Page streaming and conversion | TODO | |
-| Book, series, and read-list downloads | TODO | |
+| Cover and thumbnail generation | PARTIAL | On-demand 300px page thumbnails with decoded-pixel safety bounds; durable cover selection and generated thumbnail cache pending |
+| Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, and resource-lifetime tests; PDF negotiation and differential caching semantics pending |
+| Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming, single-byte-range responses, role/access enforcement, and wildcard filename compatibility; series/read-list archives pending |
 | Incorrect extension repair | TODO | |
 | CBR/RAR to CBZ conversion | TODO | |
 
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, and four book/series progress mutations with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces, fifteen catalog reads, on-deck, four book/series progress mutations, six media-delivery operations, and production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
