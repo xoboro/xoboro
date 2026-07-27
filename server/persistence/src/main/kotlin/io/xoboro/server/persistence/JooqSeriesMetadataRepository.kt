@@ -14,31 +14,46 @@ class JooqSeriesMetadataRepository(
   private val database: XoboroDatabase,
 ) : SeriesMetadataRepository {
   override fun findBySeriesIdOrNull(seriesId: SeriesId): SeriesMetadata? {
-    val record =
-      database.dsl
-        .fetchOne(
+    return findAllBySeriesIds(listOf(seriesId)).singleOrNull()
+  }
+
+  override fun findAllBySeriesIds(seriesIds: Collection<SeriesId>): List<SeriesMetadata> {
+    val ids = seriesIds.distinct()
+    if (ids.isEmpty()) return emptyList()
+    return ids.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
+      val records =
+        database.dsl.fetch(
           """
           SELECT series_metadata.*,
             CAST(created_at_ms AS TEXT) AS created_at_ms_64,
             CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
           FROM series_metadata
-          WHERE series_id = ?
+          WHERE series_id IN (${batch.placeholders()})
+          ORDER BY series_id
           """.trimIndent(),
-          seriesId.value,
+          *batch.map { it.value }.toTypedArray(),
         )
-        ?: return null
-    return record.toMetadata(
-      genres = loadValues("series_metadata_genre", "genre", seriesId),
-      tags = loadValues("series_metadata_tag", "tag", seriesId),
-      sharingLabels =
+      val genres = loadValues("series_metadata_genre", "genre", batch)
+      val tags = loadValues("series_metadata_tag", "tag", batch)
+      val sharingLabels =
         loadValues(
           "series_metadata_sharing_label",
           "sharing_label",
-          seriesId,
-        ),
-      links = loadLinks(seriesId),
-      alternateTitles = loadAlternateTitles(seriesId),
-    )
+          batch,
+        )
+      val links = loadLinks(batch)
+      val alternateTitles = loadAlternateTitles(batch)
+      records.map { record ->
+        val id = SeriesId(record.requiredString("series_id"))
+        record.toMetadata(
+          genres = genres[id].orEmpty(),
+          tags = tags[id].orEmpty(),
+          sharingLabels = sharingLabels[id].orEmpty(),
+          links = links[id].orEmpty(),
+          alternateTitles = alternateTitles[id].orEmpty(),
+        )
+      }
+    }
   }
 
   override fun upsert(metadata: SeriesMetadata) {
@@ -137,39 +152,53 @@ class JooqSeriesMetadataRepository(
   private fun loadValues(
     table: String,
     column: String,
-    seriesId: SeriesId,
-  ): Set<String> =
-    database.dsl
-      .fetch(
-        "SELECT $column FROM $table WHERE series_id = ? ORDER BY $column",
-        seriesId.value,
-      ).map { it.requiredString(column) }.toSet()
-
-  private fun loadLinks(seriesId: SeriesId): List<WebLink> =
+    seriesIds: Collection<SeriesId>,
+  ): Map<SeriesId, Set<String>> =
     database.dsl
       .fetch(
         """
-        SELECT label, url
+        SELECT series_id, $column
+        FROM $table
+        WHERE series_id IN (${seriesIds.placeholders()})
+        ORDER BY series_id, $column
+        """.trimIndent(),
+        *seriesIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { SeriesId(it.requiredString("series_id")) },
+        { it.requiredString(column) },
+      ).mapValues { (_, values) -> values.toSet() }
+
+  private fun loadLinks(seriesIds: Collection<SeriesId>): Map<SeriesId, List<WebLink>> =
+    database.dsl
+      .fetch(
+        """
+        SELECT series_id, label, url
         FROM series_metadata_link
-        WHERE series_id = ?
-        ORDER BY ordinal
+        WHERE series_id IN (${seriesIds.placeholders()})
+        ORDER BY series_id, ordinal
         """.trimIndent(),
-        seriesId.value,
+        *seriesIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { SeriesId(it.requiredString("series_id")) },
+        { WebLink(it.requiredString("label"), it.requiredString("url")) },
       )
-      .map { WebLink(it.requiredString("label"), it.requiredString("url")) }
 
-  private fun loadAlternateTitles(seriesId: SeriesId): List<AlternateTitle> =
+  private fun loadAlternateTitles(
+    seriesIds: Collection<SeriesId>,
+  ): Map<SeriesId, List<AlternateTitle>> =
     database.dsl
       .fetch(
         """
-        SELECT label, title
+        SELECT series_id, label, title
         FROM series_metadata_alternate_title
-        WHERE series_id = ?
-        ORDER BY ordinal
+        WHERE series_id IN (${seriesIds.placeholders()})
+        ORDER BY series_id, ordinal
         """.trimIndent(),
-        seriesId.value,
+        *seriesIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { SeriesId(it.requiredString("series_id")) },
+        { AlternateTitle(it.requiredString("label"), it.requiredString("title")) },
       )
-      .map { AlternateTitle(it.requiredString("label"), it.requiredString("title")) }
 
   private fun DSLContext.replaceValues(
     table: String,
@@ -280,4 +309,10 @@ class JooqSeriesMetadataRepository(
     }
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private fun Collection<*>.placeholders(): String = joinToString(",") { "?" }
+
+  private companion object {
+    const val QUERY_BATCH_SIZE = 500
+  }
 }

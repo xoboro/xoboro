@@ -61,6 +61,12 @@ interface ReadProgressRepository {
     userId: UserId,
   ): SeriesReadProgress?
 
+  fun findAllSeriesByIdsAndUserId(
+    seriesIds: Collection<SeriesId>,
+    userId: UserId,
+  ): List<SeriesReadProgress> =
+    seriesIds.distinct().mapNotNull { findSeriesByIdAndUserIdOrNull(it, userId) }
+
   fun upsert(progress: ReadProgress)
 
   fun upsertAll(progresses: Collection<ReadProgress>)

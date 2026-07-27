@@ -266,6 +266,9 @@ interface TimelineMediaItemRepository {
 interface SeriesRepository {
   fun findByIdOrNull(id: SeriesId): Series?
 
+  fun findAllByIds(ids: Collection<SeriesId>): List<Series> =
+    ids.distinct().mapNotNull(::findByIdOrNull)
+
   fun findAllByLibraryId(libraryId: LibraryId): List<Series>
 
   fun findByLibraryIdAndRelativePath(
@@ -288,6 +291,9 @@ interface SeriesRepository {
 
 interface BookRepository {
   fun findByIdOrNull(id: BookId): Book?
+
+  fun findAllByIds(ids: Collection<BookId>): List<Book> =
+    ids.distinct().mapNotNull(::findByIdOrNull)
 
   fun findAllByLibraryId(libraryId: LibraryId): List<Book>
 

@@ -12,24 +12,37 @@ class JooqBookMetadataRepository(
   private val database: XoboroDatabase,
 ) : BookMetadataRepository {
   override fun findByBookIdOrNull(bookId: BookId): BookMetadata? {
-    val record =
-      database.dsl
-        .fetchOne(
+    return findAllByBookIds(listOf(bookId)).singleOrNull()
+  }
+
+  override fun findAllByBookIds(bookIds: Collection<BookId>): List<BookMetadata> {
+    val ids = bookIds.distinct()
+    if (ids.isEmpty()) return emptyList()
+    return ids.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
+      val records =
+        database.dsl.fetch(
           """
           SELECT book_metadata.*,
             CAST(created_at_ms AS TEXT) AS created_at_ms_64,
             CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
           FROM book_metadata
-          WHERE book_id = ?
+          WHERE book_id IN (${batch.placeholders()})
+          ORDER BY book_id
           """.trimIndent(),
-          bookId.value,
+          *batch.map { it.value }.toTypedArray(),
         )
-        ?: return null
-    return record.toMetadata(
-      authors = loadAuthors(bookId),
-      tags = loadTags(bookId),
-      links = loadLinks(bookId),
-    )
+      val authors = loadAuthors(batch)
+      val tags = loadTags(batch)
+      val links = loadLinks(batch)
+      records.map { record ->
+        val id = BookId(record.requiredString("book_id"))
+        record.toMetadata(
+          authors = authors[id].orEmpty(),
+          tags = tags[id].orEmpty(),
+          links = links[id].orEmpty(),
+        )
+      }
+    }
   }
 
   override fun upsert(metadata: BookMetadata) {
@@ -87,43 +100,50 @@ class JooqBookMetadataRepository(
     }
   }
 
-  private fun loadAuthors(bookId: BookId): List<Author> =
+  private fun loadAuthors(bookIds: Collection<BookId>): Map<BookId, List<Author>> =
     database.dsl
       .fetch(
         """
-        SELECT name, role
+        SELECT book_id, name, role
         FROM book_metadata_author
-        WHERE book_id = ?
-        ORDER BY ordinal
+        WHERE book_id IN (${bookIds.placeholders()})
+        ORDER BY book_id, ordinal
         """.trimIndent(),
-        bookId.value,
+        *bookIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { BookId(it.requiredString("book_id")) },
+        { Author(it.requiredString("name"), it.requiredString("role")) },
       )
-      .map { Author(it.requiredString("name"), it.requiredString("role")) }
 
-  private fun loadTags(bookId: BookId): Set<String> =
+  private fun loadTags(bookIds: Collection<BookId>): Map<BookId, Set<String>> =
     database.dsl
       .fetch(
         """
-        SELECT tag
+        SELECT book_id, tag
         FROM book_metadata_tag
-        WHERE book_id = ?
-        ORDER BY tag
+        WHERE book_id IN (${bookIds.placeholders()})
+        ORDER BY book_id, tag
         """.trimIndent(),
-        bookId.value,
-      ).map { it.requiredString("tag") }.toSet()
+        *bookIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { BookId(it.requiredString("book_id")) },
+        { it.requiredString("tag") },
+      ).mapValues { (_, values) -> values.toSet() }
 
-  private fun loadLinks(bookId: BookId): List<WebLink> =
+  private fun loadLinks(bookIds: Collection<BookId>): Map<BookId, List<WebLink>> =
     database.dsl
       .fetch(
         """
-        SELECT label, url
+        SELECT book_id, label, url
         FROM book_metadata_link
-        WHERE book_id = ?
-        ORDER BY ordinal
+        WHERE book_id IN (${bookIds.placeholders()})
+        ORDER BY book_id, ordinal
         """.trimIndent(),
-        bookId.value,
+        *bookIds.map { it.value }.toTypedArray(),
+      ).groupBy(
+        { BookId(it.requiredString("book_id")) },
+        { WebLink(it.requiredString("label"), it.requiredString("url")) },
       )
-      .map { WebLink(it.requiredString("label"), it.requiredString("url")) }
 
   private fun DSLContext.replaceAuthors(metadata: BookMetadata) {
     execute("DELETE FROM book_metadata_author WHERE book_id = ?", metadata.bookId.value)
@@ -215,4 +235,10 @@ class JooqBookMetadataRepository(
     }
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private fun Collection<*>.placeholders(): String = joinToString(",") { "?" }
+
+  private companion object {
+    const val QUERY_BATCH_SIZE = 500
+  }
 }

@@ -140,6 +140,9 @@ data class BookMedia(
 interface BookMediaRepository {
   fun findByBookIdOrNull(bookId: BookId): BookMedia?
 
+  fun findAllByBookIds(bookIds: Collection<BookId>): List<BookMedia> =
+    bookIds.distinct().mapNotNull(::findByBookIdOrNull)
+
   fun upsert(media: BookMedia)
 
   fun deleteByBookId(bookId: BookId)
