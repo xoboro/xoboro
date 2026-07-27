@@ -1142,15 +1142,14 @@ private fun CatalogReadRepository.keepReading(
   request: CatalogPageRequest,
   libraryId: LibraryId? = null,
 ): CatalogPage<CatalogBook> {
-  val all =
-    findBooks(
-      BookCatalogQuery(libraryIds = libraryId?.let(::setOf).orEmpty()),
-      user.catalogAccess(),
-      CatalogPageRequest(size = CatalogPageRequest.MAXIMUM_PAGE_SIZE),
-    ).content
-      .filter { it.readProgress?.completed == false }
-      .sortedByDescending { it.readProgress?.readAtMillis ?: 0 }
-  return all.toPage(request)
+  return findBooks(
+    BookCatalogQuery(
+      libraryIds = libraryId?.let(::setOf).orEmpty(),
+      keepReading = true,
+    ),
+    user.catalogAccess(),
+    request,
+  )
 }
 
 private fun <T> List<T>.toPage(request: CatalogPageRequest): CatalogPage<T> {

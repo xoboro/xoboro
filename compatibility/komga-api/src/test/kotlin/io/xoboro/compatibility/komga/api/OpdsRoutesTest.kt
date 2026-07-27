@@ -208,6 +208,14 @@ class OpdsRoutesTest {
         val saved = client.authenticatedGet("/opds/v2/books/book-1/progression")
         assertEquals(HttpStatusCode.OK, saved.status)
         assertEquals(1, JSON.decodeFromString<R2ProgressionDto>(saved.bodyAsText()).locator.locations?.position)
+
+        val keepReading =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/libraries/keep-reading?size=1&page=0").bodyAsText(),
+          )
+        assertEquals(1, keepReading.metadata.numberOfItems)
+        assertEquals(1, keepReading.metadata.itemsPerPage)
+        assertEquals("Synthetic chapter", keepReading.publications.single().metadata.title)
       }
     }
   }
@@ -266,8 +274,14 @@ class OpdsRoutesTest {
               mediaType = "image/jpeg",
               fileSize = SyntheticContent.BYTES.size.toLong(),
             ),
+            BookPage(
+              number = 2,
+              fileName = "002.jpg",
+              mediaType = "image/jpeg",
+              fileSize = SyntheticContent.BYTES.size.toLong(),
+            ),
           ),
-        pageCount = 1,
+        pageCount = 2,
         createdAtMillis = 1,
       ),
     )
