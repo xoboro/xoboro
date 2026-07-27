@@ -3,6 +3,7 @@ package io.xoboro.server
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
+import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.LibraryRepository
 import io.ktor.http.HttpStatusCode
@@ -40,6 +41,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     readiness = runtime::isReady,
     onStop = runtime::close,
     userLifecycle = runtime.userLifecycle,
+    apiKeyLifecycle = runtime.apiKeyLifecycle,
     libraryRepository = runtime.libraryRepository,
   )
 }
@@ -48,6 +50,7 @@ fun Application.xoboroModule(
   readiness: () -> Boolean = { true },
   onStop: () -> Unit = {},
   userLifecycle: UserLifecycle? = null,
+  apiKeyLifecycle: ApiKeyLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
@@ -62,7 +65,7 @@ fun Application.xoboroModule(
     )
   }
   userLifecycle?.let {
-    installKomgaBasicAuthentication(it)
+    installKomgaBasicAuthentication(it, apiKeyLifecycle)
   }
   install(StatusPages) {
     exception<Throwable> { call, cause ->
@@ -87,7 +90,11 @@ fun Application.xoboroModule(
     }
     userLifecycle?.let {
       komgaClaimRoutes(it)
-      komgaAuthenticatedUserRoutes(it, requireNotNull(libraryRepository))
+      komgaAuthenticatedUserRoutes(
+        users = it,
+        libraries = requireNotNull(libraryRepository),
+        apiKeys = apiKeyLifecycle,
+      )
     }
   }
 }
