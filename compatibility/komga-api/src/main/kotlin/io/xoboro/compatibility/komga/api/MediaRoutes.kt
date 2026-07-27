@@ -1,7 +1,6 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.http.ContentType
-import io.ktor.http.ContentDisposition
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.auth.AuthenticationStrategy
@@ -21,6 +20,7 @@ import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookPage
+import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
 import kotlinx.serialization.Serializable
@@ -57,6 +57,7 @@ fun Route.komgaMediaRoutes(
         if (pages == null) {
           call.respond(HttpStatusCode.NotFound)
         } else {
+          call.response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
           call.respond(pages.map(BookPage::toDto))
         }
       }
@@ -120,7 +121,8 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   deliveryRequest: PageImageRequest? = null,
 ) {
   val bookId = BookId(requireNotNull(parameters["bookId"]))
-  if (catalog.findBookByIdOrNull(bookId, user.mediaAccess()) == null) {
+  val item = catalog.findBookByIdOrNull(bookId, user.mediaAccess())
+  if (item == null) {
     respond(HttpStatusCode.NotFound)
     return
   }
@@ -131,6 +133,13 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   }
   val zeroBased = request.queryParameters["zero_based"]?.toBooleanStrictOrNull() ?: false
   val pageNumber = if (zeroBased && !raw) requested + 1 else requested
+  if (raw && item.media?.profile != MediaProfile.PDF) {
+    respond(
+      HttpStatusCode.BadRequest,
+      mapOf("error" to "Raw pages are only available for PDF media"),
+    )
+    return
+  }
   val requestedFormat =
     if (raw || deliveryRequest != null) {
       null
@@ -168,6 +177,16 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   }
   opened.useForResponse {
     val type = runCatching { ContentType.parse(it.mediaType) }.getOrDefault(ContentType.Application.OctetStream)
+    response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
+    if (deliveryRequest == null) {
+      response.header(
+        HttpHeaders.ContentDisposition,
+        komgaContentDisposition(
+          disposition = "inline",
+          fileName = "${item.book.name}-$pageNumber${it.mediaType.komgaFileExtension(it.fileName)}",
+        ),
+      )
+    }
     respondOutputStream(
       contentType = type,
       status = HttpStatusCode.OK,
@@ -228,12 +247,11 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamBook(
       return@useForResponse
     }
     response.header(HttpHeaders.AcceptRanges, "bytes")
+    response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
     stream.fileName?.let { fileName ->
       response.header(
         HttpHeaders.ContentDisposition,
-        ContentDisposition.Attachment
-          .withParameter(ContentDisposition.Parameters.FileName, fileName)
-          .toString(),
+        komgaContentDisposition("attachment", fileName),
       )
     }
     if (range != null) {
@@ -272,6 +290,60 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamBook(
     }
   }
 }
+
+internal fun komgaContentDisposition(
+  disposition: String,
+  fileName: String,
+): String {
+  require(disposition == "inline" || disposition == "attachment")
+  val encodedWord =
+    fileName.encodeToByteArray().joinToString("") { byte ->
+      when (val value = byte.toInt() and 0xff) {
+        0x20 -> "_"
+        in 0x21..0x7e ->
+          if (
+            value == '='.code ||
+            value == '?'.code ||
+            value == '_'.code ||
+            value == '"'.code ||
+            value == '\\'.code
+          ) {
+            "=${value.toHex()}"
+          } else {
+            value.toChar().toString()
+          }
+        else -> "=${value.toHex()}"
+      }
+    }
+  val encodedParameter =
+    fileName.encodeToByteArray().joinToString("") { byte ->
+      val value = byte.toInt() and 0xff
+      if (
+        value in 'a'.code..'z'.code ||
+        value in 'A'.code..'Z'.code ||
+        value in '0'.code..'9'.code ||
+        value.toChar() in RFC_5987_SAFE
+      ) {
+        value.toChar().toString()
+      } else {
+        "%${value.toHex()}"
+      }
+    }
+  return "$disposition; filename=\"=?UTF-8?Q?$encodedWord?=\"; " +
+    "filename*=UTF-8''$encodedParameter"
+}
+
+private fun String.komgaFileExtension(fileName: String?): String =
+  when (substringBefore(';').lowercase()) {
+    "image/jpeg" -> ".jpg"
+    "image/png" -> ".png"
+    "image/gif" -> ".gif"
+    "image/webp" -> ".webp"
+    "application/pdf" -> ".pdf"
+    else -> fileName?.substringAfterLast('.', "")?.takeIf(String::isNotEmpty)?.let { ".$it" }.orEmpty()
+  }
+
+private fun Int.toHex(): String = HEX[(this ushr 4) and 0xf].toString() + HEX[this and 0xf]
 
 private data class ByteRange(
   val first: Long,
@@ -342,3 +414,6 @@ private fun formatPageSize(bytes: Long): String =
 
 private const val STREAM_BUFFER_SIZE = 8 * 1_024
 private const val PAGE_THUMBNAIL_MAXIMUM_DIMENSION = 300
+private const val KOMGA_PRIVATE_REVALIDATE = "max-age=0, must-revalidate, private"
+private const val RFC_5987_SAFE = "!#$&+-.^_`|~"
+private const val HEX = "0123456789ABCDEF"

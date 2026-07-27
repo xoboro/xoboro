@@ -47,6 +47,7 @@ import io.xoboro.server.security.BCryptPasswordHasher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
@@ -54,6 +55,19 @@ import org.junit.jupiter.api.io.TempDir
 class WebPubRoutesTest {
   @TempDir
   lateinit var tempDirectory: Path
+
+  @Test
+  fun `uses Komga export media types for comic archives`() {
+    assertEquals(
+      "application/vnd.comicbook+zip",
+      "application/zip".toKomgaExportMediaType(),
+    )
+    assertEquals(
+      "application/vnd.comicbook-rar",
+      "application/x-rar-compressed; version=5".toKomgaExportMediaType(),
+    )
+    assertEquals("application/pdf", "application/pdf".toKomgaExportMediaType())
+  }
 
   @Test
   fun `serves epub and pdf WebPub contracts from analyzed media`() {
@@ -107,6 +121,9 @@ class WebPubRoutesTest {
         assertEquals(HttpStatusCode.OK, epubResponse.status)
         assertEquals("application/webpub+json", epubResponse.headers[HttpHeaders.ContentType])
         val epub = JSON.decodeFromString<WPPublicationDto>(epubResponse.bodyAsText())
+        assertTrue(epubResponse.bodyAsText().contains("\"context\":"))
+        assertFalse(epubResponse.bodyAsText().contains("\"@context\":"))
+        assertFalse(epubResponse.bodyAsText().contains("\"author\":[]"))
         assertEquals(
           "https://readium.org/webpub-manifest/profiles/epub",
           epub.metadata.conformsTo,

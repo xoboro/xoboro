@@ -118,6 +118,23 @@ class DifferentialRunnerTest {
   }
 
   @Test
+  fun `can compare status and headers without comparing a body`() {
+    val report =
+      DifferentialRunner(
+        fixtureTransport(
+          jsonSnapshot("""{"reference":true}"""),
+          jsonSnapshot("""{"candidate":true}"""),
+        ),
+      ).run(
+        suite(ComparisonPolicy(bodyMode = BodyMode.NONE)),
+        REFERENCE,
+        CANDIDATE,
+      )
+
+    assertTrue(report.passed)
+  }
+
+  @Test
   fun `passes authorization to each endpoint without storing it in a suite`() {
     val observed = mutableListOf<Pair<String, String?>>()
     val transport =
@@ -144,6 +161,46 @@ class DifferentialRunnerTest {
   }
 
   @Test
+  fun `resolves independent safe path variables for each server`() {
+    val observed = mutableListOf<Pair<String, String>>()
+    val transport =
+      DifferentialHttpTransport { baseUrl, request, _ ->
+        observed += baseUrl to request.path
+        jsonSnapshot("""{"ok":true}""")
+      }
+    val suite =
+      DifferentialSuite(
+        version = "synthetic",
+        cases =
+          listOf(
+            DifferentialCase(
+              name = "dynamic resource",
+              path = "/api/v1/books/{BOOK_ID}/file",
+              pathVariables = setOf("BOOK_ID"),
+            ),
+          ),
+      )
+
+    val report =
+      DifferentialRunner(transport).run(
+        suite,
+        REFERENCE,
+        CANDIDATE,
+        referencePathVariables = mapOf("BOOK_ID" to "reference-book"),
+        candidatePathVariables = mapOf("BOOK_ID" to "candidate-book"),
+      )
+
+    assertTrue(report.passed)
+    assertEquals(
+      listOf(
+        REFERENCE to "/api/v1/books/reference-book/file",
+        CANDIDATE to "/api/v1/books/candidate-book/file",
+      ),
+      observed,
+    )
+  }
+
+  @Test
   fun `rejects unsafe requests and malformed paths`() {
     assertFailsWith<IllegalArgumentException> {
       DifferentialCase(name = "unsafe", path = "https://example.invalid/private")
@@ -157,6 +214,19 @@ class DifferentialRunnerTest {
     }
     assertFailsWith<IllegalArgumentException> {
       ComparisonPolicy(ignoreJsonPaths = setOf("/invalid~2path"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      DifferentialCase(
+        name = "undeclared variable",
+        path = "/api/v1/books/{BOOK_ID}",
+      )
+    }
+    assertFailsWith<IllegalArgumentException> {
+      DifferentialCase(
+        name = "partial segment",
+        path = "/api/v1/books/prefix-{BOOK_ID}",
+        pathVariables = setOf("BOOK_ID"),
+      )
     }
   }
 
