@@ -15,5 +15,6 @@ dependencyResolutionManagement {
 rootProject.name = "xoboro"
 
 include(":core:domain")
+include(":core:application")
 include(":server:app")
 include(":server:persistence")
