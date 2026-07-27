@@ -34,6 +34,8 @@ dependencies {
   implementation(libs.ktor.server.content.negotiation)
   implementation(libs.ktor.server.status.pages)
   implementation(libs.ktor.serialization.kotlinx.json)
+  implementation(libs.ktor.client.cio)
+  implementation(libs.ktor.client.content.negotiation)
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.tsid.creator)
   runtimeOnly(libs.logback.classic)
@@ -41,6 +43,7 @@ dependencies {
   testImplementation(kotlin("test-junit5"))
   testImplementation(libs.ktor.server.test.host)
   testImplementation(libs.ktor.client.content.negotiation)
+  testImplementation(libs.ktor.client.mock)
 }
 
 tasks.test {
