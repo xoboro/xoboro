@@ -69,7 +69,9 @@ class JooqLibraryRepository(
   override fun count(): Long =
     database.dsl
       .fetchOne("SELECT count(*) FROM library")
-      ?.get(0, Long::class.java)
+      ?.get(0)
+      ?.let { it as Number }
+      ?.toLong()
       ?: 0L
 
   private fun List<Record>.toLibraries(): List<Library> {
@@ -250,16 +252,20 @@ class JooqLibraryRepository(
           analyzeDimensions = requiredBoolean("analyze_dimensions"),
           oneshotsDirectory = get("oneshots_directory", String::class.java),
         ),
-      unavailableAtMillis = get("unavailable_at_ms", Long::class.java),
-      createdAtMillis = requiredLong("created_at_ms"),
-      updatedAtMillis = requiredLong("updated_at_ms"),
+      unavailableAtMillis = nullableLongText("unavailable_at_ms_64"),
+      createdAtMillis = requiredLongText("created_at_ms_64"),
+      updatedAtMillis = requiredLongText("updated_at_ms_64"),
     )
 
   private fun Record.requiredString(field: String): String =
     requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
 
-  private fun Record.requiredLong(field: String): Long =
-    requireNotNull(get(field, Long::class.java)) { "Database field '$field' must not be null" }
+  private fun Record.requiredLongText(field: String): Long =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+      .toLong()
+
+  private fun Record.nullableLongText(field: String): Long? =
+    get(field, String::class.java)?.toLong()
 
   private fun Record.requiredBoolean(field: String): Boolean =
     when (val value = requireNotNull(get(field, Int::class.java))) {
@@ -271,6 +277,13 @@ class JooqLibraryRepository(
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 
   companion object {
-    private const val SELECT_LIBRARY = "SELECT * FROM library"
+    private const val SELECT_LIBRARY =
+      """
+      SELECT library.*,
+        CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+        CAST(updated_at_ms AS TEXT) AS updated_at_ms_64,
+        CAST(unavailable_at_ms AS TEXT) AS unavailable_at_ms_64
+      FROM library
+      """
   }
 }

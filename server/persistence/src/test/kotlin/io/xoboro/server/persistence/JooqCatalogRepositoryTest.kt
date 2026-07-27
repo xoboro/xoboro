@@ -79,11 +79,11 @@ class JooqCatalogRepositoryTest {
           name = "Updated series",
           relativePath = "moved",
           sourceItemId = "file:///synthetic/moved",
-          fileModifiedAtMillis = 10L,
+          fileModifiedAtMillis = 1_700_000_010_000L,
           bookCount = 2,
-          deletedAtMillis = 9L,
+          deletedAtMillis = 1_700_000_009_000L,
           oneshot = true,
-          updatedAtMillis = 10L,
+          updatedAtMillis = 1_700_000_010_000L,
         )
       val updatedBook =
         book.copy(
@@ -93,14 +93,14 @@ class JooqCatalogRepositoryTest {
           sourceItemId = "file:///synthetic/moved/book.pdf",
           sourceIdentity = "identity-2",
           mediaKind = MediaKind.PDF,
-          fileModifiedAtMillis = 10L,
-          fileSize = 20L,
+          fileModifiedAtMillis = 1_700_000_010_000L,
+          fileSize = 6_000_000_000L,
           fileHash = "file-hash-2",
           fileHashKoreader = "koreader-hash-2",
           number = 2,
-          deletedAtMillis = 9L,
+          deletedAtMillis = 1_700_000_009_000L,
           oneshot = true,
-          updatedAtMillis = 10L,
+          updatedAtMillis = 1_700_000_010_000L,
         )
 
       seriesRepository.update(updatedSeries)
@@ -122,7 +122,7 @@ class JooqCatalogRepositoryTest {
       assertFailsWith<NoSuchElementException> {
         seriesRepository.updateAll(
           listOf(
-            series.copy(name = "Must roll back", updatedAtMillis = 2L),
+            series.copy(name = "Must roll back", updatedAtMillis = 1_700_000_002_000L),
             seriesFixture(id = "missing-series"),
           ),
         )
@@ -130,7 +130,7 @@ class JooqCatalogRepositoryTest {
       assertFailsWith<NoSuchElementException> {
         bookRepository.updateAll(
           listOf(
-            book.copy(name = "Must roll back", updatedAtMillis = 2L),
+            book.copy(name = "Must roll back", updatedAtMillis = 1_700_000_002_000L),
             bookFixture(id = "missing-book"),
           ),
         )
@@ -201,12 +201,12 @@ class JooqCatalogRepositoryTest {
       name = name,
       relativePath = relativePath,
       sourceItemId = "file:///synthetic/$relativePath",
-      fileModifiedAtMillis = 2L,
+      fileModifiedAtMillis = 1_700_000_000_000L,
       bookCount = 1,
-      deletedAtMillis = 3L,
+      deletedAtMillis = 1_700_000_001_000L,
       oneshot = true,
-      createdAtMillis = 1L,
-      updatedAtMillis = 3L,
+      createdAtMillis = 1_700_000_000_000L,
+      updatedAtMillis = 1_700_000_001_000L,
     )
 
   private fun bookFixture(
@@ -225,15 +225,15 @@ class JooqCatalogRepositoryTest {
       sourceItemId = sourceItemId,
       sourceIdentity = "identity-$id",
       mediaKind = MediaKind.COMIC_ARCHIVE,
-      fileModifiedAtMillis = 2L,
-      fileSize = 10L,
+      fileModifiedAtMillis = 1_700_000_000_000L,
+      fileSize = 5_000_000_000L,
       fileHash = "file-hash",
       fileHashKoreader = "koreader-hash",
       number = number,
-      deletedAtMillis = 3L,
+      deletedAtMillis = 1_700_000_001_000L,
       oneshot = true,
-      createdAtMillis = 1L,
-      updatedAtMillis = 3L,
+      createdAtMillis = 1_700_000_000_000L,
+      updatedAtMillis = 1_700_000_001_000L,
     )
 
   companion object {

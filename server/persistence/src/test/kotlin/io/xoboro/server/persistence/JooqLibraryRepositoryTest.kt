@@ -44,8 +44,8 @@ class JooqLibraryRepositoryTest {
               scanDirectoryExclusions = setOf("ignored-new"),
               scanInterval = ScanInterval.DAILY,
             ),
-          unavailableAtMillis = 300L,
-          updatedAtMillis = 400L,
+          unavailableAtMillis = 1_700_000_003_000L,
+          updatedAtMillis = 1_700_000_004_000L,
         )
 
       repository.update(updated)
@@ -218,8 +218,8 @@ class JooqLibraryRepositoryTest {
           analyzeDimensions = false,
           oneshotsDirectory = "oneshots",
         ),
-      unavailableAtMillis = 200L,
-      createdAtMillis = 100L,
-      updatedAtMillis = 200L,
+      unavailableAtMillis = 1_700_000_002_000L,
+      createdAtMillis = 1_700_000_001_000L,
+      updatedAtMillis = 1_700_000_002_000L,
     )
 }

@@ -2,6 +2,7 @@ package io.xoboro.core.application
 
 data class SourceFile(
   val itemId: String,
+  val parentItemId: String,
   val identity: String?,
   val relativePath: String,
   val name: String,
@@ -11,6 +12,7 @@ data class SourceFile(
 ) {
   init {
     require(itemId.isNotBlank()) { "Source item ID must not be blank" }
+    require(parentItemId.isNotBlank()) { "Source parent item ID must not be blank" }
     require(identity == null || identity.isNotBlank()) {
       "Source identity must be null or non-blank"
     }
