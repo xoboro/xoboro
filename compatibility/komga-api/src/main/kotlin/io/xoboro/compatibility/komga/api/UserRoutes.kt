@@ -1,6 +1,7 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
@@ -13,6 +14,10 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.ApiKeyLifecycle
+import io.xoboro.core.domain.ApiKey
+import io.xoboro.core.domain.ApiKeyCommentAlreadyExistsException
+import io.xoboro.core.domain.ApiKeyId
 import io.xoboro.core.domain.AgeRestriction
 import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.LibraryId
@@ -22,6 +27,7 @@ import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserRole
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -31,8 +37,13 @@ import kotlinx.serialization.json.decodeFromJsonElement
 fun Route.komgaAuthenticatedUserRoutes(
   users: UserLifecycle,
   libraries: LibraryRepository,
+  apiKeys: ApiKeyLifecycle? = null,
 ) {
-  authenticate(KOMGA_BASIC_AUTHENTICATION) {
+  authenticate(
+    KOMGA_BASIC_AUTHENTICATION,
+    KOMGA_API_KEY_AUTHENTICATION,
+    strategy = AuthenticationStrategy.FirstSuccessful,
+  ) {
     route("/api/v2/users") {
       get("/me") {
         call.respond(call.komgaPrincipal().user.toDto())
@@ -46,6 +57,46 @@ fun Route.komgaAuthenticatedUserRoutes(
         }
         users.updatePassword(principal.user.id, request.password)
         call.respond(HttpStatusCode.NoContent)
+      }
+      apiKeys?.let { lifecycle ->
+        get("/me/api-keys") {
+          val principal = call.komgaPrincipal()
+          call.respond(
+            lifecycle
+              .findAll(principal.user.id)
+              .map { it.toDto(REDACTED_API_KEY) },
+          )
+        }
+        post("/me/api-keys") {
+          val principal = call.komgaPrincipal()
+          val request = call.receive<ApiKeyRequestDto>()
+          if (request.comment.isBlank()) {
+            call.respondValidation("comment", "must not be blank")
+            return@post
+          }
+          try {
+            val created = lifecycle.create(principal.user.id, request.comment)
+            if (created == null) {
+              call.respondError(
+                HttpStatusCode.ServiceUnavailable,
+                "Failed to generate API key",
+              )
+            } else {
+              call.respond(created.apiKey.toDto(created.plainTextKey))
+            }
+          } catch (_: ApiKeyCommentAlreadyExistsException) {
+            call.respondBadRequest(DUPLICATE_API_KEY_COMMENT_CODE)
+          }
+        }
+        delete("/me/api-keys/{keyId}") {
+          val principal = call.komgaPrincipal()
+          val keyId = ApiKeyId(requireNotNull(call.parameters["keyId"]))
+          if (!lifecycle.delete(principal.user.id, keyId)) {
+            call.respondNotFound()
+            return@delete
+          }
+          call.respond(HttpStatusCode.NoContent)
+        }
       }
       get {
         val principal = call.komgaPrincipal()
@@ -161,6 +212,21 @@ data class PasswordUpdateDto(
 )
 
 @Serializable
+data class ApiKeyRequestDto(
+  val comment: String,
+)
+
+@Serializable
+data class ApiKeyDto(
+  val id: String,
+  val userId: String,
+  val key: String,
+  val comment: String,
+  val createdDate: String,
+  val lastModifiedDate: String,
+)
+
+@Serializable
 data class AgeRestrictionUpdateDto(
   val age: Int,
   val restriction: AllowExcludeDto,
@@ -191,6 +257,16 @@ private fun UserCreationDto.validationViolations(): List<ViolationDto> =
       add(ViolationDto("ageRestriction.age", "must be greater than or equal to 0"))
     }
   }
+
+private fun ApiKey.toDto(keyValue: String): ApiKeyDto =
+  ApiKeyDto(
+    id = id.value,
+    userId = userId.value,
+    key = keyValue,
+    comment = comment,
+    createdDate = Instant.ofEpochMilli(createdAtMillis).toString(),
+    lastModifiedDate = Instant.ofEpochMilli(updatedAtMillis).toString(),
+  )
 
 private fun UserCreationDto.toContentRestrictions(): ContentRestrictions =
   ContentRestrictions(
@@ -337,3 +413,5 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondError(
 
 private val WIRE_JSON = Json { ignoreUnknownKeys = true }
 private val EMAIL_PATTERN = Regex(".+@.+\\..+")
+private const val REDACTED_API_KEY = "******"
+private const val DUPLICATE_API_KEY_COMMENT_CODE = "ERR_1034"
