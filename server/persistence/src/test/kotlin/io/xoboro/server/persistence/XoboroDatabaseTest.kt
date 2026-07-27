@@ -6,8 +6,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import org.flywaydb.core.Flyway
 import org.jooq.impl.DSL
 import org.junit.jupiter.api.io.TempDir
+import org.sqlite.SQLiteDataSource
 
 class XoboroDatabaseTest {
   @TempDir
@@ -22,11 +24,15 @@ class XoboroDatabaseTest {
           String::class.java,
         )
 
-      assertTrue(tables.containsAll(listOf("flyway_schema_history", "library", "series", "book")))
+      assertTrue(
+        tables.containsAll(
+          listOf("flyway_schema_history", "library", "library_scan_exclusion", "series", "book"),
+        ),
+      )
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(1, database.migrationResult.migrationsExecuted)
+      assertEquals(2, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -46,6 +52,52 @@ class XoboroDatabaseTest {
           ?.get(0, String::class.java),
       )
       assertEquals(0, database.migrationResult.migrationsExecuted)
+    }
+  }
+
+  @Test
+  fun `upgrades a version one catalog without losing existing libraries`() {
+    val path = tempDirectory.resolve("upgrade.sqlite").toAbsolutePath()
+    val legacyDataSource =
+      SQLiteDataSource().apply {
+        url = "jdbc:sqlite:$path"
+      }
+    Flyway.configure()
+      .dataSource(legacyDataSource)
+      .locations("classpath:db/migration")
+      .target("1")
+      .load()
+      .migrate()
+    legacyDataSource.connection.use { connection ->
+      connection.prepareStatement(
+        """
+        INSERT INTO library (id, name, root_uri, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, ?, ?)
+        """.trimIndent(),
+      ).use { statement ->
+        statement.setString(1, "legacy-library")
+        statement.setString(2, "Legacy synthetic library")
+        statement.setString(3, "file:///synthetic/legacy")
+        statement.setLong(4, 1L)
+        statement.setLong(5, 1L)
+        statement.executeUpdate()
+      }
+    }
+
+    XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      assertEquals(1, database.migrationResult.migrationsExecuted)
+      assertEquals(
+        "Legacy synthetic library",
+        database.dsl
+          .fetchOne("SELECT name FROM library WHERE id = ?", "legacy-library")
+          ?.get(0, String::class.java),
+      )
+      assertEquals(
+        "EVERY_6H",
+        database.dsl
+          .fetchOne("SELECT scan_interval FROM library WHERE id = ?", "legacy-library")
+          ?.get(0, String::class.java),
+      )
     }
   }
 

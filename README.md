@@ -43,6 +43,7 @@ core/
   domain/            Platform-neutral domain model
 server/
   app/               Ktor application entry point
+  persistence/       SQLite migrations and jOOQ persistence adapters
 compatibility/       Komga API and protocol adapters
 docs/                Architecture, parity, testing, and design records
 third-party/         Third-party license notices
@@ -86,4 +87,3 @@ directories. See [`docs/testing.md`](docs/testing.md).
 ## License
 
 Xoboro is available under the [MIT License](LICENSE).
-

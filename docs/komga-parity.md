@@ -21,8 +21,8 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | TODO | |
-| SQLite schema and migrations | TODO | |
-| Transactions and restart recovery | TODO | |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V2 clean-install and upgrade tests |
+| Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability tests |
 | Durable prioritized task queue | TODO | |
 | Structured logs, health, readiness, metrics | PARTIAL | `/health` contract test |
 | Server-Sent Events | TODO | |
@@ -49,8 +49,8 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Library CRUD and non-overlapping roots | TODO | |
-| Directory exclusions and media filters | TODO | |
+| Library CRUD and non-overlapping roots | PARTIAL | Full settings repository round-trip; overlap validation pending |
+| Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement and media-setting round-trip tests |
 | Startup, periodic, manual, and deep scan | TODO | |
 | Incremental add/change/move/delete detection | TODO | |
 | Unavailable storage handling | TODO | |
@@ -150,4 +150,3 @@ Status:
 The simple-komga port and new administrator UI do not begin until every backend
 row required for Komga replacement is either `COMPATIBLE` or explicitly
 approved as `INTENTIONAL`.
-
