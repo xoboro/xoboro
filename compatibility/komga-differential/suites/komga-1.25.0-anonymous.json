@@ -35,6 +35,70 @@
       }
     },
     {
+      "name": "configured CORS simple request",
+      "path": "/api/v1/claim",
+      "headers": {
+        "Origin": "https://reader.example.invalid"
+      },
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": [
+          "Access-Control-Allow-Origin",
+          "Access-Control-Expose-Headers",
+          "Access-Control-Allow-Credentials",
+          "Cache-Control",
+          "ETag",
+          "Vary",
+          "X-Content-Type-Options",
+          "X-XSS-Protection",
+          "X-Frame-Options"
+        ]
+      }
+    },
+    {
+      "name": "configured CORS denied origin",
+      "path": "/api/v1/claim",
+      "headers": {
+        "Origin": "https://denied.example.invalid"
+      },
+      "comparison": {
+        "bodyMode": "TEXT",
+        "compareContentType": false,
+        "headers": [
+          "Vary",
+          "X-Content-Type-Options",
+          "X-XSS-Protection",
+          "X-Frame-Options"
+        ]
+      }
+    },
+    {
+      "name": "configured CORS preflight",
+      "method": "OPTIONS",
+      "path": "/api/v1/claim",
+      "headers": {
+        "Origin": "https://reader.example.invalid",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "X-Synthetic, Content-Type"
+      },
+      "comparison": {
+        "bodyMode": "NONE",
+        "compareContentType": false,
+        "headers": [
+          "Access-Control-Allow-Origin",
+          "Access-Control-Allow-Methods",
+          "Access-Control-Allow-Headers",
+          "Access-Control-Expose-Headers",
+          "Access-Control-Allow-Credentials",
+          "Access-Control-Max-Age",
+          "Vary",
+          "X-Content-Type-Options",
+          "X-XSS-Protection",
+          "X-Frame-Options"
+        ]
+      }
+    },
+    {
       "name": "OpenAPI contract",
       "path": "/v3/api-docs",
       "comparison": {
