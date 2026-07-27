@@ -4,6 +4,7 @@ import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.domain.LibraryRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -39,6 +40,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     readiness = runtime::isReady,
     onStop = runtime::close,
     userLifecycle = runtime.userLifecycle,
+    libraryRepository = runtime.libraryRepository,
   )
 }
 
@@ -46,6 +48,7 @@ fun Application.xoboroModule(
   readiness: () -> Boolean = { true },
   onStop: () -> Unit = {},
   userLifecycle: UserLifecycle? = null,
+  libraryRepository: LibraryRepository? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
     onStop()
@@ -84,7 +87,7 @@ fun Application.xoboroModule(
     }
     userLifecycle?.let {
       komgaClaimRoutes(it)
-      komgaAuthenticatedUserRoutes()
+      komgaAuthenticatedUserRoutes(it, requireNotNull(libraryRepository))
     }
   }
 }
