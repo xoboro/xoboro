@@ -10,9 +10,11 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. All 165 operations are partially implemented and none are yet
-certified by differential tests. Protocol and non-REST inventories are tracked
-separately in [`docs/compatibility`](compatibility/README.md).
+167 schemas. All 165 operations are partially implemented. A digest-pinned live
+Komga harness currently certifies the anonymous claim-status and OAuth-provider
+operations plus the OpenAPI document after normalizing only its runtime server
+URL. Protocol and non-REST inventories are tracked separately in
+[`docs/compatibility`](compatibility/README.md).
 
 The non-OpenAPI inventory contains 70 operations, including the two OAuth2
 browser-flow routes.
@@ -105,7 +107,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Initial administrator claim | PARTIAL | Anonymous GET status and header-based POST claim contracts, atomic single-winner persistence, all-role DTO, TSID identity, BCrypt hashing, null omission, validation, and real-runtime restart tests; automated initial-user configuration pending |
+| Initial administrator claim | PARTIAL | Anonymous GET status is live-differential-certified against Komga 1.25.0; header-based POST claim contracts, atomic single-winner persistence, all-role DTO, TSID identity, BCrypt hashing, null omission, validation, and real-runtime restart tests are covered; automated initial-user configuration and authenticated differential claim fixtures pending |
 | Multi-user CRUD and password reset | PARTIAL | Komga v2 current-user, admin list/create/patch/delete, self/admin password change, duplicate/validation/not-found behavior, durable relations, and immediate credential replacement tests; demo-mode and exact global error envelopes pending |
 | Roles and authorization | PARTIAL | Komga role model, durable assignment, implicit USER authority, administrator-only management, self-mutation guards, and 401/403 tests; authorization across remaining APIs pending |
 | Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics, persistence tests, and SQL-level Book/Series catalog enforcement; remaining interfaces pending |
@@ -113,7 +115,7 @@ Status:
 | Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation; Spring-compatible signed remember-me tokens, durable and live-rotatable server key, dynamically configurable cookie duration, password invalidation, restored-session issuance, and logout cleanup tests; OAuth pending |
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
-| OAuth2 providers | PARTIAL | Anonymous provider listing, Spring-compatible registration binding, authorization-code exchange, one-time state plus browser-bound CSRF correlation, verified forwarded-origin callbacks, cached issuer discovery with exact issuer validation, RSA and P-256/P-384/P-521 ID-token verification, JWK algorithm/type/use enforcement, audience/authorized-party/time/nonce validation, verified-email policy, GitHub primary verified-email fallback, account matching/creation, Komga error codes, session issuance, failure redirects, and login activity tests; differential configured-provider tests pending |
+| OAuth2 providers | PARTIAL | Empty anonymous provider listing is live-differential-certified against Komga 1.25.0; Spring-compatible registration binding, authorization-code exchange, one-time state plus browser-bound CSRF correlation, verified forwarded-origin callbacks, cached issuer discovery with exact issuer validation, RSA and P-256/P-384/P-521 ID-token verification, JWK algorithm/type/use enforcement, audience/authorized-party/time/nonce validation, verified-email policy, GitHub primary verified-email fallback, account matching/creation, Komga error codes, session issuance, failure redirects, and login activity tests are covered; configured-provider differential tests pending |
 | Authentication activity | PARTIAL | Durable success/failure ledger, password and API-key source recording, credential-safe failed-key fingerprinting, User-Agent/IP capture, current-user/admin pagination and sorting, API-key-filtered latest lookup, retention cutoff, cascade cleanup, and restart tests; sessions, OAuth, demo mode, proxy IP policy, and scheduled cleanup pending |
 | Per-user client settings | PARTIAL | Global and per-user namespaced string settings, anonymous visibility filtering, administrator authorization, user isolation, transactional upsert, selective deletion, cascade cleanup, restart persistence, validation, and six REST operation tests |
 | Announcements | PARTIAL | Komga JSON Feed retrieval with one-hour expire-after-access cache, single-flight refresh, unknown-field tolerance, administrator authorization, per-user durable read flags, duplicate-safe marking, user cascade cleanup, empty-feed 404 and upstream-error propagation, restart persistence, and two REST operation tests |
@@ -134,7 +136,7 @@ Status:
 |---|---|---|
 | Komga REST API v1/v2 | PARTIAL | All 165 pinned operations have an implementation in progress, including management info, font resources, release discovery, durable poster regeneration, and atomic duplicate-page removal; differential certification and exact schema/error completion pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
-| OpenAPI document | COMPLETE | The unmodified checksum-pinned Komga 1.25.0 OpenAPI 3.1 contract is bundled in the runtime and served anonymously at context-aware `/v3/api-docs`, with source/license provenance and route tests |
+| OpenAPI document | COMPLETE | The unmodified checksum-pinned Komga 1.25.0 OpenAPI 3.1 contract is bundled in the runtime and served anonymously at context-aware `/v3/api-docs`, with source/license provenance, route tests, and live structural differential certification that ignores only the environment-specific `servers` field |
 | OPDS v1 | PARTIAL | All 18 Atom/OpenSearch catalog, browse, acquisition, thumbnail, and page operations use access-filtered catalog data and streamed media with synthetic route coverage; differential XML, caching, and failure fixtures pending |
 | OPDS v2 and authentication document | PARTIAL | All 30 feed, browse, search, artwork, page, profile manifest, authentication-document, and progression operations reuse shared WebPub/progress boundaries with synthetic integration coverage; exact unauthorized document and differential fixtures pending |
 | Kobo Sync and KEPUB | PARTIAL | All 15 URL-token routes, role enforcement, initialization, device auth, access-filtered metadata/state/shelves, restart-safe incremental SQLite snapshots and continuation cursors, thumbnails, EPUB downloads, bounded external kepubify conversion with revision cache invalidation, and no-proxy catch-all behavior have synthetic integration coverage; Kobo Store proxy merging and differential device fixtures pending |

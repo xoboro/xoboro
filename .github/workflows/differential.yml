@@ -1,0 +1,87 @@
+name: Komga differential
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/differential.yml"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle/**"
+      - "gradlew"
+      - "gradle.properties"
+      - "compatibility/komga-api/**"
+      - "compatibility/komga-differential/**"
+      - "server/app/**"
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: komga-differential-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  anonymous:
+    name: Anonymous baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up project tools
+        uses: jdx/mise-action@v4
+        with:
+          cache: true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Start reference Komga
+        run: |
+          docker run --detach --name komga-reference \
+            --publish 127.0.0.1:25610:25600 \
+            gotson/komga@sha256:c4f9885fc077e2e9cd684dc95e8f6cfa5e33b100b46712b2de7f5cc2ff59e6fb
+
+      - name: Start Xoboro candidate
+        run: |
+          XOBORO_PORT=25611 \
+          XOBORO_DATABASE_PATH="${RUNNER_TEMP}/xoboro.sqlite" \
+          ./gradlew :server:app:run >"${RUNNER_TEMP}/xoboro.log" 2>&1 &
+          echo "$!" >"${RUNNER_TEMP}/xoboro.pid"
+
+      - name: Wait for both servers
+        run: |
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:25610/api/v1/claim >/dev/null &&
+              curl --fail --silent http://127.0.0.1:25611/api/v1/claim >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Compare anonymous contracts
+        run: |
+          ./gradlew :compatibility:komga-differential:run --args="\
+          --reference http://127.0.0.1:25610 \
+          --candidate http://127.0.0.1:25611 \
+          --suite compatibility/komga-differential/suites/komga-1.25.0-anonymous.json"
+
+      - name: Show server logs after failure
+        if: failure()
+        run: |
+          docker logs komga-reference || true
+          cat "${RUNNER_TEMP}/xoboro.log" || true
+
+      - name: Stop servers
+        if: always()
+        run: |
+          docker rm --force komga-reference || true
+          if [ -f "${RUNNER_TEMP}/xoboro.pid" ]; then
+            kill "$(cat "${RUNNER_TEMP}/xoboro.pid")" || true
+          fi
