@@ -65,6 +65,31 @@ class ArtworkLifecycle(
     return requireNotNull(artwork.findByIdOrNull(owner, item.id))
   }
 
+  fun replaceGenerated(
+    owner: ArtworkOwner,
+    input: ByteArray,
+  ): Artwork {
+    require(input.isNotEmpty()) { "Generated artwork must not be empty" }
+    require(input.size <= MAXIMUM_UPLOAD_BYTES) { "Generated artwork exceeds the size limit" }
+    val processed = processor.process(input)
+    val currentSelected = artwork.findSelectedOrNull(owner)
+    val now = now()
+    val item =
+      Artwork(
+        id = ArtworkId(idFactory()),
+        owner = owner,
+        type = ArtworkType.GENERATED,
+        selected = currentSelected == null || currentSelected.type == ArtworkType.GENERATED,
+        mediaType = processed.mediaType,
+        fileSize = processed.bytes.size.toLong(),
+        width = processed.width,
+        height = processed.height,
+        createdAtMillis = now,
+      )
+    artwork.replaceGenerated(ArtworkContent(item, processed.bytes))
+    return requireNotNull(artwork.findByIdOrNull(owner, item.id))
+  }
+
   fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,

@@ -21,6 +21,13 @@ interface PageHashRepository {
   ): CatalogPage<PageHashMatch>
 
   fun upsert(known: KnownPageHash)
+
+  fun incrementDeleteCount(
+    hash: String,
+    count: Int,
+  ) {
+    error("Page hash delete-count updates are not supported")
+  }
 }
 
 class PageHashLifecycle(

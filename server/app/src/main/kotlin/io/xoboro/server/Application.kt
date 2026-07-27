@@ -25,6 +25,7 @@ import io.xoboro.compatibility.komga.api.komgaHistoryRoutes
 import io.xoboro.compatibility.komga.api.komgaSyncPointRoutes
 import io.xoboro.compatibility.komga.api.komgaTachiyomiProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
+import io.xoboro.compatibility.komga.api.komgaServerResourceRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -33,6 +34,7 @@ import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CompatibilityMaintenanceRequester
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.BookContentAccess
@@ -41,6 +43,7 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.FontResourceCatalog
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.application.OrganizationLifecycle
@@ -48,6 +51,7 @@ import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
+import io.xoboro.core.application.ServerReleaseCatalog
 import io.xoboro.core.application.TransientBookLifecycle
 import io.xoboro.core.application.SequentialReadProgressLifecycle
 import io.xoboro.core.application.ReadListImportLifecycle
@@ -115,6 +119,9 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     historicalEventRepository = runtime.historicalEventRepository,
     syncPointRepository = runtime.syncPointRepository,
     readListImportLifecycle = runtime.readListImportLifecycle,
+    fontResourceCatalog = runtime.fontResourceCatalog,
+    serverReleaseCatalog = runtime.serverReleaseCatalog,
+    compatibilityMaintenanceRequester = runtime.compatibilityMaintenanceRequester,
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
@@ -153,6 +160,9 @@ fun Application.xoboroModule(
   historicalEventRepository: HistoricalEventRepository? = null,
   syncPointRepository: SyncPointRepository? = null,
   readListImportLifecycle: ReadListImportLifecycle? = null,
+  fontResourceCatalog: FontResourceCatalog? = null,
+  serverReleaseCatalog: ServerReleaseCatalog? = null,
+  compatibilityMaintenanceRequester: CompatibilityMaintenanceRequester? = null,
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
@@ -256,6 +266,20 @@ fun Application.xoboroModule(
       historicalEventRepository?.let(::komgaHistoryRoutes)
       syncPointRepository?.let(::komgaSyncPointRoutes)
       readListImportLifecycle?.let(::komgaComicRackRoutes)
+      if (
+        fontResourceCatalog != null &&
+        serverReleaseCatalog != null &&
+        compatibilityMaintenanceRequester != null &&
+        pageHashRepository != null
+      ) {
+        komgaServerResourceRoutes(
+          fonts = fontResourceCatalog,
+          releases = serverReleaseCatalog,
+          maintenance = compatibilityMaintenanceRequester,
+          pageHashes = pageHashRepository,
+          applicationVersion = APPLICATION_VERSION,
+        )
+      }
       if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
         komgaMetadataRoutes(metadataEditingLifecycle, metadataFacetRepository)
       }
@@ -326,6 +350,8 @@ fun Application.xoboroModule(
     }
   }
 }
+
+private const val APPLICATION_VERSION = "0.1.0-SNAPSHOT"
 
 @Serializable
 data class HealthResponse(

@@ -21,6 +21,7 @@ class ServerConfigTest {
     assertEquals(null, config.configuredPort)
     assertEquals(null, config.configuredContextPath)
     assertEquals(workingDirectory.resolve("config/xoboro.sqlite"), config.databasePath)
+    assertEquals(workingDirectory.resolve("config/fonts"), config.fontsDirectory)
     assertEquals(4, config.workerCount)
   }
 
@@ -40,6 +41,7 @@ class ServerConfigTest {
             "XOBORO_TASK_FAILURE_POLL_MILLIS" to "50",
             "XOBORO_TASK_LEASE_MILLIS" to "1000",
             "XOBORO_SHUTDOWN_TIMEOUT_MILLIS" to "2000",
+            "XOBORO_FONTS_PATH" to "assets/fonts",
           ),
         workingDirectory = workingDirectory,
       )
@@ -53,6 +55,7 @@ class ServerConfigTest {
     assertEquals(50L, config.taskFailurePollMillis)
     assertEquals(1_000L, config.taskLeaseMillis)
     assertEquals(2_000L, config.shutdownTimeoutMillis)
+    assertEquals(workingDirectory.resolve("assets/fonts"), config.fontsDirectory)
   }
 
   @Test
