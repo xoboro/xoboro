@@ -89,6 +89,39 @@ class XoboroRuntimeTest {
     }
   }
 
+  @Test
+  fun `persists claimed users across real runtime restarts`() {
+    val databasePath = tempDirectory.resolve("claimed-runtime.sqlite")
+    val config =
+      ServerConfig(
+        port = 25_600,
+        databasePath = databasePath,
+        workerCount = 1,
+        taskPollMillis = 10,
+        taskFailurePollMillis = 10,
+        taskLeaseMillis = 1_000,
+        shutdownTimeoutMillis = 2_000,
+      )
+
+    XoboroRuntime.open(config).use { runtime ->
+      assertFalse(runtime.userLifecycle.isClaimed())
+      runtime.userLifecycle.claimInitialAdministrator(
+        email = "admin@example.invalid",
+        rawPassword = "synthetic-password",
+      )
+    }
+
+    XoboroRuntime.open(config).use { runtime ->
+      assertTrue(runtime.userLifecycle.isClaimed())
+      assertTrue(
+        runtime.userLifecycle.authenticate(
+          email = "ADMIN@example.invalid",
+          rawPassword = "synthetic-password",
+        ) != null,
+      )
+    }
+  }
+
   private fun awaitBookCount(
     databasePath: Path,
     expected: Long,

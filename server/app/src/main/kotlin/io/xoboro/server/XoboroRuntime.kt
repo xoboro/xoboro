@@ -1,6 +1,8 @@
 package io.xoboro.server
 
+import com.github.f4b6a3.tsid.TsidCreator
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.UserLifecycle
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
@@ -9,7 +11,9 @@ import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
+import io.xoboro.server.security.BCryptPasswordHasher
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
@@ -32,6 +36,7 @@ class XoboroRuntime private constructor(
   private val libraryScanScheduler: LibraryScanScheduler,
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
+  val userLifecycle: UserLifecycle,
 ) : AutoCloseable {
   private val closed = AtomicBoolean(false)
 
@@ -79,6 +84,13 @@ class XoboroRuntime private constructor(
         val books = JooqBookRepository(database)
         val media = JooqBookMediaRepository(database)
         val queue = JooqDurableTaskQueue(database)
+        val userLifecycle =
+          UserLifecycle(
+            users = JooqUserRepository(database),
+            passwordHasher = BCryptPasswordHasher(),
+            userIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val catalogScanner =
           CatalogScanner(
             inventories = listOf(LocalSourceInventory()),
@@ -154,6 +166,7 @@ class XoboroRuntime private constructor(
           libraryScanScheduler = createdLibraryScanScheduler,
           heartbeat = createdHeartbeat,
           workerPool = createdWorkerPool,
+          userLifecycle = userLifecycle,
         ).also {
           createdWorkerPool.start()
           createdLibraryScanScheduler.start()
