@@ -15,6 +15,7 @@ fun Route.komgaSessionRoutes(sessions: UserSessionLifecycle) {
     KOMGA_BASIC_AUTHENTICATION,
     KOMGA_API_KEY_AUTHENTICATION,
     KOMGA_SESSION_AUTHENTICATION,
+    KOMGA_REMEMBER_ME_AUTHENTICATION,
     strategy = AuthenticationStrategy.FirstSuccessful,
   ) {
     get("/api/v1/login/set-cookie") {
@@ -53,6 +54,7 @@ private fun io.ktor.server.application.ApplicationCall.expireSession(
       extensions = mapOf("SameSite" to "Lax"),
     ),
   )
+  expireRememberMeCookie()
   if (request.headers.contains(KOMGA_SESSION_HEADER)) {
     response.headers.append(KOMGA_SESSION_HEADER, "")
   }
