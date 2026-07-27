@@ -12,9 +12,9 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.response.header
-import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
@@ -73,7 +73,7 @@ fun Route.komgaWebPubRoutes(
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        call.respondText(
+        call.respondKomgaCachedJson(
           WEBPUB_JSON.encodeToString(
             R2PositionsDto(
               total = analyzed.positions.size,
@@ -91,10 +91,17 @@ fun Route.komgaWebPubRoutes(
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        if (item.media?.profile != MediaProfile.EPUB) {
+        val analyzed = item.media
+        if (analyzed?.profile != MediaProfile.EPUB) {
           call.respond(HttpStatusCode.BadRequest)
           return@get
         }
+        val lastModified = analyzed.updatedAtMillis
+        call.response.header(
+          "Content-Security-Policy",
+          "script-src 'none'; object-src 'none';",
+        )
+        if (call.respondNotModifiedByTimestamp(lastModified)) return@get
         val resource =
           call.parameters.getAll("resource")?.joinToString("/")?.takeIf(String::isNotBlank)
         if (resource == null) {
@@ -115,32 +122,22 @@ fun Route.komgaWebPubRoutes(
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        call.response.header(
-          "Content-Security-Policy",
-          "script-src 'none'; object-src 'none';",
-        )
-        opened.fileName?.let { fileName ->
-          call.response.header(
-            HttpHeaders.ContentDisposition,
-            ContentDisposition.Inline
-              .withParameter(ContentDisposition.Parameters.FileName, fileName)
-              .toString(),
-          )
-        }
         try {
-          call.respondOutputStream(
-            contentType =
-              runCatching { ContentType.parse(opened.mediaType) }
-                .getOrDefault(ContentType.Application.OctetStream),
-            contentLength = opened.contentLength,
-          ) {
-            val buffer = ByteArray(WEBPUB_STREAM_BUFFER_SIZE)
-            while (true) {
-              val read = opened.read(buffer)
-              if (read < 0) break
-              if (read > 0) write(buffer, 0, read)
-            }
+          val body = opened.readKomgaCachedBody()
+          if (call.respondNotModified(body, lastModified)) return@get
+          opened.fileName?.let { fileName ->
+            call.response.header(
+              HttpHeaders.ContentDisposition,
+              ContentDisposition.Inline
+                .withParameter(ContentDisposition.Parameters.FileName, fileName)
+                .toString(),
+            )
           }
+          call.respondBytes(
+            body.bytes,
+            runCatching { ContentType.parse(opened.mediaType) }
+              .getOrDefault(ContentType.Application.OctetStream),
+          )
         } finally {
           opened.close()
         }
@@ -290,7 +287,7 @@ internal suspend fun ApplicationCall.respondManifest(catalog: CatalogReadReposit
   val contentType =
     if (analyzed.profile == MediaProfile.DIVINA) DIVINA_CONTENT_TYPE
     else WEBPUB_CONTENT_TYPE
-  respondText(WEBPUB_JSON.encodeToString(manifest), contentType)
+  respondKomgaCachedJson(WEBPUB_JSON.encodeToString(manifest), contentType)
 }
 
 internal suspend fun ApplicationCall.respondProfileManifest(
@@ -326,11 +323,20 @@ internal suspend fun ApplicationCall.respondProfileManifest(
       MediaProfile.EPUB -> item.toEpubManifest(apiBaseUrl())
       MediaProfile.PDF -> item.toPdfManifest(apiBaseUrl())
     }
-  respondText(
+  respondKomgaCachedJson(
     WEBPUB_JSON.encodeToString(manifest),
     if (requestedProfile == MediaProfile.DIVINA) DIVINA_CONTENT_TYPE
     else WEBPUB_CONTENT_TYPE,
   )
+}
+
+private suspend fun ApplicationCall.respondKomgaCachedJson(
+  value: String,
+  contentType: ContentType,
+) {
+  val body = value.encodeToByteArray().komgaCachedBody()
+  if (respondNotModified(body, lastModifiedMillis = null)) return
+  respondBytes(body.bytes, contentType)
 }
 
 internal suspend fun ApplicationCall.respondProgression(
@@ -643,4 +649,3 @@ private val PROGRESSION_CONTENT_TYPE =
   ContentType.parse("application/vnd.readium.progression+json")
 private const val DIVINA_MEDIA_TYPE: String = "application/divina+json"
 private const val WEBPUB_MEDIA_TYPE: String = "application/webpub+json"
-private const val WEBPUB_STREAM_BUFFER_SIZE: Int = 64 * 1_024

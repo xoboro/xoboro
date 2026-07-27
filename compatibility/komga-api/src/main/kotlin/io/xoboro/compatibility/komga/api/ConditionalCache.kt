@@ -8,6 +8,8 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.util.date.GMTDate
+import io.xoboro.core.application.MediaContentStream
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 
 internal data class KomgaCachedBody(
@@ -44,6 +46,7 @@ internal suspend fun ApplicationCall.respondNotModifiedByTimestamp(
 internal suspend fun ApplicationCall.respondNotModified(
   body: KomgaCachedBody,
   lastModifiedMillis: Long?,
+  cacheControl: String = KOMGA_PRIVATE_REVALIDATE,
 ): Boolean {
   val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
   val matches =
@@ -54,7 +57,7 @@ internal suspend fun ApplicationCall.respondNotModified(
           .map(String::trim)
           .any { candidate -> candidate.weakEntityTag() == body.entityTag }
     } ?: false
-  appendKomgaCacheHeaders(lastModifiedMillis, body.entityTag)
+  appendKomgaCacheHeaders(lastModifiedMillis, body.entityTag, cacheControl)
   if (!matches) return false
   respond(HttpStatusCode.NotModified)
   return true
@@ -63,8 +66,9 @@ internal suspend fun ApplicationCall.respondNotModified(
 internal fun ApplicationCall.appendKomgaCacheHeaders(
   lastModifiedMillis: Long?,
   entityTag: String? = null,
+  cacheControl: String = KOMGA_PRIVATE_REVALIDATE,
 ) {
-  response.header(HttpHeaders.CacheControl, KOMGA_PRIVATE_REVALIDATE)
+  response.header(HttpHeaders.CacheControl, cacheControl)
   lastModifiedMillis?.let {
     response.header(HttpHeaders.LastModified, GMTDate(it.toHttpSecond()).toHttpDate())
   }
@@ -75,4 +79,22 @@ private fun String.weakEntityTag(): String = removePrefix("W/").trim()
 
 private fun Long.toHttpSecond(): Long = this - Math.floorMod(this, 1_000L)
 
+internal fun MediaContentStream.readKomgaCachedBody(): KomgaCachedBody {
+  val initialCapacity =
+    contentLength
+      ?.coerceIn(0, MAXIMUM_EAGER_ALLOCATION.toLong())
+      ?.toInt()
+      ?: CACHE_STREAM_BUFFER_SIZE
+  val output = ByteArrayOutputStream(initialCapacity)
+  val buffer = ByteArray(CACHE_STREAM_BUFFER_SIZE)
+  while (true) {
+    val read = read(buffer)
+    if (read < 0) break
+    if (read > 0) output.write(buffer, 0, read)
+  }
+  return output.toByteArray().komgaCachedBody()
+}
+
 internal const val KOMGA_PRIVATE_REVALIDATE = "max-age=0, must-revalidate, private"
+private const val CACHE_STREAM_BUFFER_SIZE = 8 * 1_024
+private const val MAXIMUM_EAGER_ALLOCATION = 1024 * 1_024

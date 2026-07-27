@@ -44,5 +44,5 @@ one source read, matching Komga's shallow-filter behavior, but suppresses the
 response transfer.
 
 Generated archives remain excluded from shallow ETags, matching Komga.
-Conditional EPUB resources, manifests, artwork, OPDS media, and PDF-specific
-representations remain separate certification work.
+WebPub and artwork revalidation continues in ADR 0066. OPDS media and
+PDF-specific representations remain separate certification work.

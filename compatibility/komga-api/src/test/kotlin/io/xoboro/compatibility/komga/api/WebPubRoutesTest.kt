@@ -89,6 +89,7 @@ class WebPubRoutesTest {
           progresses = JooqReadProgressRepository(database),
           currentTimeMillis = { 20 },
         )
+      val content = SyntheticContent()
       testApplication {
         application {
           install(ServerContentNegotiation) {
@@ -97,7 +98,7 @@ class WebPubRoutesTest {
           installKomgaBasicAuthentication(users)
           routing {
             komgaClaimRoutes(users)
-            komgaWebPubRoutes(catalog, progress, SyntheticContent())
+            komgaWebPubRoutes(catalog, progress, content)
           }
         }
         val client =
@@ -120,6 +121,14 @@ class WebPubRoutesTest {
           }
         assertEquals(HttpStatusCode.OK, epubResponse.status)
         assertEquals("application/webpub+json", epubResponse.headers[HttpHeaders.ContentType])
+        val manifestEntityTag = requireNotNull(epubResponse.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-epub/manifest") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, manifestEntityTag)
+          }.status,
+        )
         val epub = JSON.decodeFromString<WPPublicationDto>(epubResponse.bodyAsText())
         assertTrue(epubResponse.bodyAsText().contains("\"context\":"))
         assertFalse(epubResponse.bodyAsText().contains("\"@context\":"))
@@ -143,6 +152,14 @@ class WebPubRoutesTest {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
           }
         assertEquals(HttpStatusCode.OK, positionsResponse.status)
+        val positionsEntityTag = requireNotNull(positionsResponse.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-epub/positions") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, positionsEntityTag)
+          }.status,
+        )
         val positions =
           JSON.decodeFromString<R2PositionsDto>(positionsResponse.bodyAsText())
         assertEquals(1, positions.total)
@@ -155,6 +172,25 @@ class WebPubRoutesTest {
         assertEquals(HttpStatusCode.OK, resource.status)
         assertEquals("script-src 'none'; object-src 'none';", resource.headers["Content-Security-Policy"])
         assertEquals("<html>Synthetic resource</html>", resource.bodyAsText())
+        val resourceEntityTag = requireNotNull(resource.headers[HttpHeaders.ETag])
+        val resourceLastModified = requireNotNull(resource.headers[HttpHeaders.LastModified])
+        assertEquals(1, content.openedResources)
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-epub/resource/OEBPS/chapter.xhtml") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfNoneMatch, resourceEntityTag)
+          }.status,
+        )
+        assertEquals(2, content.openedResources)
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/api/v1/books/book-epub/resource/OEBPS/chapter.xhtml") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.IfModifiedSince, resourceLastModified)
+          }.status,
+        )
+        assertEquals(2, content.openedResources)
 
         val pdfResponse =
           client.get("/api/v1/books/book-pdf/manifest") {
@@ -293,6 +329,8 @@ class WebPubRoutesTest {
   }
 
   private class SyntheticContent : BookContentAccess {
+    var openedResources: Int = 0
+
     override fun pages(bookId: BookId): List<BookPage>? = null
 
     override fun openPage(
@@ -308,6 +346,7 @@ class WebPubRoutesTest {
       resource: String,
     ): MediaContentStream? {
       if (bookId != BookId("book-epub") || resource != "OEBPS/chapter.xhtml") return null
+      openedResources += 1
       val bytes = "<html>Synthetic resource</html>".encodeToByteArray()
       return object : MediaContentStream {
         private var cursor = 0

@@ -191,6 +191,8 @@ jobs:
         run: |
           for endpoint in \
             pages \
+            manifest \
+            thumbnail \
             pages/1 \
             "pages/1?convert=jpeg" \
             pages/1/thumbnail; do
