@@ -145,11 +145,11 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Read-only Komga 1.25.0 database importer | TODO | |
-| Users and restrictions migration | TODO | |
-| Metadata and locks migration | TODO | |
-| Progress migration | TODO | |
-| Collections and read-list migration | TODO | |
+| Read-only Komga 1.25.0 database importer | PARTIAL | Exact Flyway schema and integrity validation, SQLite read-only/query-only snapshot, empty-target guard, atomic replacement, source immutability test, and synthetic 1.25 fixture; production snapshot comparison pending |
+| Users and restrictions migration | PARTIAL | Password hashes, roles, library grants, sharing labels, API keys, authentication activity, user client settings, and announcement reads migrate with synthetic restart-safe verification; live authentication comparison pending |
+| Metadata and locks migration | PARTIAL | Series/book fields, locks, relations, media/page/file indexes, embedded artwork, page-hash policy, history, and full-text index rebuild migrate in one transaction; external artwork is intentionally rediscovered and production comparison is pending |
+| Progress migration | PARTIAL | Per-book and per-series progress plus bounded gzip locator conversion migrate with synthetic verification; differential reader and sync-client comparison pending |
+| Collections and read-list migration | PARTIAL | Collection/read-list identity, metadata, ordering, and membership migrate with synthetic verification; production snapshot comparison pending |
 | Docker amd64 and arm64 | TODO | |
 | Compose deployment | TODO | |
 | Reverse-proxy and base-path support | PARTIAL | Restart-applied, database- or environment-configured base path mounts all current routes; forwarded-header trust policy and proxy integration tests pending |

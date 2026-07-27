@@ -129,6 +129,37 @@ mise exec -- ./gradlew :server:app:run \
 The restore command rejects a running Xoboro process, validates the source and
 staged copy, and removes stale SQLite WAL/SHM sidecars before startup.
 
+### Importing a Komga 1.25 database
+
+Stop both servers and create a verified backup before migration. Inspect a
+Komga 1.25 database through a read-only SQLite connection:
+
+```shell
+mise exec -- ./gradlew :server:app:run \
+  --args="import-komga /srv/komga/database.sqlite --dry-run"
+```
+
+Import into an empty Xoboro database, or explicitly replace all previously
+imported state:
+
+```shell
+mise exec -- ./gradlew :server:app:run \
+  --args="import-komga /srv/komga/database.sqlite"
+mise exec -- ./gradlew :server:app:run \
+  --args="import-komga /srv/komga/database.sqlite --replace"
+```
+
+The importer validates the exact Komga 1.25 schema and source integrity, then
+migrates libraries, users and restrictions, catalog and metadata locks, media
+indexes, progress, collections, read lists, embedded artwork, page-hash
+policies, history, API keys, authentication activity, and client settings in
+one Xoboro transaction. The source database is never written.
+
+External artwork sidecars are deliberately rediscovered from media storage.
+Komga server settings and Komga-specific synchronization snapshots are not
+copied; Xoboro server settings retain their deployment defaults and each sync
+adapter establishes new Xoboro snapshots after cutover.
+
 ## Compatibility status
 
 The auditable compatibility ledger is maintained in

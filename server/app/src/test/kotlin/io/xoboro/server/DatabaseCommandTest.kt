@@ -63,6 +63,18 @@ class DatabaseCommandTest {
         serverConfig(tempDirectory.resolve("db.sqlite")),
       )
     }
+    assertFailsWith<IllegalArgumentException> {
+      runDatabaseCommand(
+        arrayOf("backup", "unused", "--replace", "--replace"),
+        serverConfig(tempDirectory.resolve("db.sqlite")),
+      )
+    }
+    assertFailsWith<IllegalArgumentException> {
+      runDatabaseCommand(
+        arrayOf("import-komga", "unused", "--replace", "--dry-run"),
+        serverConfig(tempDirectory.resolve("db.sqlite")),
+      )
+    }
   }
 
   private fun serverConfig(databasePath: Path): ServerConfig =

@@ -74,6 +74,7 @@ import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.KomgaDatabaseImporter
 import io.xoboro.server.persistence.XoboroDatabase
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -116,18 +117,25 @@ internal fun runDatabaseCommand(
   output: (String) -> Unit = ::println,
 ): Boolean {
   if (args.isEmpty()) return false
-  require(args.size == 2 || (args.size == 3 && args[2] == "--replace")) {
-    "Usage: xoboro <backup|restore|verify-backup> <path> [--replace]"
+  require(args.size >= 2) {
+    "Usage: xoboro <backup|restore|verify-backup|import-komga> <path> [--replace] [--dry-run]"
   }
   val path = Path.of(args[1]).toAbsolutePath().normalize()
-  val replace = args.getOrNull(2) == "--replace"
+  val options = args.drop(2).toSet()
+  require(options.size == args.size - 2 && options.all { it in setOf("--replace", "--dry-run") }) {
+    "Unknown or duplicate database command option"
+  }
+  val replace = "--replace" in options
+  val dryRun = "--dry-run" in options
   when (args[0]) {
     "backup" -> {
+      require(!dryRun) { "backup does not accept --dry-run" }
       XoboroDatabase.open(DatabaseConfig(config.databasePath)).use { database ->
         output(database.backups.create(path, replaceExisting = replace).toString())
       }
     }
     "restore" -> {
+      require(!dryRun) { "restore does not accept --dry-run" }
       output(
         DatabaseBackupManager
           .restore(path, config.databasePath, replaceExisting = replace)
@@ -135,9 +143,30 @@ internal fun runDatabaseCommand(
       )
     }
     "verify-backup" -> {
-      require(!replace) { "verify-backup does not accept --replace" }
+      require(!replace && !dryRun) {
+        "verify-backup does not accept --replace or --dry-run"
+      }
       DatabaseBackupManager.verify(path)
       output(path.toString())
+    }
+    "import-komga" -> {
+      require(!(replace && dryRun)) { "--replace and --dry-run cannot be combined" }
+      XoboroDatabase.open(DatabaseConfig(config.databasePath)).use { database ->
+        val importer = KomgaDatabaseImporter(database)
+        val report =
+          if (dryRun) {
+            importer.inspect(path)
+          } else {
+            importer.import(path, replaceExisting = replace)
+          }
+        output(
+          report.render(
+            heading =
+              if (dryRun) "Komga inspection complete; target was not imported" else
+                "Komga import complete",
+          ),
+        )
+      }
     }
     else -> error("Unknown command: ${args[0]}")
   }
