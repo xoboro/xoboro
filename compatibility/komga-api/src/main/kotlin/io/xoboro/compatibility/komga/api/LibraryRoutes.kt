@@ -15,6 +15,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
@@ -36,6 +37,7 @@ import kotlinx.serialization.json.jsonPrimitive
 fun Route.komgaLibraryRoutes(
   libraries: LibraryAdministrationLifecycle,
   scanRequester: LibraryScanRequester,
+  maintenanceRequester: LibraryMaintenanceRequester,
 ) {
   authenticate(
     KOMGA_BASIC_AUTHENTICATION,
@@ -133,6 +135,21 @@ fun Route.komgaLibraryRoutes(
                 false
               }
           scanRequester.request(id, deep)
+          call.respond(HttpStatusCode.Accepted)
+        }
+        post("/analyze") {
+          if (!call.requireLibraryAdministrator()) return@post
+          maintenanceRequester.analyze(call.libraryId())
+          call.respond(HttpStatusCode.Accepted)
+        }
+        post("/empty-trash") {
+          if (!call.requireLibraryAdministrator()) return@post
+          val id = call.libraryId()
+          if (libraries.findByIdOrNull(id) == null) {
+            call.respondLibraryNotFound()
+            return@post
+          }
+          maintenanceRequester.emptyTrash(id)
           call.respond(HttpStatusCode.Accepted)
         }
       }

@@ -15,6 +15,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.OAuth2LoginLifecycle
@@ -68,6 +69,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     announcementLifecycle = runtime.announcementLifecycle,
     serverSettingsLifecycle = runtime.serverSettingsLifecycle,
     libraryAdministrationLifecycle = runtime.libraryAdministrationLifecycle,
+    libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
@@ -87,6 +89,7 @@ fun Application.xoboroModule(
   announcementLifecycle: AnnouncementLifecycle? = null,
   serverSettingsLifecycle: ServerSettingsLifecycle? = null,
   libraryAdministrationLifecycle: LibraryAdministrationLifecycle? = null,
+  libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
@@ -155,6 +158,7 @@ fun Application.xoboroModule(
         komgaLibraryRoutes(
           libraries = libraries,
           scanRequester = requireNotNull(libraryScanRequester),
+          maintenanceRequester = requireNotNull(libraryMaintenanceRequester),
         )
       }
       oauth2LoginLifecycle?.let { oauth2 ->

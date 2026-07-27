@@ -1,11 +1,56 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.BookRepository
+import io.xoboro.core.domain.LibraryId
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+
+class AnalyzeBookTaskEmitter(
+  private val books: BookRepository,
+  private val queue: DurableTaskQueue,
+  private val currentTimeMillis: () -> Long,
+) {
+  fun analyzeLibrary(
+    libraryId: LibraryId,
+    priority: Int = TaskPriority.HIGH,
+  ): Int {
+    val nowMillis = currentTimeMillis()
+    require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
+    return books
+      .findAllByLibraryId(libraryId)
+      .asSequence()
+      .filter { it.deletedAtMillis == null }
+      .count { book ->
+        queue.enqueue(
+          task =
+            DurableTask(
+              id = taskId(book.id),
+              type = AnalyzeBookTaskHandler.TASK_TYPE,
+              payloadJson =
+                buildJsonObject {
+                  put(AnalyzeBookTaskHandler.BOOK_ID_FIELD, book.id.value)
+                }.toString(),
+              priority = priority,
+              groupId = book.seriesId.value,
+              availableAtMillis = nowMillis,
+            ),
+          nowMillis = nowMillis,
+        )
+      }
+  }
+
+  companion object {
+    fun taskId(bookId: BookId): String = "ANALYZE_BOOK_${bookId.value}"
+  }
+}
 
 class AnalyzeBookTaskHandler(
   private val analyzeBook: (BookId) -> Unit,
@@ -28,6 +73,6 @@ class AnalyzeBookTaskHandler(
 
   companion object {
     const val TASK_TYPE: String = "ANALYZE_BOOK"
-    private const val BOOK_ID_FIELD = "bookId"
+    internal const val BOOK_ID_FIELD = "bookId"
   }
 }
