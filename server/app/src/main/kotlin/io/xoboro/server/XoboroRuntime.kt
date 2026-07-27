@@ -11,6 +11,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
@@ -77,6 +78,7 @@ import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
+import io.xoboro.server.tasks.DurableCatalogMaintenanceRequester
 import io.xoboro.server.tasks.DurableTaskWorker
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
@@ -118,6 +120,7 @@ class XoboroRuntime private constructor(
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
+  val catalogMaintenanceRequester: CatalogMaintenanceRequester,
   val metadataEditingLifecycle: MetadataEditingLifecycle,
   val metadataFacetRepository: MetadataFacetRepository,
   val bookContentAccess: BookContentAccess,
@@ -454,6 +457,12 @@ class XoboroRuntime private constructor(
             metadata = refreshMetadataTaskEmitter,
             trash = emptyLibraryTrashTaskEmitter,
           )
+        val catalogMaintenanceRequester =
+          DurableCatalogMaintenanceRequester(
+            analysis = analyzeBookTaskEmitter,
+            metadata = refreshMetadataTaskEmitter,
+            queue = queue,
+          )
         val libraryTrashStore = JooqLibraryTrashStore(database)
         val analyzeBook =
           AnalyzeBook(
@@ -528,6 +537,7 @@ class XoboroRuntime private constructor(
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
+          catalogMaintenanceRequester = catalogMaintenanceRequester,
           metadataEditingLifecycle = metadataEditing,
           metadataFacetRepository = metadataFacets,
           bookContentAccess = bookContentAccess,

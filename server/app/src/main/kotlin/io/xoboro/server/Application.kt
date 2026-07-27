@@ -2,6 +2,7 @@ package io.xoboro.server
 
 import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
+import io.xoboro.compatibility.komga.api.komgaCatalogMaintenanceRoutes
 import io.xoboro.compatibility.komga.api.komgaMediaRoutes
 import io.xoboro.compatibility.komga.api.komgaMetadataRoutes
 import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
@@ -20,6 +21,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
@@ -85,6 +87,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
+    catalogMaintenanceRequester = runtime.catalogMaintenanceRequester,
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
@@ -113,6 +116,7 @@ fun Application.xoboroModule(
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
+  catalogMaintenanceRequester: CatalogMaintenanceRequester? = null,
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
@@ -191,6 +195,7 @@ fun Application.xoboroModule(
         )
       }
       catalogReadRepository?.let(::komgaCatalogRoutes)
+      catalogMaintenanceRequester?.let(::komgaCatalogMaintenanceRoutes)
       if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
         komgaMetadataRoutes(metadataEditingLifecycle, metadataFacetRepository)
       }

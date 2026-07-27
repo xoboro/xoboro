@@ -215,6 +215,9 @@ class JooqDurableTaskQueue(
     )
   }
 
+  override fun clearUnclaimed(): Int =
+    database.dsl.execute("DELETE FROM task WHERE state <> 'RUNNING'")
+
   private fun Record.toClaimedTask(): ClaimedTask =
     ClaimedTask(
       task =
