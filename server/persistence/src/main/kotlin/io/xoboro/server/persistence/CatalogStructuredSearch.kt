@@ -163,11 +163,10 @@ internal class CatalogStructuredSearch(
       CatalogSearchField.AUTHOR ->
         author(
           ownerColumn = "s.id",
-          ownerSelection = "child.series_id",
+          ownerSelection = "author.series_id",
           from =
             """
-            book child
-            JOIN book_metadata_author author ON author.book_id = child.id
+            series_book_metadata_aggregation_author author
             """.trimIndent(),
           predicate = predicate,
         )
@@ -286,15 +285,7 @@ internal class CatalogStructuredSearch(
     predicate: CatalogSearchCondition.Predicate,
   ): CatalogSqlCondition =
     dateValue(
-      column =
-        """
-        (
-          SELECT max(child_metadata.release_date)
-          FROM book child
-          JOIN book_metadata child_metadata ON child_metadata.book_id = child.id
-          WHERE child.series_id = s.id
-        )
-        """.trimIndent(),
+      column = "ba.release_date",
       predicate = predicate,
     )
 
@@ -358,9 +349,8 @@ internal class CatalogStructuredSearch(
           WHERE series_tag.series_id = s.id
           UNION ALL
           SELECT book_tag.tag AS tag_value
-          FROM book child
-          JOIN book_metadata_tag book_tag ON book_tag.book_id = child.id
-          WHERE child.series_id = s.id
+          FROM series_book_metadata_aggregation_tag book_tag
+          WHERE book_tag.series_id = s.id
         ) combined_tag
         WHERE 1 = 1 $valueFilter
       )
