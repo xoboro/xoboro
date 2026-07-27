@@ -1,6 +1,7 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.BookImportCommand
+import io.xoboro.core.application.CatalogImportEvent
 import io.xoboro.core.application.SourceCopyMode
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
@@ -23,6 +24,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -84,6 +86,7 @@ class CatalogFileLifecycleTaskTest {
       val scanEmitter = ScanLibraryTaskEmitter(queue) { 200 }
       val history = JooqHistoricalEventRepository(database)
       var eventSequence = 0
+      val importEvents = mutableListOf<CatalogImportEvent>()
       val lifecycle =
         CatalogSourceFileLifecycle(
           books = JooqBookRepository(database),
@@ -94,6 +97,7 @@ class CatalogFileLifecycleTaskTest {
           history = history,
           historyIdFactory = { "event-${++eventSequence}" },
           currentTimeMillis = { 300 + eventSequence.toLong() },
+          importEventPublisher = importEvents::add,
         )
       val importedSource = Files.writeString(tempDirectory.resolve("import.cbz"), "imported")
 
@@ -123,6 +127,27 @@ class CatalogFileLifecycleTaskTest {
       assertEquals(BOOK_ID, events.first().bookId)
       assertEquals(SERIES_ID, events.first().seriesId)
       assertEquals("No", events.last().properties["upgrade"])
+      assertEquals(
+        CatalogImportEvent(
+          bookId = null,
+          sourceFile = importedSource.toString(),
+          success = true,
+        ),
+        importEvents.single(),
+      )
+
+      val missingSource = tempDirectory.resolve("missing.cbz")
+      assertFailsWith<Exception> {
+        lifecycle.importBook(
+          BookImportCommand(
+            sourceFile = missingSource.toString(),
+            seriesId = SERIES_ID,
+          ),
+          SourceCopyMode.COPY,
+        )
+      }
+      assertEquals(false, importEvents.last().success)
+      assertEquals(missingSource.toString(), importEvents.last().sourceFile)
     }
   }
 

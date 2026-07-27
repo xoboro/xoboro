@@ -1,6 +1,8 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.BookImportCommand
+import io.xoboro.core.application.CatalogImportEvent
+import io.xoboro.core.application.CatalogImportEventPublisher
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
@@ -120,6 +122,7 @@ class CatalogSourceFileLifecycle(
   private val history: HistoricalEventRepository? = null,
   private val historyIdFactory: () -> String = { UUID.randomUUID().toString() },
   private val currentTimeMillis: () -> Long = System::currentTimeMillis,
+  private val importEventPublisher: CatalogImportEventPublisher = CatalogImportEventPublisher {},
 ) {
   private val mutationsBySourceId = mutations.associateBy(SourceMutationAccess::sourceId)
 
@@ -174,45 +177,66 @@ class CatalogSourceFileLifecycle(
   }
 
   fun importBook(command: BookImportCommand, copyMode: SourceCopyMode) {
-    val target =
-      series.findByIdOrNull(command.seriesId)
-        ?.takeIf { it.deletedAtMillis == null }
-        ?: return
-    val library = libraries.findById(target.libraryId)
-    val upgrade =
-      command.upgradeBookId?.let { id ->
-        requireNotNull(books.findByIdOrNull(id)) { "Upgrade book does not exist" }
-          .also { require(it.seriesId == target.id) { "Upgrade book must belong to target series" } }
+    try {
+      val target =
+        series.findByIdOrNull(command.seriesId)
+          ?.takeIf { it.deletedAtMillis == null }
+          ?: return
+      val library = libraries.findById(target.libraryId)
+      val upgrade =
+        command.upgradeBookId?.let { id ->
+          requireNotNull(books.findByIdOrNull(id)) { "Upgrade book does not exist" }
+            .also {
+              require(it.seriesId == target.id) { "Upgrade book must belong to target series" }
+            }
+        }
+      val source = mutation(library)
+      val importedItemId =
+        source.import(
+          rootItemId = library.root.itemId,
+          destinationParentItemId = target.sourceItemId,
+          request =
+            SourceImportRequest(
+              sourceFile = command.sourceFile,
+              destinationName =
+                command.destinationName
+                  ?: upgrade?.relativePath?.substringAfterLast('/'),
+              copyMode = copyMode,
+              replaceExisting = upgrade != null,
+            ),
+        )
+      if (upgrade != null && upgrade.sourceItemId != importedItemId) {
+        source.delete(library.root.itemId, upgrade.sourceItemId)
       }
-    val source = mutation(library)
-    val importedItemId =
-      source.import(
-        rootItemId = library.root.itemId,
-        destinationParentItemId = target.sourceItemId,
-        request =
-          SourceImportRequest(
-            sourceFile = command.sourceFile,
-            destinationName =
-              command.destinationName
-                ?: upgrade?.relativePath?.substringAfterLast('/'),
-            copyMode = copyMode,
-            replaceExisting = upgrade != null,
+      record(
+        type = "BookImported",
+        seriesId = target.id,
+        properties =
+          mapOf(
+            "name" to importedItemId,
+            "source" to command.sourceFile,
+            "upgrade" to if (upgrade == null) "No" else "Yes",
           ),
       )
-    if (upgrade != null && upgrade.sourceItemId != importedItemId) {
-      source.delete(library.root.itemId, upgrade.sourceItemId)
-    }
-    record(
-      type = "BookImported",
-      seriesId = target.id,
-      properties =
-        mapOf(
-          "name" to importedItemId,
-          "source" to command.sourceFile,
-          "upgrade" to if (upgrade == null) "No" else "Yes",
+      importEventPublisher.publish(
+        CatalogImportEvent(
+          bookId = upgrade?.id,
+          sourceFile = command.sourceFile,
+          success = true,
         ),
-    )
-    scanEmitter.scanLibrary(library.id, priority = TaskPriority.HIGHEST)
+      )
+      scanEmitter.scanLibrary(library.id, priority = TaskPriority.HIGHEST)
+    } catch (failure: Exception) {
+      importEventPublisher.publish(
+        CatalogImportEvent(
+          bookId = null,
+          sourceFile = command.sourceFile,
+          success = false,
+          message = failure.message?.takeIf(String::isNotBlank),
+        ),
+      )
+      throw failure
+    }
   }
 
   private fun record(

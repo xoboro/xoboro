@@ -99,7 +99,8 @@ class UserLifecycleTest {
   fun `expires sessions only for security changes and explicit password resets`() {
     val repository = InMemoryUserRepository()
     val invalidated = mutableListOf<UserId>()
-    val lifecycle = lifecycle(repository, invalidated::add)
+    val events = mutableListOf<UserEvent>()
+    val lifecycle = lifecycle(repository, invalidated::add, events::add)
     val created = lifecycle.createUser("reader@example.invalid", "reader-password")
 
     lifecycle.updateUser(created)
@@ -114,11 +115,16 @@ class UserLifecycleTest {
     lifecycle.updatePassword(created.id, "admin-reset", expireSessions = true)
     lifecycle.deleteUser(created.id)
     assertEquals(listOf(created.id, created.id, created.id), invalidated)
+    assertEquals(
+      listOf(created.id, created.id, created.id),
+      events.map { (it as UserEvent.SessionsExpired).userId },
+    )
   }
 
   private fun lifecycle(
     repository: InMemoryUserRepository,
     invalidateUserSessions: (UserId) -> Unit = {},
+    eventPublisher: (UserEvent) -> Unit = {},
   ): UserLifecycle =
     UserLifecycle(
       users = repository,
@@ -134,6 +140,7 @@ class UserLifecycleTest {
       userIdFactory = { "user-${repository.count() + 1}" },
       currentTimeMillis = { 100 },
       invalidateUserSessions = invalidateUserSessions,
+      eventPublisher = eventPublisher,
     )
 
   private class InMemoryUserRepository : UserRepository {

@@ -77,12 +77,14 @@ class MetadataEditingLifecycle(
   private val bookMetadata: BookMetadataRepository,
   private val seriesMetadata: SeriesMetadataRepository,
   private val currentTimeMillis: () -> Long,
+  private val eventPublisher: CatalogMutationEventPublisher = CatalogMutationEventPublisher {},
 ) {
   fun patchBook(
     id: BookId,
     patch: ManualBookMetadataPatch,
   ): BookMetadata {
-    require(books.findByIdOrNull(id)?.deletedAtMillis == null) { "Book not found" }
+    val book = requireNotNull(books.findByIdOrNull(id)) { "Book not found" }
+    require(book.deletedAtMillis == null) { "Book not found" }
     val existing = requireNotNull(bookMetadata.findByBookIdOrNull(id)) { "Book metadata not found" }
     val updated =
       existing.copy(
@@ -110,7 +112,16 @@ class MetadataEditingLifecycle(
         updatedAtMillis = now(),
       )
     bookMetadata.upsert(updated)
-    return requireNotNull(bookMetadata.findByBookIdOrNull(id))
+    return requireNotNull(bookMetadata.findByBookIdOrNull(id)).also {
+      eventPublisher.publish(
+        CatalogMutationEvent.Book(
+          kind = CatalogMutationKind.UPDATED,
+          bookId = book.id,
+          seriesId = book.seriesId,
+          libraryId = book.libraryId,
+        ),
+      )
+    }
   }
 
   fun patchBooks(patches: Map<BookId, ManualBookMetadataPatch>): List<BookMetadata> =
@@ -122,7 +133,8 @@ class MetadataEditingLifecycle(
     id: SeriesId,
     patch: ManualSeriesMetadataPatch,
   ): SeriesMetadata {
-    require(series.findByIdOrNull(id)?.deletedAtMillis == null) { "Series not found" }
+    val item = requireNotNull(series.findByIdOrNull(id)) { "Series not found" }
+    require(item.deletedAtMillis == null) { "Series not found" }
     val existing =
       requireNotNull(seriesMetadata.findBySeriesIdOrNull(id)) { "Series metadata not found" }
     val updated =
@@ -160,7 +172,15 @@ class MetadataEditingLifecycle(
         updatedAtMillis = now(),
       )
     seriesMetadata.upsert(updated)
-    return requireNotNull(seriesMetadata.findBySeriesIdOrNull(id))
+    return requireNotNull(seriesMetadata.findBySeriesIdOrNull(id)).also {
+      eventPublisher.publish(
+        CatalogMutationEvent.Series(
+          kind = CatalogMutationKind.UPDATED,
+          seriesId = item.id,
+          libraryId = item.libraryId,
+        ),
+      )
+    }
   }
 
   private fun now(): Long =

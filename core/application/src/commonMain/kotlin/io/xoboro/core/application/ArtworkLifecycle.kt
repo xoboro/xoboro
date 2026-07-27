@@ -24,11 +24,28 @@ fun interface ArtworkProcessor {
   fun process(input: ByteArray): ProcessedArtwork
 }
 
+sealed interface ArtworkEvent {
+  val artwork: Artwork
+
+  data class Added(
+    override val artwork: Artwork,
+  ) : ArtworkEvent
+
+  data class Deleted(
+    override val artwork: Artwork,
+  ) : ArtworkEvent
+}
+
+fun interface ArtworkEventPublisher {
+  fun publish(event: ArtworkEvent)
+}
+
 class ArtworkLifecycle(
   private val artwork: ArtworkRepository,
   private val processor: ArtworkProcessor,
   private val idFactory: () -> String,
   private val currentTimeMillis: () -> Long,
+  private val eventPublisher: ArtworkEventPublisher = ArtworkEventPublisher {},
 ) {
   fun findAll(owner: ArtworkOwner): List<Artwork> = artwork.findAll(owner)
 
@@ -69,6 +86,7 @@ class ArtworkLifecycle(
       )
     artwork.insert(ArtworkContent(item, processed.bytes))
     return requireNotNull(artwork.findByIdOrNull(owner, item.id))
+      .also { eventPublisher.publish(ArtworkEvent.Added(it)) }
   }
 
   fun replaceGenerated(
@@ -79,6 +97,7 @@ class ArtworkLifecycle(
     require(input.size <= MAXIMUM_UPLOAD_BYTES) { "Generated artwork exceeds the size limit" }
     val processed = processor.process(input)
     val currentSelected = artwork.findSelectedOrNull(owner)
+    val replaced = artwork.findAll(owner).filter { it.type == ArtworkType.GENERATED }
     val now = now()
     val item =
       Artwork(
@@ -93,7 +112,9 @@ class ArtworkLifecycle(
         createdAtMillis = now,
       )
     artwork.replaceGenerated(ArtworkContent(item, processed.bytes))
+    replaced.forEach { eventPublisher.publish(ArtworkEvent.Deleted(it)) }
     return requireNotNull(artwork.findByIdOrNull(owner, item.id))
+      .also { eventPublisher.publish(ArtworkEvent.Added(it)) }
   }
 
   fun replaceSidecars(
@@ -105,6 +126,7 @@ class ArtworkLifecycle(
       require(input.size <= MAXIMUM_UPLOAD_BYTES) { "Sidecar artwork exceeds the size limit" }
     }
     val selected = artwork.findSelectedOrNull(owner)
+    val replaced = artwork.findAll(owner).filter { it.type == ArtworkType.SIDECAR }
     val selectFirst = selected == null || selected.type != ArtworkType.USER_UPLOADED
     val now = now()
     val processedInputs =
@@ -128,13 +150,25 @@ class ArtworkLifecycle(
         ArtworkContent(item, processed.bytes)
       }
     artwork.replaceSidecars(owner, contents)
-    return artwork.findAll(owner).filter { it.type == ArtworkType.SIDECAR }
+    replaced.forEach { eventPublisher.publish(ArtworkEvent.Deleted(it)) }
+    return artwork.findAll(owner)
+      .filter { it.type == ArtworkType.SIDECAR }
+      .also { items ->
+        items.forEach { eventPublisher.publish(ArtworkEvent.Added(it)) }
+      }
   }
 
   fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,
-  ): Boolean = artwork.markSelected(owner, id, now())
+  ): Boolean {
+    val changed = artwork.markSelected(owner, id, now())
+    if (changed) {
+      artwork.findByIdOrNull(owner, id)
+        ?.let { eventPublisher.publish(ArtworkEvent.Added(it)) }
+    }
+    return changed
+  }
 
   fun deleteUploaded(
     owner: ArtworkOwner,
@@ -143,6 +177,9 @@ class ArtworkLifecycle(
     val item = artwork.findByIdOrNull(owner, id) ?: return false
     require(item.type == ArtworkType.USER_UPLOADED) { "Only uploaded artwork can be deleted" }
     return artwork.delete(owner, id)
+      .also { deleted ->
+        if (deleted) eventPublisher.publish(ArtworkEvent.Deleted(item))
+      }
   }
 
   private fun now(): Long =

@@ -23,6 +23,7 @@ import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.OrganizationLifecycle
+import io.xoboro.core.application.OrganizationEvent
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
@@ -97,6 +98,7 @@ class CatalogRoutesTest {
       val collections = JooqSeriesCollectionRepository(database)
       val readLists = JooqReadListRepository(database)
       var organizationSequence = 0
+      val organizationEvents = mutableListOf<OrganizationEvent>()
       val organizations =
         OrganizationLifecycle(
           collections = collections,
@@ -106,6 +108,7 @@ class CatalogRoutesTest {
           collectionIdFactory = { "collection-${++organizationSequence}" },
           readListIdFactory = { "read-list-${++organizationSequence}" },
           currentTimeMillis = { 30 + organizationSequence.toLong() },
+          eventPublisher = organizationEvents::add,
         )
       val progress =
         ReadProgressLifecycle(
@@ -614,6 +617,17 @@ class CatalogRoutesTest {
           client.delete("/api/v1/collections/${collection.id}") {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
           }.status,
+        )
+        assertEquals(
+          listOf(
+            "CollectionAdded",
+            "CollectionUpdated",
+            "ReadListAdded",
+            "ReadListUpdated",
+            "ReadListDeleted",
+            "CollectionDeleted",
+          ),
+          organizationEvents.map { it::class.simpleName },
         )
 
         val books =
