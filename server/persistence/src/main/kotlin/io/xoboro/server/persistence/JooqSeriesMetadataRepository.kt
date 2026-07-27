@@ -130,6 +130,7 @@ class JooqSeriesMetadataRepository(
       )
       transaction.replaceLinks(metadata)
       transaction.replaceAlternateTitles(metadata)
+      transaction.rebuildSeriesSearchDocument(metadata.seriesId, includeBooks = true)
     }
   }
 

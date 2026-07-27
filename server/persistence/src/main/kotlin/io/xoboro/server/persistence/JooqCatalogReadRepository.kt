@@ -34,7 +34,10 @@ class JooqCatalogReadRepository(
   private val seriesMetadata: SeriesMetadataRepository = JooqSeriesMetadataRepository(database),
   private val media: BookMediaRepository = JooqBookMediaRepository(database),
   private val readProgress: ReadProgressRepository = JooqReadProgressRepository(database),
+  currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) : CatalogReadRepository {
+  private val structuredSearch = CatalogStructuredSearch(currentTimeMillis)
+
   override fun findBooks(
     query: BookCatalogQuery,
     access: CatalogAccess,
@@ -425,16 +428,25 @@ class JooqCatalogReadRepository(
         """.trimIndent()
     }
     query.fullTextSearch?.trim()?.takeIf(String::isNotEmpty)?.let {
-      parts +=
-        """
-        (
-          lower(b.name) LIKE ? ESCAPE '\'
-          OR lower(bm.title) LIKE ? ESCAPE '\'
-          OR lower(s.name) LIKE ? ESCAPE '\'
-          OR lower(sm.title) LIKE ? ESCAPE '\'
-        )
-        """.trimIndent()
-      repeat(4) { _ -> bindings += it.likePattern() }
+      val match = it.toFtsQuery()
+      if (match == null) {
+        parts += "1 = 0"
+      } else {
+        parts +=
+          """
+          b.id IN (
+            SELECT entity_id
+            FROM catalog_search_fts
+            WHERE entity_type = 'BOOK' AND catalog_search_fts MATCH ?
+          )
+          """.trimIndent()
+        bindings += match
+      }
+    }
+    query.condition?.let {
+      val condition = structuredSearch.book(it, access)
+      parts += "(${condition.sql})"
+      bindings.addAll(condition.bindings)
     }
     addContentRestriction(parts, bindings, access.restrictions)
     extraSql?.let {
@@ -461,8 +473,25 @@ class JooqCatalogReadRepository(
       bindings += it.toSqliteInt()
     }
     query.fullTextSearch?.trim()?.takeIf(String::isNotEmpty)?.let {
-      parts += "(lower(s.name) LIKE ? ESCAPE '\\' OR lower(sm.title) LIKE ? ESCAPE '\\')"
-      repeat(2) { _ -> bindings += it.likePattern() }
+      val match = it.toFtsQuery()
+      if (match == null) {
+        parts += "1 = 0"
+      } else {
+        parts +=
+          """
+          s.id IN (
+            SELECT entity_id
+            FROM catalog_search_fts
+            WHERE entity_type = 'SERIES' AND catalog_search_fts MATCH ?
+          )
+          """.trimIndent()
+        bindings += match
+      }
+    }
+    query.condition?.let {
+      val condition = structuredSearch.series(it, access)
+      parts += "(${condition.sql})"
+      bindings.addAll(condition.bindings)
     }
     addAnyValue(parts, bindings, "lower(sm.publisher)", query.publishers)
     addAnyValue(parts, bindings, "lower(sm.language)", query.languages)
@@ -647,13 +676,15 @@ class JooqCatalogReadRepository(
     return "LIMIT ? OFFSET ?"
   }
 
-  private fun String.likePattern(): String =
-    "%" +
-      lowercase()
-        .replace("\\", "\\\\")
-        .replace("%", "\\%")
-        .replace("_", "\\_") +
-      "%"
+  private fun String.toFtsQuery(): String? =
+    SEARCH_TOKEN
+      .findAll(this)
+      .map(MatchResult::value)
+      .filter(String::isNotBlank)
+      .map { token -> "\"${token.replace("\"", "\"\"")}\"*" }
+      .toList()
+      .takeIf(List<String>::isNotEmpty)
+      ?.joinToString(" AND ")
 
   private fun Set<String>.normalized(): Set<String> =
     asSequence().map(String::trim).filter(String::isNotEmpty).map(String::lowercase).toSet()
@@ -668,4 +699,8 @@ class JooqCatalogReadRepository(
     val sql: String,
     val bindings: MutableList<Any?>,
   )
+
+  companion object {
+    private val SEARCH_TOKEN = Regex("[\\p{L}\\p{N}]+")
+  }
 }
