@@ -15,6 +15,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
@@ -112,7 +113,7 @@ class BasicAuthenticationTest {
           installKomgaBasicAuthentication(lifecycle)
           routing {
             komgaClaimRoutes(lifecycle)
-            komgaAuthenticatedUserRoutes()
+            komgaAuthenticatedUserRoutes(lifecycle, JooqLibraryRepository(database))
           }
         }
         assertions()

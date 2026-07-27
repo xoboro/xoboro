@@ -9,6 +9,7 @@ import io.xoboro.core.domain.UserRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -67,6 +68,31 @@ class UserLifecycleTest {
     assertNull(lifecycle.authenticate("", "reader-password"))
     assertNull(lifecycle.authenticate("missing@example.invalid", "reader-password"))
     assertNull(lifecycle.authenticate("reader@example.invalid", "wrong-password"))
+  }
+
+  @Test
+  fun `updates user state password and deletion through the lifecycle`() {
+    val repository = InMemoryUserRepository()
+    val lifecycle = lifecycle(repository)
+    val created = lifecycle.createUser("reader@example.invalid", "reader-password")
+
+    val updated =
+      lifecycle.updateUser(
+        created.copy(
+          roles = setOf(UserRole.KOBO_SYNC),
+          sharesAllLibraries = false,
+        ),
+      )
+    assertEquals(setOf(UserRole.KOBO_SYNC), updated.roles)
+    assertFalse(updated.sharesAllLibraries)
+
+    lifecycle.updatePassword(created.id, "updated-password")
+    assertNull(lifecycle.authenticate(created.email, "reader-password"))
+    assertEquals(created.id, lifecycle.authenticate(created.email, "updated-password")?.id)
+
+    assertTrue(lifecycle.deleteUser(created.id))
+    assertFalse(lifecycle.deleteUser(created.id))
+    assertTrue(lifecycle.findAll().isEmpty())
   }
 
   private fun lifecycle(repository: InMemoryUserRepository): UserLifecycle =
