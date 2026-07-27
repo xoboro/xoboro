@@ -26,6 +26,12 @@ partially imported Xoboro database.
   activity, and client settings.
 - Map archive, EPUB, and PDF books onto the canonical Comic, Novel, and Book
   `MediaItem` subtypes. Komga Book and Series remain compatibility adapters.
+- Convert Komga's zero-based media-page numbers to Xoboro's one-based page
+  contract at the boundary.
+- Stream the source result sets and write bounded JDBC batches. Use larger
+  batches for scalar page and relation rows and small batches for artwork BLOBs
+  so catalog-size imports avoid per-row round trips without retaining the
+  source database in memory.
 - Rebuild Xoboro's full-text catalog index before committing.
 - Never copy deployment-specific server settings or Komga synchronization
   snapshots. External artwork sidecars are rediscovered through normal source

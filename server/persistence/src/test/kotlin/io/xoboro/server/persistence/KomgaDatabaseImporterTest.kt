@@ -37,6 +37,7 @@ class KomgaDatabaseImporterTest {
       assertEquals("collection-1", target.string("SELECT collection_id FROM series_collection_member"))
       assertEquals("read-list-1", target.string("SELECT read_list_id FROM read_list_member"))
       assertEquals(1, target.int("SELECT count(*) FROM artwork_thumbnail"))
+      assertEquals(1, target.int("SELECT number FROM book_page"))
       assertEquals(2, target.int("SELECT count(*) FROM catalog_search_fts"))
       assertEquals(
         "synthetic-password-hash",
@@ -183,7 +184,7 @@ class KomgaDatabaseImporterTest {
       connection.execute(
         """
         INSERT INTO MEDIA_PAGE VALUES (
-          '001.png', 'image/png', 1, 'book-1', 100, 200, 'page-hash', 50
+          '001.png', 'image/png', 0, 'book-1', 100, 200, 'page-hash', 50
         )
         """.trimIndent(),
       )

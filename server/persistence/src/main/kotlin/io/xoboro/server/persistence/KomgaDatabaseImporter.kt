@@ -361,20 +361,16 @@ class KomgaDatabaseImporter(
         updated,
       )
     }
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT b.*, m.MEDIA_TYPE
       FROM BOOK b
       LEFT JOIN MEDIA m ON m.BOOK_ID = b.ID
       ORDER BY b.ID
       """.trimIndent(),
-    ) { row ->
-      val created = row.timestampMillis("CREATED_DATE")
-      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
-      val root = requireNotNull(roots[row.string("LIBRARY_ID")])
-      val sourceItemId = row.string("URL")
-      val mediaKind = mediaKind(sourceItemId, row.nullableString("MEDIA_TYPE"))
-      execute(
+      targetSql =
         """
         INSERT INTO book (
           id, library_id, series_id, relative_uri, source_item_id, source_identity,
@@ -383,6 +379,13 @@ class KomgaDatabaseImporter(
           created_at_ms, updated_at_ms
         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent(),
+    ) { row ->
+      val created = row.timestampMillis("CREATED_DATE")
+      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
+      val root = requireNotNull(roots[row.string("LIBRARY_ID")])
+      val sourceItemId = row.string("URL")
+      val mediaKind = mediaKind(sourceItemId, row.nullableString("MEDIA_TYPE"))
+      arrayOf(
         row.string("ID"),
         row.string("LIBRARY_ID"),
         row.string("SERIES_ID"),
@@ -506,10 +509,10 @@ class KomgaDatabaseImporter(
       )
     }
 
-    source.each("SELECT * FROM BOOK_METADATA ORDER BY BOOK_ID") { row ->
-      val created = row.timestampMillis("CREATED_DATE")
-      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
-      execute(
+    copyBatched(
+      source = source,
+      sourceSql = "SELECT * FROM BOOK_METADATA ORDER BY BOOK_ID",
+      targetSql =
         """
         UPDATE book_metadata SET
           title = ?, summary = ?, number = ?, number_sort = ?, release_date = ?, isbn = ?,
@@ -518,6 +521,10 @@ class KomgaDatabaseImporter(
           links_lock = ?, created_at_ms = ?, updated_at_ms = ?
         WHERE book_id = ?
         """.trimIndent(),
+    ) { row ->
+      val created = row.timestampMillis("CREATED_DATE")
+      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
+      arrayOf(
         row.string("TITLE"),
         row.string("SUMMARY"),
         row.string("NUMBER"),
@@ -538,18 +545,21 @@ class KomgaDatabaseImporter(
         row.string("BOOK_ID"),
       )
     }
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT BOOK_ID, NAME, ROLE,
         row_number() OVER (PARTITION BY BOOK_ID ORDER BY rowid) - 1 AS ORDINAL
       FROM BOOK_METADATA_AUTHOR
       """.trimIndent(),
-    ) { row ->
-      execute(
+      targetSql =
         """
         INSERT INTO book_metadata_author (book_id, ordinal, name, role)
         VALUES (?, ?, ?, ?)
         """.trimIndent(),
+    ) { row ->
+      arrayOf(
         row.string("BOOK_ID"),
         row.int("ORDINAL"),
         row.string("NAME"),
@@ -563,18 +573,21 @@ class KomgaDatabaseImporter(
       "BOOK_ID",
       "TAG",
     )
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT BOOK_ID, LABEL, URL,
         row_number() OVER (PARTITION BY BOOK_ID ORDER BY rowid) - 1 AS ORDINAL
       FROM BOOK_METADATA_LINK
       """.trimIndent(),
-    ) { row ->
-      execute(
+      targetSql =
         """
         INSERT INTO book_metadata_link (book_id, ordinal, label, url)
         VALUES (?, ?, ?, ?)
         """.trimIndent(),
+    ) { row ->
+      arrayOf(
         row.string("BOOK_ID"),
         row.int("ORDINAL"),
         row.string("LABEL"),
@@ -590,17 +603,16 @@ class KomgaDatabaseImporter(
     ownerColumn: String,
     valueColumn: String,
   ) {
-    source.each(sourceSql) { row ->
-      execute(targetSql, row.string(ownerColumn), row.string(valueColumn))
+    copyBatched(source, sourceSql, targetSql) { row ->
+      arrayOf(row.string(ownerColumn), row.string(valueColumn))
     }
   }
 
   private fun DSLContext.importMedia(source: Connection) {
-    source.each("SELECT * FROM MEDIA ORDER BY BOOK_ID") { row ->
-      val created = row.timestampMillis("CREATED_DATE")
-      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
-      val mediaType = row.nullableString("MEDIA_TYPE")
-      execute(
+    copyBatched(
+      source = source,
+      sourceSql = "SELECT * FROM MEDIA ORDER BY BOOK_ID",
+      targetSql =
         """
         INSERT INTO media (
           book_id, status, media_type, profile, page_count, comment,
@@ -608,6 +620,11 @@ class KomgaDatabaseImporter(
           epub_is_kepub, epub_is_fixed_layout
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         """.trimIndent(),
+    ) { row ->
+      val created = row.timestampMillis("CREATED_DATE")
+      val updated = maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE"))
+      val mediaType = row.nullableString("MEDIA_TYPE")
+      arrayOf(
         row.string("BOOK_ID"),
         normalizeMediaStatus(row.string("STATUS")),
         mediaType,
@@ -620,23 +637,27 @@ class KomgaDatabaseImporter(
         row.booleanInt("EPUB_IS_KEPUB"),
       )
     }
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT *
       FROM MEDIA_PAGE
       ORDER BY BOOK_ID, NUMBER
       """.trimIndent(),
-    ) { row ->
-      val width = row.nullableInt("WIDTH")
-      val height = row.nullableInt("HEIGHT")
-      execute(
+      targetSql =
         """
         INSERT INTO book_page (
           book_id, number, file_name, media_type, file_size, width, height, file_hash
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent(),
+      batchSize = 1_000,
+    ) { row ->
+      val width = row.nullableInt("WIDTH")
+      val height = row.nullableInt("HEIGHT")
+      arrayOf(
         row.string("BOOK_ID"),
-        row.int("NUMBER"),
+        row.int("NUMBER") + 1,
         row.string("FILE_NAME"),
         row.string("MEDIA_TYPE"),
         row.nullableLong("FILE_SIZE"),
@@ -645,20 +666,24 @@ class KomgaDatabaseImporter(
         row.string("FILE_HASH"),
       )
     }
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT BOOK_ID, FILE_NAME, MEDIA_TYPE, FILE_SIZE, SUB_TYPE,
         row_number() OVER (PARTITION BY BOOK_ID ORDER BY rowid) AS NUMBER
       FROM MEDIA_FILE
       ORDER BY BOOK_ID, NUMBER
       """.trimIndent(),
-    ) { row ->
-      execute(
+      targetSql =
         """
         INSERT INTO media_file (
           book_id, number, file_name, media_type, file_size, kind
         ) VALUES (?, ?, ?, ?, ?, ?)
         """.trimIndent(),
+      batchSize = 1_000,
+    ) { row ->
+      arrayOf(
         row.string("BOOK_ID"),
         row.int("NUMBER"),
         row.string("FILE_NAME"),
@@ -820,13 +845,24 @@ class KomgaDatabaseImporter(
     ownerColumn: String,
     ownerKind: String,
   ) {
-    source.each(
+    copyBatched(
+      source = source,
+      sourceSql =
       """
       SELECT *
       FROM $sourceTable
       WHERE THUMBNAIL IS NOT NULL
       ORDER BY $ownerColumn, ID
       """.trimIndent(),
+      targetSql =
+        """
+        INSERT INTO artwork_thumbnail (
+          id, owner_kind, owner_id, artwork_type, selected,
+          media_type, file_size, width, height, content,
+          created_at_ms, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """.trimIndent(),
+      batchSize = 32,
     ) { row ->
       val content = row.bytes("THUMBNAIL")
       val width = row.int("WIDTH")
@@ -836,14 +872,7 @@ class KomgaDatabaseImporter(
         "Komga artwork ${row.string("ID")} has incomplete binary metadata"
       }
       val created = row.timestampMillis("CREATED_DATE")
-      execute(
-        """
-        INSERT INTO artwork_thumbnail (
-          id, owner_kind, owner_id, artwork_type, selected,
-          media_type, file_size, width, height, content,
-          created_at_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """.trimIndent(),
+      arrayOf(
         row.string("ID"),
         ownerKind,
         row.string(ownerColumn),
@@ -858,6 +887,25 @@ class KomgaDatabaseImporter(
         maxOf(created, row.timestampMillis("LAST_MODIFIED_DATE")),
       )
     }
+  }
+
+  private fun DSLContext.copyBatched(
+    source: Connection,
+    sourceSql: String,
+    targetSql: String,
+    batchSize: Int = 500,
+    bindings: (ResultSet) -> Array<Any?>,
+  ) {
+    require(batchSize > 0) { "Batch size must be positive" }
+    val pending = ArrayList<Array<Any?>>(batchSize)
+    source.each(sourceSql) { row ->
+      pending += bindings(row)
+      if (pending.size == batchSize) {
+        batch(targetSql, *pending.toTypedArray()).execute()
+        pending.clear()
+      }
+    }
+    if (pending.isNotEmpty()) batch(targetSql, *pending.toTypedArray()).execute()
   }
 
   private fun DSLContext.importPageHashes(source: Connection) {
