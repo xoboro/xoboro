@@ -78,7 +78,8 @@ class JooqBookRepository(
   }
 
   override fun count(): Long =
-    database.dsl.fetchOne("SELECT count(*) FROM book")?.get(0, Long::class.java) ?: 0L
+    database.dsl.fetchOne("SELECT count(*) FROM book")?.get(0)?.let { it as Number }?.toLong()
+      ?: 0L
 
   private fun DSLContext.insertBook(book: Book) {
     execute(
@@ -157,15 +158,15 @@ class JooqBookRepository(
       sourceItemId = requiredString("source_item_id"),
       sourceIdentity = get("source_identity", String::class.java),
       mediaKind = MediaKind.valueOf(requiredString("media_kind")),
-      fileModifiedAtMillis = requiredLong("file_modified_ms"),
-      fileSize = requiredLong("file_size"),
+      fileModifiedAtMillis = requiredLongText("file_modified_ms_64"),
+      fileSize = requiredLongText("file_size_64"),
       fileHash = requiredString("file_hash"),
       fileHashKoreader = requiredString("file_hash_koreader"),
       number = requiredInt("number"),
-      deletedAtMillis = get("deleted_at_ms", Long::class.java),
+      deletedAtMillis = nullableLongText("deleted_at_ms_64"),
       oneshot = requiredBoolean("oneshot"),
-      createdAtMillis = requiredLong("created_at_ms"),
-      updatedAtMillis = requiredLong("updated_at_ms"),
+      createdAtMillis = requiredLongText("created_at_ms_64"),
+      updatedAtMillis = requiredLongText("updated_at_ms_64"),
     )
 
   private fun Record.requiredString(field: String): String =
@@ -174,8 +175,12 @@ class JooqBookRepository(
   private fun Record.requiredInt(field: String): Int =
     requireNotNull(get(field, Int::class.java)) { "Database field '$field' must not be null" }
 
-  private fun Record.requiredLong(field: String): Long =
-    requireNotNull(get(field, Long::class.java)) { "Database field '$field' must not be null" }
+  private fun Record.requiredLongText(field: String): Long =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+      .toLong()
+
+  private fun Record.nullableLongText(field: String): Long? =
+    get(field, String::class.java)?.toLong()
 
   private fun Record.requiredBoolean(field: String): Boolean =
     when (val value = requiredInt(field)) {
@@ -187,6 +192,15 @@ class JooqBookRepository(
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 
   companion object {
-    private const val SELECT_BOOK = "SELECT * FROM book"
+    private const val SELECT_BOOK =
+      """
+      SELECT book.*,
+        CAST(file_size AS TEXT) AS file_size_64,
+        CAST(file_modified_ms AS TEXT) AS file_modified_ms_64,
+        CAST(deleted_at_ms AS TEXT) AS deleted_at_ms_64,
+        CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+        CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
+      FROM book
+      """
   }
 }

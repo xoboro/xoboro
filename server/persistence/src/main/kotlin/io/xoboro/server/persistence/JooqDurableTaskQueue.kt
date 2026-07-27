@@ -105,7 +105,11 @@ class JooqDurableTaskQueue(
             LIMIT 1
           )
           AND state = 'PENDING'
-          RETURNING *
+          RETURNING
+            id, task_type, payload_json, priority, group_id, max_attempts,
+            attempt_count, lease_owner, lease_token,
+            CAST(available_at_ms AS TEXT) AS available_at_ms_64,
+            CAST(lease_expires_at_ms AS TEXT) AS lease_expires_at_ms_64
           """.trimIndent(),
           workerId,
           leaseToken,
@@ -202,7 +206,7 @@ class JooqDurableTaskQueue(
       database.dsl
         .fetch("SELECT state, count(*) AS task_count FROM task GROUP BY state")
         .associate { record ->
-          record.requiredString("state") to record.requiredLong("task_count")
+          record.requiredString("state") to record.requiredNumberLong("task_count")
         }
     return TaskCounts(
       pending = counts["PENDING"] ?: 0L,
@@ -220,13 +224,13 @@ class JooqDurableTaskQueue(
           payloadJson = requiredString("payload_json"),
           priority = requiredInt("priority"),
           groupId = get("group_id", String::class.java),
-          availableAtMillis = requiredLong("available_at_ms"),
+          availableAtMillis = requiredLongText("available_at_ms_64"),
           maxAttempts = requiredInt("max_attempts"),
         ),
       attempt = requiredInt("attempt_count"),
       leaseOwner = requiredString("lease_owner"),
       leaseToken = requiredString("lease_token"),
-      leaseExpiresAtMillis = requiredLong("lease_expires_at_ms"),
+      leaseExpiresAtMillis = requiredLongText("lease_expires_at_ms_64"),
     )
 
   private fun leaseExpiration(
@@ -245,8 +249,13 @@ class JooqDurableTaskQueue(
   private fun Record.requiredInt(field: String): Int =
     requireNotNull(get(field, Int::class.java)) { "Database field '$field' must not be null" }
 
-  private fun Record.requiredLong(field: String): Long =
-    requireNotNull(get(field, Long::class.java)) { "Database field '$field' must not be null" }
+  private fun Record.requiredLongText(field: String): Long =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+      .toLong()
+
+  private fun Record.requiredNumberLong(field: String): Long =
+    requireNotNull(get(field) as? Number) { "Database field '$field' must be numeric" }
+      .toLong()
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
 }
