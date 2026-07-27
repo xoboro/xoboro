@@ -7,6 +7,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.serialization.kotlinx.json.json
 import io.xoboro.core.application.ApiKeyLifecycle
+import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
@@ -39,6 +40,7 @@ import io.xoboro.core.domain.MediaItemRepository
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.server.media.AnalyzeBook
+import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
@@ -47,6 +49,7 @@ import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqAnnouncementReadRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
+import io.xoboro.server.persistence.JooqArtworkRepository
 import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqCatalogReadRepository
@@ -116,6 +119,7 @@ class XoboroRuntime private constructor(
   val serverSettingsLifecycle: ServerSettingsLifecycle,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
+  val artworkLifecycle: ArtworkLifecycle,
   val libraryAdministrationLifecycle: LibraryAdministrationLifecycle,
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
@@ -190,6 +194,13 @@ class XoboroRuntime private constructor(
         val readProgresses = JooqReadProgressRepository(database)
         val collections = JooqSeriesCollectionRepository(database)
         val readLists = JooqReadListRepository(database)
+        val artworkLifecycle =
+          ArtworkLifecycle(
+            artwork = JooqArtworkRepository(database),
+            processor = SafeJpegArtworkProcessor(),
+            idFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val organizationLifecycle =
           OrganizationLifecycle(
             collections = collections,
@@ -533,6 +544,7 @@ class XoboroRuntime private constructor(
           serverSettingsLifecycle = serverSettingsLifecycle,
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
+          artworkLifecycle = artworkLifecycle,
           libraryAdministrationLifecycle = libraryAdministrationLifecycle,
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,

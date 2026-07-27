@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(102, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(126, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(63, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(39, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -89,6 +89,12 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/books/{bookId}/pages/{pageNumber}/raw"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/pages/{pageNumber}/thumbnail"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/previous"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnail"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnails"),
+        RestEndpoint("POST", "/api/v1/books/{bookId}/thumbnails"),
+        RestEndpoint("DELETE", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}"),
+        RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}"),
+        RestEndpoint("PUT", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}/selected"),
         RestEndpoint("DELETE", "/api/v1/books/{bookId}/read-progress"),
         RestEndpoint("PATCH", "/api/v1/books/{bookId}/read-progress"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/readlists"),
@@ -98,6 +104,12 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/collections/{id}"),
         RestEndpoint("PATCH", "/api/v1/collections/{id}"),
         RestEndpoint("GET", "/api/v1/collections/{id}/series"),
+        RestEndpoint("GET", "/api/v1/collections/{id}/thumbnail"),
+        RestEndpoint("GET", "/api/v1/collections/{id}/thumbnails"),
+        RestEndpoint("POST", "/api/v1/collections/{id}/thumbnails"),
+        RestEndpoint("DELETE", "/api/v1/collections/{id}/thumbnails/{thumbnailId}"),
+        RestEndpoint("GET", "/api/v1/collections/{id}/thumbnails/{thumbnailId}"),
+        RestEndpoint("PUT", "/api/v1/collections/{id}/thumbnails/{thumbnailId}/selected"),
         RestEndpoint("GET", "/api/v1/genres"),
         RestEndpoint("GET", "/api/v1/languages"),
         RestEndpoint("GET", "/api/v1/libraries"),
@@ -120,6 +132,12 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/readlists/{id}/books"),
         RestEndpoint("GET", "/api/v1/readlists/{id}/books/{bookId}/next"),
         RestEndpoint("GET", "/api/v1/readlists/{id}/books/{bookId}/previous"),
+        RestEndpoint("GET", "/api/v1/readlists/{id}/thumbnail"),
+        RestEndpoint("GET", "/api/v1/readlists/{id}/thumbnails"),
+        RestEndpoint("POST", "/api/v1/readlists/{id}/thumbnails"),
+        RestEndpoint("DELETE", "/api/v1/readlists/{id}/thumbnails/{thumbnailId}"),
+        RestEndpoint("GET", "/api/v1/readlists/{id}/thumbnails/{thumbnailId}"),
+        RestEndpoint("PUT", "/api/v1/readlists/{id}/thumbnails/{thumbnailId}/selected"),
         RestEndpoint("GET", "/api/v1/series"),
         RestEndpoint("GET", "/api/v1/series/alphabetical-groups"),
         RestEndpoint("GET", "/api/v1/series/latest"),
@@ -134,6 +152,12 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/series/{seriesId}/collections"),
         RestEndpoint("PATCH", "/api/v1/series/{seriesId}/metadata"),
         RestEndpoint("POST", "/api/v1/series/{seriesId}/metadata/refresh"),
+        RestEndpoint("GET", "/api/v1/series/{seriesId}/thumbnail"),
+        RestEndpoint("GET", "/api/v1/series/{seriesId}/thumbnails"),
+        RestEndpoint("POST", "/api/v1/series/{seriesId}/thumbnails"),
+        RestEndpoint("DELETE", "/api/v1/series/{seriesId}/thumbnails/{thumbnailId}"),
+        RestEndpoint("GET", "/api/v1/series/{seriesId}/thumbnails/{thumbnailId}"),
+        RestEndpoint("PUT", "/api/v1/series/{seriesId}/thumbnails/{thumbnailId}/selected"),
         RestEndpoint("DELETE", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("POST", "/api/v1/series/{seriesId}/read-progress"),
         RestEndpoint("GET", "/api/v1/settings"),
