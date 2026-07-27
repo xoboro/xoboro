@@ -3,10 +3,15 @@ package io.xoboro.server.persistence
 import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.CatalogSearchCondition
+import io.xoboro.core.application.CatalogSearchField
+import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.SeriesCatalogQuery
 import io.xoboro.core.domain.AgeRestriction
+import io.xoboro.core.domain.AlternateTitle
+import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ContentRestrictions
@@ -196,6 +201,184 @@ class JooqCatalogReadRepositoryTest {
       assertEquals(setOf("book-1", "book-2"), duplicates.content.map { it.book.id.value }.toSet())
     }
   }
+
+  @Test
+  fun `indexes normalized metadata with safe unicode prefix queries and atomic refresh`() {
+    withCatalog("full-text") { database ->
+      val bookId = BookId("book-1")
+      val seriesId = SeriesId("series-a")
+      val books = JooqBookMetadataRepository(database)
+      val series = JooqSeriesMetadataRepository(database)
+      books.upsert(
+        requireNotNull(books.findByBookIdOrNull(bookId)).copy(
+          summary = "An atlas of synthetic constellations",
+          authors = listOf(Author("Morgan Example", "cartographer")),
+          tags = setOf("reference"),
+          isbn = "9780000000002",
+          updatedAtMillis = 2,
+        ),
+      )
+      series.upsert(
+        requireNotNull(series.findBySeriesIdOrNull(seriesId)).copy(
+          summary = "A navigational archive",
+          publisher = "Synthetic Press",
+          genres = setOf("astronomy"),
+          alternateTitles = listOf(AlternateTitle("short", "Star Atlas")),
+          updatedAtMillis = 2,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("book-1"),
+        catalog
+          .findBooks(
+            BookCatalogQuery(fullTextSearch = "constell cartogr 978000"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.book.id.value },
+      )
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "star astronomy cartogr"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+      )
+      assertEquals(
+        0,
+        catalog
+          .findBooks(
+            BookCatalogQuery(fullTextSearch = "\" ) *"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+      )
+
+      books.upsert(
+        requireNotNull(books.findByBookIdOrNull(bookId)).copy(
+          summary = "A revised lunar index",
+          authors = emptyList(),
+          tags = emptySet(),
+          isbn = "",
+          updatedAtMillis = 3,
+        ),
+      )
+
+      assertEquals(
+        0,
+        catalog
+          .findBooks(
+            BookCatalogQuery(fullTextSearch = "constell"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+      )
+      assertEquals(
+        1,
+        catalog
+          .findBooks(
+            BookCatalogQuery(fullTextSearch = "lunar"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+      )
+    }
+  }
+
+  @Test
+  fun `evaluates recursive structured conditions before stable paging`() {
+    withCatalog("structured") { database ->
+      val metadata = JooqSeriesMetadataRepository(database)
+      val seriesId = SeriesId("series-a")
+      metadata.upsert(
+        requireNotNull(metadata.findBySeriesIdOrNull(seriesId)).copy(
+          publisher = "Synthetic Press",
+          totalBookCount = 3,
+          updatedAtMillis = 2,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+      val books =
+        catalog.findBooks(
+          query =
+            BookCatalogQuery(
+              deleted = null,
+              condition =
+                CatalogSearchCondition.AllOf(
+                  listOf(
+                    predicate(
+                      CatalogSearchField.SERIES_ID,
+                      CatalogSearchOperator.IS,
+                      "series-a",
+                    ),
+                    CatalogSearchCondition.AnyOf(
+                      listOf(
+                        predicate(
+                          CatalogSearchField.TITLE,
+                          CatalogSearchOperator.CONTAINS,
+                          "absent",
+                        ),
+                        predicate(
+                          CatalogSearchField.NUMBER_SORT,
+                          CatalogSearchOperator.GREATER_THAN,
+                          "2",
+                        ),
+                      ),
+                    ),
+                    predicate(
+                      CatalogSearchField.DELETED,
+                      CatalogSearchOperator.IS_FALSE,
+                    ),
+                  ),
+                ),
+            ),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(),
+        )
+      val series =
+        catalog.findSeries(
+          query =
+            SeriesCatalogQuery(
+              deleted = null,
+              condition =
+                CatalogSearchCondition.AllOf(
+                  listOf(
+                    predicate(
+                      CatalogSearchField.PUBLISHER,
+                      CatalogSearchOperator.IS,
+                      "synthetic press",
+                    ),
+                    predicate(
+                      CatalogSearchField.COMPLETE,
+                      CatalogSearchOperator.IS_TRUE,
+                    ),
+                    predicate(
+                      CatalogSearchField.ONE_SHOT,
+                      CatalogSearchOperator.IS_FALSE,
+                    ),
+                  ),
+                ),
+            ),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(),
+        )
+
+      assertEquals(listOf("book-3"), books.content.map { it.book.id.value })
+      assertEquals(listOf("series-a"), series.content.map { it.series.id.value })
+    }
+  }
+
+  private fun predicate(
+    field: CatalogSearchField,
+    operator: CatalogSearchOperator,
+    value: String? = null,
+  ): CatalogSearchCondition.Predicate =
+    CatalogSearchCondition.Predicate(field, operator, value)
 
   private fun withCatalog(
     name: String,

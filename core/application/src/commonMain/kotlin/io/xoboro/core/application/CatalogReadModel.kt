@@ -72,6 +72,7 @@ data class BookCatalogQuery(
   val deleted: Boolean? = false,
   val onDeck: Boolean = false,
   val duplicatesOnly: Boolean = false,
+  val condition: CatalogSearchCondition? = null,
 )
 
 data class SeriesCatalogQuery(
@@ -83,7 +84,86 @@ data class SeriesCatalogQuery(
   val languages: Set<String> = emptySet(),
   val genres: Set<String> = emptySet(),
   val tags: Set<String> = emptySet(),
+  val condition: CatalogSearchCondition? = null,
 )
+
+enum class CatalogSearchField {
+  LIBRARY_ID,
+  COLLECTION_ID,
+  READ_LIST_ID,
+  SERIES_ID,
+  DELETED,
+  COMPLETE,
+  ONE_SHOT,
+  TITLE,
+  TITLE_SORT,
+  RELEASE_DATE,
+  TAG,
+  SHARING_LABEL,
+  PUBLISHER,
+  LANGUAGE,
+  GENRE,
+  AGE_RATING,
+  READ_STATUS,
+  SERIES_STATUS,
+  AUTHOR,
+  NUMBER_SORT,
+  MEDIA_STATUS,
+  MEDIA_PROFILE,
+  POSTER,
+}
+
+enum class CatalogSearchOperator {
+  IS,
+  IS_NOT,
+  CONTAINS,
+  DOES_NOT_CONTAIN,
+  BEGINS_WITH,
+  DOES_NOT_BEGIN_WITH,
+  ENDS_WITH,
+  DOES_NOT_END_WITH,
+  GREATER_THAN,
+  LESS_THAN,
+  BEFORE,
+  AFTER,
+  IS_IN_THE_LAST,
+  IS_NOT_IN_THE_LAST,
+  IS_NULL,
+  IS_NOT_NULL,
+  IS_TRUE,
+  IS_FALSE,
+}
+
+sealed interface CatalogSearchCondition {
+  data class AllOf(
+    val conditions: List<CatalogSearchCondition>,
+  ) : CatalogSearchCondition {
+    init {
+      require(conditions.isNotEmpty()) { "All-of search conditions must not be empty" }
+    }
+  }
+
+  data class AnyOf(
+    val conditions: List<CatalogSearchCondition>,
+  ) : CatalogSearchCondition {
+    init {
+      require(conditions.isNotEmpty()) { "Any-of search conditions must not be empty" }
+    }
+  }
+
+  data class Predicate(
+    val field: CatalogSearchField,
+    val operator: CatalogSearchOperator,
+    val value: String? = null,
+    val attributes: Map<String, String> = emptyMap(),
+  ) : CatalogSearchCondition {
+    init {
+      require(attributes.keys.none(String::isBlank)) {
+        "Search predicate attribute names must not be blank"
+      }
+    }
+  }
+}
 
 data class CatalogBook(
   val book: Book,
