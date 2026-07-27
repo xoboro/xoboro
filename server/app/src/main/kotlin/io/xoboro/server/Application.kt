@@ -3,6 +3,7 @@ package io.xoboro.server
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationStopped
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -14,18 +15,30 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 
-private const val DEFAULT_PORT = 25600
-
 fun main() {
-  embeddedServer(
-    factory = Netty,
-    host = "0.0.0.0",
-    port = configuredPort(),
-    module = Application::xoboroModule,
-  ).start(wait = true)
+  val config = ServerConfig.fromEnvironment()
+  XoboroRuntime.open(config).use { runtime ->
+    embeddedServer(
+      factory = Netty,
+      host = "0.0.0.0",
+      port = config.port,
+      module = {
+        xoboroModule(
+          readiness = runtime::isReady,
+          onStop = runtime::close,
+        )
+      },
+    ).start(wait = true)
+  }
 }
 
-fun Application.xoboroModule() {
+fun Application.xoboroModule(
+  readiness: () -> Boolean = { true },
+  onStop: () -> Unit = {},
+) {
+  monitor.subscribe(ApplicationStopped) {
+    onStop()
+  }
   install(CallLogging)
   install(ContentNegotiation) {
     json()
@@ -44,14 +57,15 @@ fun Application.xoboroModule() {
     get("/health") {
       call.respond(HealthResponse())
     }
+    get("/ready") {
+      val ready = readiness()
+      call.respond(
+        status = if (ready) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable,
+        message = HealthResponse(status = if (ready) "UP" else "DOWN"),
+      )
+    }
   }
 }
-
-private fun configuredPort(): Int =
-  System.getenv("XOBORO_PORT")
-    ?.toIntOrNull()
-    ?.takeIf { it in 1..65535 }
-    ?: DEFAULT_PORT
 
 @Serializable
 data class HealthResponse(
