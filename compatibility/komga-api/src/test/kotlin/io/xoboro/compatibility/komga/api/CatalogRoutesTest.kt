@@ -26,6 +26,7 @@ import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
+import io.xoboro.core.application.SequentialReadProgressLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
@@ -114,6 +115,12 @@ class CatalogRoutesTest {
           progresses = JooqReadProgressRepository(database),
           currentTimeMillis = { 20 },
         )
+      val sequentialProgress =
+        SequentialReadProgressLifecycle(
+          catalog = catalog,
+          readLists = readLists,
+          progress = progress,
+        )
       testApplication {
         application {
           install(ServerContentNegotiation) {
@@ -127,6 +134,7 @@ class CatalogRoutesTest {
             komgaMediaRoutes(catalog, content)
             komgaPageHashRoutes(pageHashes, pageHashLifecycle, content)
             komgaReadProgressRoutes(catalog, progress)
+            komgaTachiyomiProgressRoutes(sequentialProgress)
             komgaWebPubRoutes(catalog, progress, content)
             komgaOrganizationRoutes(collections, readLists, organizations, catalog)
             komgaArchiveRoutes(catalog, readLists, content)
@@ -502,6 +510,38 @@ class CatalogRoutesTest {
               )
             }.body<KomgaReadListDto>()
         assertEquals(listOf("book-2", "book-1"), readList.bookIds)
+        val initialReadListProgress =
+          client
+            .get("/api/v1/readlists/${readList.id}/read-progress/tachiyomi") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<TachiyomiReadProgressDto>()
+        assertEquals(2, initialReadListProgress.booksCount)
+        assertEquals(0, initialReadListProgress.booksReadCount)
+        assertEquals(1, initialReadListProgress.booksUnreadCount)
+        assertEquals(1, initialReadListProgress.booksInProgressCount)
+        assertEquals(0, initialReadListProgress.lastReadContinuousIndex)
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/api/v1/readlists/${readList.id}/read-progress/tachiyomi") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(TachiyomiReadProgressUpdateDto(lastBookRead = 1))
+          }.status,
+        )
+        val updatedReadListProgress =
+          client
+            .get("/api/v1/readlists/${readList.id}/read-progress/tachiyomi") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<TachiyomiReadProgressDto>()
+        assertEquals(1, updatedReadListProgress.booksReadCount)
+        assertEquals(1, updatedReadListProgress.booksInProgressCount)
+        assertEquals(1, updatedReadListProgress.lastReadContinuousIndex)
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.delete("/api/v1/books/book-2/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
         assertEquals(
           listOf("book-2", "book-1"),
           client
@@ -675,6 +715,31 @@ class CatalogRoutesTest {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
           }.status,
         )
+        val initialSeriesProgress =
+          client
+            .get("/api/v2/series/series-1/read-progress/tachiyomi") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<TachiyomiReadProgressV2Dto>()
+        assertEquals(2, initialSeriesProgress.booksCount)
+        assertEquals(2, initialSeriesProgress.booksUnreadCount)
+        assertEquals(0F, initialSeriesProgress.lastReadContinuousNumberSort)
+        assertEquals(2F, initialSeriesProgress.maxNumberSort)
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/api/v2/series/series-1/read-progress/tachiyomi") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(TachiyomiReadProgressUpdateV2Dto(lastBookNumberSortRead = 1F))
+          }.status,
+        )
+        val updatedSeriesProgress =
+          client
+            .get("/api/v2/series/series-1/read-progress/tachiyomi") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<TachiyomiReadProgressV2Dto>()
+        assertEquals(1, updatedSeriesProgress.booksReadCount)
+        assertEquals(1, updatedSeriesProgress.booksUnreadCount)
+        assertEquals(1F, updatedSeriesProgress.lastReadContinuousNumberSort)
 
         assertEquals(
           HttpStatusCode.BadRequest,

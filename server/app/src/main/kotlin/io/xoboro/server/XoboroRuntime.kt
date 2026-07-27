@@ -35,6 +35,8 @@ import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.application.TransientBookLifecycle
+import io.xoboro.core.application.SequentialReadProgressLifecycle
+import io.xoboro.core.application.ReadListImportLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.Library
@@ -43,6 +45,8 @@ import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.MediaItemRepository
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
+import io.xoboro.core.domain.HistoricalEventRepository
+import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
@@ -72,6 +76,9 @@ import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqSeriesCollectionRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
+import io.xoboro.server.persistence.JooqHistoricalEventRepository
+import io.xoboro.server.persistence.JooqSyncPointRepository
+import io.xoboro.server.persistence.JooqReadListImportMatcher
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
 import io.xoboro.server.security.InMemoryUserSessionRepository
@@ -80,6 +87,7 @@ import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.metadata.ComicInfoMetadataProvider
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
+import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
@@ -139,6 +147,10 @@ class XoboroRuntime private constructor(
   val catalogMaintenanceRequester: CatalogMaintenanceRequester,
   val catalogFileLifecycleRequester: CatalogFileLifecycleRequester,
   val transientBookLifecycle: TransientBookLifecycle,
+  val sequentialReadProgressLifecycle: SequentialReadProgressLifecycle,
+  val historicalEventRepository: HistoricalEventRepository,
+  val syncPointRepository: SyncPointRepository,
+  val readListImportLifecycle: ReadListImportLifecycle,
   val metadataEditingLifecycle: MetadataEditingLifecycle,
   val metadataFacetRepository: MetadataFacetRepository,
   val pageHashRepository: PageHashRepository,
@@ -259,6 +271,20 @@ class XoboroRuntime private constructor(
             media = media,
             progresses = readProgresses,
             currentTimeMillis = System::currentTimeMillis,
+          )
+        val sequentialReadProgressLifecycle =
+          SequentialReadProgressLifecycle(
+            catalog = catalogReads,
+            readLists = readLists,
+            progress = readProgressLifecycle,
+          )
+        val historicalEvents = JooqHistoricalEventRepository(database)
+        val syncPoints = JooqSyncPointRepository(database)
+        val readListImports =
+          ReadListImportLifecycle(
+            parser = ComicRackReadListParser(),
+            matcher = JooqReadListImportMatcher(database),
+            readLists = readLists,
           )
         val queue = JooqDurableTaskQueue(database)
         val userRepository = JooqUserRepository(database)
@@ -527,6 +553,9 @@ class XoboroRuntime private constructor(
             libraries = libraries,
             mutations = listOf(LocalSourceMutationAccess()),
             scanEmitter = scanEmitter,
+            history = historicalEvents,
+            historyIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
           )
         val createdHeartbeat = ScheduledLeaseHeartbeat()
         heartbeat = createdHeartbeat
@@ -599,6 +628,10 @@ class XoboroRuntime private constructor(
           catalogMaintenanceRequester = catalogMaintenanceRequester,
           catalogFileLifecycleRequester = catalogFileLifecycleRequester,
           transientBookLifecycle = transientBookLifecycle,
+          sequentialReadProgressLifecycle = sequentialReadProgressLifecycle,
+          historicalEventRepository = historicalEvents,
+          syncPointRepository = syncPoints,
+          readListImportLifecycle = readListImports,
           metadataEditingLifecycle = metadataEditing,
           metadataFacetRepository = metadataFacets,
           pageHashRepository = pageHashes,
