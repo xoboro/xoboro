@@ -10,6 +10,7 @@ import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
@@ -39,6 +40,7 @@ import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
+import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
@@ -103,6 +105,7 @@ class XoboroRuntime private constructor(
   val libraryAdministrationLifecycle: LibraryAdministrationLifecycle,
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
+  val catalogReadRepository: CatalogReadRepository,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
@@ -162,6 +165,15 @@ class XoboroRuntime private constructor(
         val seriesMetadata = JooqSeriesMetadataRepository(database)
         val mediaItems = JooqMediaItemRepository(database, books)
         val media = JooqBookMediaRepository(database)
+        val catalogReads =
+          JooqCatalogReadRepository(
+            database = database,
+            books = books,
+            series = series,
+            bookMetadata = bookMetadata,
+            seriesMetadata = seriesMetadata,
+            media = media,
+          )
         val queue = JooqDurableTaskQueue(database)
         val userRepository = JooqUserRepository(database)
         val tokenEncoder = Sha512TokenEncoder()
@@ -458,6 +470,7 @@ class XoboroRuntime private constructor(
           libraryAdministrationLifecycle = libraryAdministrationLifecycle,
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
+          catalogReadRepository = catalogReads,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,

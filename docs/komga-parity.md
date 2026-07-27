@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Thirty-nine operations are partially implemented and none are yet
+167 schemas. Fifty-four operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -90,10 +90,10 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, default-trigger/backfill migrations, and transactional repository tests; catalog read APIs pending |
+| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, database-paged read model, Komga DTOs, detail and series-book REST routes, and transactional/integration tests; read progress and differential tests pending |
 | Full-text search | TODO | |
-| Filtering, sorting, and alphabetical groups | TODO | |
-| Latest, new, updated, on-deck, keep-reading | TODO | |
+| Filtering, sorting, and alphabetical groups | PARTIAL | Allowlisted SQL sorting, escaped full-text matching, legacy library/publisher/language/genre/tag filters, stable pagination, and both alphabetical-group routes with tests; recursive search conditions and referential filters pending |
+| Latest, new, updated, on-deck, keep-reading | PARTIAL | Book latest and Series latest/new/updated use explicit database sorts and access filtering; reading-state feeds pending |
 | Collections and manual ordering | TODO | |
 | Read lists and manual ordering | TODO | |
 | ComicRack CBL import | TODO | |
@@ -106,8 +106,8 @@ Status:
 | Initial administrator claim | PARTIAL | Anonymous GET status and header-based POST claim contracts, atomic single-winner persistence, all-role DTO, TSID identity, BCrypt hashing, null omission, validation, and real-runtime restart tests; automated initial-user configuration pending |
 | Multi-user CRUD and password reset | PARTIAL | Komga v2 current-user, admin list/create/patch/delete, self/admin password change, duplicate/validation/not-found behavior, durable relations, and immediate credential replacement tests; demo-mode and exact global error envelopes pending |
 | Roles and authorization | PARTIAL | Komga role model, durable assignment, implicit USER authority, administrator-only management, self-mutation guards, and 401/403 tests; authorization across remaining APIs pending |
-| Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
-| Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, and persistence tests; catalog query enforcement pending |
+| Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics, persistence tests, and SQL-level Book/Series catalog enforcement; remaining interfaces pending |
+| Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, persistence, and pre-pagination SQL catalog enforcement tests; remaining interfaces pending |
 | Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation; Spring-compatible signed remember-me tokens, durable and live-rotatable server key, dynamically configurable cookie duration, password invalidation, restored-session issuance, and logout cleanup tests; OAuth pending |
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
@@ -123,14 +123,14 @@ Status:
 | Page-based progress | TODO | |
 | R2 locator and EPUB progression | TODO | |
 | Mark read and unread by book or series | TODO | |
-| Previous and next book semantics | TODO | |
+| Previous and next book semantics | PARTIAL | Stable metadata number, relative-path, and ID tie-breaking in SQL with access checks and boundary tests; differential and read-state semantics pending |
 | Sync points and conflict behavior | TODO | |
 
 ## Interfaces and protocols
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, server settings, and ten library CRUD/scan/analyze/trash/metadata-refresh operations with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Security/settings/library surfaces plus fifteen Book/Series list, latest/new/updated, detail, sibling, series-book, and alphabetical-group operations with production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
