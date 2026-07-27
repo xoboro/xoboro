@@ -1,0 +1,323 @@
+package io.xoboro.server.media
+
+import io.xoboro.core.application.PageImageFormat
+import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.domain.Book
+import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.BookMedia
+import io.xoboro.core.domain.BookMediaRepository
+import io.xoboro.core.domain.BookPage
+import io.xoboro.core.domain.BookRepository
+import io.xoboro.core.domain.Library
+import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SourceLocation
+import java.nio.file.Files
+import java.nio.file.Path
+import java.awt.image.BufferedImage
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import javax.imageio.ImageIO
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import org.junit.jupiter.api.io.TempDir
+
+class BookContentServiceTest {
+  @TempDir
+  lateinit var temporaryDirectory: Path
+
+  @Test
+  fun `streams the indexed archive entry and closes materialization`() {
+    val expected = byteArrayOf(1, 3, 5, 7)
+    val archive = archive(mapOf("nested/001.png" to expected, "ignored.txt" to byteArrayOf(9)))
+    val access = RecordingAccess(archive)
+    val service = service(access = access)
+
+    val opened = requireNotNull(service.openPage(BOOK_ID, 1))
+    val actual = buildList<Byte> {
+      val buffer = ByteArray(2)
+      while (true) {
+        val count = opened.read(buffer)
+        if (count < 0) break
+        repeat(count) { add(buffer[it]) }
+      }
+    }.toByteArray()
+
+    assertContentEquals(expected, actual)
+    assertEquals("image/png", opened.mediaType)
+    assertEquals(expected.size.toLong(), opened.contentLength)
+    assertEquals(0, access.closeCount)
+    opened.close()
+    assertEquals(1, access.closeCount)
+  }
+
+  @Test
+  fun `returns indexed pages without materializing the source`() {
+    val access = RecordingAccess(archive(emptyMap()))
+    val service = service(access = access)
+
+    val pages = requireNotNull(service.pages(BOOK_ID))
+
+    assertEquals("nested/001.png", pages.single().fileName)
+    assertEquals(0, access.materializeCount)
+  }
+
+  @Test
+  fun `streams the original book file and closes materialization`() {
+    val expected = byteArrayOf(2, 4, 6, 8, 10)
+    val archive = temporaryDirectory.resolve("download.cbz")
+    Files.write(archive, expected)
+    val access = RecordingAccess(archive)
+    val service = service(access = access)
+
+    val opened = requireNotNull(service.openBook(BOOK_ID))
+    val actual = ByteArray(expected.size)
+    assertEquals(expected.size, opened.read(actual))
+
+    assertContentEquals(expected, actual)
+    assertEquals("book.cbz", opened.fileName)
+    assertEquals(expected.size.toLong(), opened.contentLength)
+    opened.close()
+    assertEquals(1, access.closeCount)
+  }
+
+  @Test
+  fun `converts and bounds a single page without retaining archive resources`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(600, 300, BufferedImage.TYPE_INT_ARGB), "png", output)
+        output.toByteArray()
+      }
+    val access = RecordingAccess(archive(mapOf("nested/001.png" to source)))
+    val service = service(access = access)
+
+    val opened =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(
+            format = PageImageFormat.JPEG,
+            maximumDimension = 300,
+          ),
+        ),
+      )
+    val converted = buildList<Byte> {
+      val buffer = ByteArray(1_024)
+      while (true) {
+        val count = opened.read(buffer)
+        if (count < 0) break
+        repeat(count) { add(buffer[it]) }
+      }
+    }.toByteArray()
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(converted)))
+
+    assertEquals(300, image.width)
+    assertEquals(150, image.height)
+    assertEquals("image/jpeg", opened.mediaType)
+    assertEquals("001.jpg", opened.fileName)
+    assertEquals(1, access.closeCount)
+    opened.close()
+    assertEquals(1, access.closeCount)
+  }
+
+  @Test
+  fun `does not materialize for an out of range page`() {
+    val access = RecordingAccess(archive(emptyMap()))
+    val service = service(access = access)
+
+    assertNull(service.openPage(BOOK_ID, 2))
+    assertEquals(0, access.materializeCount)
+  }
+
+  @Test
+  fun `rejects media that is not ready`() {
+    val service =
+      service(
+        access = RecordingAccess(archive(emptyMap())),
+        status = MediaStatus.OUTDATED,
+      )
+
+    val failure =
+      assertFailsWith<IllegalArgumentException> {
+        service.openPage(BOOK_ID, 1)
+      }
+
+    assertTrue(failure.message.orEmpty().contains("OUTDATED"))
+  }
+
+  @Test
+  fun `closes materialization when an indexed entry is missing`() {
+    val access = RecordingAccess(archive(mapOf("other.png" to byteArrayOf(1))))
+    val service = service(access = access)
+
+    assertFailsWith<IllegalStateException> {
+      service.openPage(BOOK_ID, 1)
+    }
+
+    assertEquals(1, access.closeCount)
+  }
+
+  private fun service(
+    access: RecordingAccess,
+    status: MediaStatus = MediaStatus.READY,
+  ): BookContentService {
+    val library =
+      Library(
+        id = LIBRARY_ID,
+        name = "Synthetic library",
+        root = SourceLocation(access.sourceId, "opaque-root"),
+        createdAtMillis = 1,
+      )
+    val book =
+      Book(
+        id = BOOK_ID,
+        libraryId = LIBRARY_ID,
+        seriesId = SeriesId("series-1"),
+        name = "Synthetic book",
+        relativePath = "series/book.cbz",
+        sourceItemId = "opaque-book",
+        mediaKind = MediaKind.COMIC_ARCHIVE,
+        fileModifiedAtMillis = 1,
+        createdAtMillis = 1,
+      )
+    val analyzed =
+      BookMedia(
+        bookId = BOOK_ID,
+        status = status,
+        mediaType = "application/zip",
+        pages =
+          listOf(
+            BookPage(
+              number = 1,
+              fileName = "nested/001.png",
+              mediaType = "image/png",
+              fileSize = 4,
+            ),
+          ),
+        createdAtMillis = 1,
+      )
+    return BookContentService(
+      libraries = SingleLibraryRepository(library),
+      books = SingleBookRepository(book),
+      media = SingleMediaRepository(analyzed),
+      accesses = listOf(access),
+    )
+  }
+
+  private fun archive(entries: Map<String, ByteArray>): Path {
+    val path = temporaryDirectory.resolve("synthetic-${entries.hashCode()}.cbz")
+    ZipOutputStream(Files.newOutputStream(path)).use { output ->
+      entries.forEach { (name, bytes) ->
+        output.putNextEntry(ZipEntry(name))
+        output.write(bytes)
+        output.closeEntry()
+      }
+    }
+    return path
+  }
+
+  private class RecordingAccess(
+    private val archive: Path,
+  ) : SourceMediaAccess {
+    override val sourceId: String = "synthetic"
+    var materializeCount: Int = 0
+    var closeCount: Int = 0
+
+    override fun materialize(
+      rootItemId: String,
+      itemId: String,
+    ): MaterializedMedia {
+      assertEquals("opaque-root", rootItemId)
+      assertEquals("opaque-book", itemId)
+      materializeCount += 1
+      return object : MaterializedMedia {
+        override val path: Path = archive
+
+        override fun close() {
+          closeCount += 1
+        }
+      }
+    }
+  }
+
+  private class SingleMediaRepository(
+    private val media: BookMedia,
+  ) : BookMediaRepository {
+    override fun findByBookIdOrNull(bookId: BookId): BookMedia? =
+      media.takeIf { it.bookId == bookId }
+
+    override fun upsert(media: BookMedia) = Unit
+
+    override fun deleteByBookId(bookId: BookId) = Unit
+  }
+
+  private class SingleBookRepository(
+    private val book: Book,
+  ) : BookRepository {
+    override fun findByIdOrNull(id: BookId): Book? = book.takeIf { it.id == id }
+
+    override fun findAllByLibraryId(libraryId: LibraryId): List<Book> =
+      listOf(book).filter { it.libraryId == libraryId }
+
+    override fun findAllBySeriesId(seriesId: SeriesId): List<Book> =
+      listOf(book).filter { it.seriesId == seriesId }
+
+    override fun findByLibraryIdAndRelativePath(
+      libraryId: LibraryId,
+      relativePath: String,
+    ): Book? =
+      book.takeIf { it.libraryId == libraryId && it.relativePath == relativePath }
+
+    override fun insert(book: Book) = Unit
+
+    override fun insertAll(books: Collection<Book>) = Unit
+
+    override fun update(book: Book) = Unit
+
+    override fun updateAll(books: Collection<Book>) = Unit
+
+    override fun delete(id: BookId) = Unit
+
+    override fun count(): Long = 1
+  }
+
+  private class SingleLibraryRepository(
+    private val library: Library,
+  ) : LibraryRepository {
+    override fun findById(id: LibraryId): Library =
+      requireNotNull(findByIdOrNull(id))
+
+    override fun findByIdOrNull(id: LibraryId): Library? =
+      library.takeIf { it.id == id }
+
+    override fun findAll(): List<Library> = listOf(library)
+
+    override fun findAllByIds(ids: Collection<LibraryId>): List<Library> =
+      listOf(library).filter { it.id in ids }
+
+    override fun insert(library: Library) = Unit
+
+    override fun update(library: Library) = Unit
+
+    override fun delete(id: LibraryId) = Unit
+
+    override fun deleteAll() = Unit
+
+    override fun count(): Long = 1
+  }
+
+  private companion object {
+    val BOOK_ID = BookId("book-1")
+    val LIBRARY_ID = LibraryId("library-1")
+  }
+}
