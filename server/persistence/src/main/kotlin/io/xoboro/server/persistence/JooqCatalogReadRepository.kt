@@ -7,6 +7,9 @@ import io.xoboro.core.application.CatalogGroupCount
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSearchCondition
+import io.xoboro.core.application.CatalogSearchField
+import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
@@ -52,6 +55,7 @@ class JooqCatalogReadRepository(
     val total = count(from.sql, countFilter)
     val bindings = (from.bindings + filter.bindings).toMutableList()
     val order = bookOrder(page.sorts, query, access)
+    bindings.addAll(order.bindings)
     val limit = page.limitClause(bindings)
     val ids =
       database.dsl
@@ -60,7 +64,7 @@ class JooqCatalogReadRepository(
           SELECT b.id
           FROM ${from.sql}
           WHERE ${filter.sql}
-          ORDER BY $order
+          ORDER BY ${order.sql}
           $limit
           """.trimIndent(),
           *bindings.toTypedArray(),
@@ -98,29 +102,26 @@ class JooqCatalogReadRepository(
     page: CatalogPageRequest,
   ): CatalogPage<CatalogSeries> {
     bookMetadataAggregations.refreshAllDirty()
+    val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
-    val total =
-      count(
-        """
-        series s
-        JOIN series_metadata sm ON sm.series_id = s.id
-        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
-        """.trimIndent(),
-        filter,
-      )
+    val countFilter =
+      SqlFilter(filter.sql, (from.bindings + filter.bindings).toMutableList())
+    val total = count(from.sql, countFilter)
+    val bindings = (from.bindings + filter.bindings).toMutableList()
+    val order = seriesOrder(page.sorts, query)
+    bindings.addAll(order.bindings)
+    val limit = page.limitClause(bindings)
     val ids =
       database.dsl
         .fetch(
           """
           SELECT s.id
-          FROM series s
-          JOIN series_metadata sm ON sm.series_id = s.id
-          JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+          FROM ${from.sql}
           WHERE ${filter.sql}
-          ORDER BY ${seriesOrder(page.sorts)}
-          ${page.limitClause(filter.bindings)}
+          ORDER BY ${order.sql}
+          $limit
           """.trimIndent(),
-          *filter.bindings.toTypedArray(),
+          *bindings.toTypedArray(),
         ).map { SeriesId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
       content = hydrateSeries(ids, access.userId),
@@ -136,6 +137,7 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
   ): CatalogSeries? {
     bookMetadataAggregations.refreshDirty(listOf(id))
+    val from = seriesFrom(access)
     val filter =
       seriesFilter(
         SeriesCatalogQuery(deleted = null),
@@ -147,12 +149,10 @@ class JooqCatalogReadRepository(
       database.dsl.fetchOne(
         """
         SELECT s.id
-        FROM series s
-        JOIN series_metadata sm ON sm.series_id = s.id
-        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+        FROM ${from.sql}
         WHERE ${filter.sql}
         """.trimIndent(),
-        *filter.bindings.toTypedArray(),
+        *(from.bindings + filter.bindings).toTypedArray(),
       ) ?: return null
     return hydrateSeries(
       listOf(SeriesId(requireNotNull(found.get("id", String::class.java)))),
@@ -165,6 +165,7 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
   ): List<CatalogGroupCount> {
     bookMetadataAggregations.refreshAllDirty()
+    val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     return database.dsl
       .fetch(
@@ -175,14 +176,12 @@ class JooqCatalogReadRepository(
             ELSE upper(substr(trim(sm.title_sort), 1, 1))
           END AS group_name,
           count(*) AS group_count
-        FROM series s
-        JOIN series_metadata sm ON sm.series_id = s.id
-        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+        FROM ${from.sql}
         WHERE ${filter.sql}
         GROUP BY group_name
         ORDER BY group_name
         """.trimIndent(),
-        *filter.bindings.toTypedArray(),
+        *(from.bindings + filter.bindings).toTypedArray(),
       ).map {
         CatalogGroupCount(
           group = requireNotNull(it.get("group_name", String::class.java)),
@@ -597,26 +596,36 @@ class JooqCatalogReadRepository(
     sorts: List<CatalogSort>,
     query: BookCatalogQuery,
     access: CatalogAccess,
-  ): String {
+  ): SqlOrder {
     if (query.keepReading && access.userId != null && sorts.isEmpty()) {
-      return "keep_progress.read_at_ms DESC, b.id ASC"
+      return SqlOrder("keep_progress.read_at_ms DESC, b.id ASC")
     }
+    val readListId =
+      query.condition
+        .equalityValues(CatalogSearchField.READ_LIST_ID)
+        .singleOrNull()
     return order(
       sorts = sorts,
-      mappings =
-        mapOf(
-          "created" to "b.created_at_ms",
-          "fileHash" to "b.file_hash",
-          "fileLastModified" to "b.file_modified_ms",
-          "lastModified" to "b.updated_at_ms",
-          "name" to "b.name COLLATE NOCASE",
-          "number" to "bm.number_sort",
-          "numberSort" to "bm.number_sort",
-          "seriesTitle" to "sm.title_sort COLLATE NOCASE",
-          "sizeBytes" to "b.file_size",
-          "title" to "bm.title COLLATE NOCASE",
-        ),
+      expression = { property ->
+        if (property == "readList.number" && readListId != null) {
+          SqlSortExpression(
+            sql =
+              """
+              (
+                SELECT member.position
+                FROM read_list_member member
+                WHERE member.book_id = b.id
+                  AND member.read_list_id = ?
+              )
+              """.trimIndent(),
+            bindings = listOf(readListId),
+          )
+        } else {
+          BOOK_SORTS[property]?.let(::SqlSortExpression)
+        }
+      },
       fallback = "sm.title_sort COLLATE NOCASE ASC, bm.number_sort ASC, b.relative_uri ASC, b.id ASC",
+      tieBreaker = "b.id ASC",
     )
   }
 
@@ -626,6 +635,17 @@ class JooqCatalogReadRepository(
   ): SqlFrom {
     val bindings = mutableListOf<Any?>()
     val userId = access.userId
+    val progressJoin =
+      if (userId == null) {
+        "LEFT JOIN read_progress sort_progress ON 1 = 0"
+      } else {
+        bindings += userId.value
+        """
+        LEFT JOIN read_progress sort_progress
+          ON sort_progress.book_id = b.id
+          AND sort_progress.user_id = ?
+        """.trimIndent()
+      }
     val keepReadingJoins =
       if (query.keepReading && userId != null) {
         bindings += userId.value
@@ -648,51 +668,117 @@ class JooqCatalogReadRepository(
         JOIN series s ON s.id = b.series_id
         JOIN book_metadata bm ON bm.book_id = b.id
         JOIN series_metadata sm ON sm.series_id = s.id
+        LEFT JOIN media sort_media ON sort_media.book_id = b.id
+        $progressJoin
         $keepReadingJoins
         """.trimIndent(),
       bindings = bindings,
     )
   }
 
-  private fun seriesOrder(sorts: List<CatalogSort>): String =
-    order(
-      sorts = sorts,
-      mappings =
-        mapOf(
-          "booksCount" to "s.book_count",
-          "created" to "s.created_at_ms",
-          "createdDate" to "s.created_at_ms",
-          "fileLastModified" to "s.file_modified_ms",
-          "lastModified" to "s.updated_at_ms",
-          "lastModifiedDate" to "s.updated_at_ms",
-          "name" to "s.name COLLATE NOCASE",
-          "title" to "sm.title COLLATE NOCASE",
-          "titleSort" to "sm.title_sort COLLATE NOCASE",
-          "metadata.titleSort" to "sm.title_sort COLLATE NOCASE",
-          "booksMetadata.releaseDate" to "ba.release_date",
-          "random" to "random()",
-        ),
-      fallback = "sm.title_sort COLLATE NOCASE ASC, s.id ASC",
+  private fun seriesFrom(access: CatalogAccess): SqlFrom {
+    val bindings = mutableListOf<Any?>()
+    val progressJoin =
+      access.userId?.let { userId ->
+        bindings += userId.value
+        """
+        LEFT JOIN read_progress_series sort_series_progress
+          ON sort_series_progress.series_id = s.id
+          AND sort_series_progress.user_id = ?
+        """.trimIndent()
+      } ?: "LEFT JOIN read_progress_series sort_series_progress ON 1 = 0"
+    return SqlFrom(
+      sql =
+        """
+        series s
+        JOIN series_metadata sm ON sm.series_id = s.id
+        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+        $progressJoin
+        """.trimIndent(),
+      bindings = bindings,
     )
+  }
+
+  private fun seriesOrder(
+    sorts: List<CatalogSort>,
+    query: SeriesCatalogQuery,
+  ): SqlOrder {
+    val collectionId =
+      query.condition
+        .equalityValues(CatalogSearchField.COLLECTION_ID)
+        .singleOrNull()
+    return order(
+      sorts = sorts,
+      expression = { property ->
+        if (property == "collection.number" && collectionId != null) {
+          SqlSortExpression(
+            sql =
+              """
+              (
+                SELECT member.position
+                FROM series_collection_member member
+                WHERE member.series_id = s.id
+                  AND member.collection_id = ?
+              )
+              """.trimIndent(),
+            bindings = listOf(collectionId),
+          )
+        } else {
+          SERIES_SORTS[property]?.let(::SqlSortExpression)
+        }
+      },
+      fallback = "sm.title_sort COLLATE NOCASE ASC, s.id ASC",
+      tieBreaker = "s.id ASC",
+    )
+  }
 
   private fun order(
     sorts: List<CatalogSort>,
-    mappings: Map<String, String>,
+    expression: (String) -> SqlSortExpression?,
     fallback: String,
-  ): String {
-    if (sorts.isEmpty()) return fallback
-    return sorts.joinToString(", ") { sort ->
-      val column =
-        mappings[sort.property]
-          ?: throw IllegalArgumentException("Unsupported catalog sort property: ${sort.property}")
-      val direction =
-        when (sort.direction) {
-          CatalogSortDirection.ASC -> "ASC"
-          CatalogSortDirection.DESC -> "DESC"
-        }
-      "$column $direction"
-    }
+    tieBreaker: String,
+  ): SqlOrder {
+    if (sorts.isEmpty()) return SqlOrder(fallback)
+    val bindings = mutableListOf<Any?>()
+    val requested =
+      sorts.joinToString(", ") { sort ->
+        val sortExpression =
+          expression(sort.property)
+            ?: throw IllegalArgumentException(
+              "Unsupported catalog sort property: ${sort.property}",
+            )
+        bindings.addAll(sortExpression.bindings)
+        val direction =
+          when (sort.direction) {
+            CatalogSortDirection.ASC -> "ASC"
+            CatalogSortDirection.DESC -> "DESC"
+          }
+        "${sortExpression.sql} $direction"
+      }
+    return SqlOrder("$requested, $tieBreaker", bindings)
   }
+
+  private fun CatalogSearchCondition?.equalityValues(field: CatalogSearchField): Set<String> =
+    when (this) {
+      null -> emptySet()
+      is CatalogSearchCondition.Predicate ->
+        value
+          ?.takeIf { this.field == field && operator == CatalogSearchOperator.IS }
+          ?.let(::setOf)
+          .orEmpty()
+      is CatalogSearchCondition.AllOf ->
+        conditions.flatMapTo(linkedSetOf()) { it.equalityValues(field) }
+      is CatalogSearchCondition.AnyOf -> {
+        val branchValues = conditions.map { it.equalityValues(field) }
+        branchValues
+          .mapNotNull { it.singleOrNull() }
+          .distinct()
+          .singleOrNull()
+          ?.takeIf { branchValues.all { values -> values.singleOrNull() == it } }
+          ?.let(::setOf)
+          .orEmpty()
+      }
+    }
 
   private fun CatalogPageRequest.limitClause(bindings: MutableList<Any?>): String {
     if (unpaged) return ""
@@ -730,7 +816,77 @@ class JooqCatalogReadRepository(
     val bindings: MutableList<Any?>,
   )
 
+  private data class SqlOrder(
+    val sql: String,
+    val bindings: List<Any?> = emptyList(),
+  )
+
+  private data class SqlSortExpression(
+    val sql: String,
+    val bindings: List<Any?> = emptyList(),
+  )
+
   companion object {
+    private val BOOK_SORTS =
+      mapOf(
+        "created" to "b.created_at_ms",
+        "createdDate" to "b.created_at_ms",
+        "fileHash" to "b.file_hash",
+        "fileLastModified" to "b.file_modified_ms",
+        "fileSize" to "b.file_size",
+        "lastModified" to "b.updated_at_ms",
+        "lastModifiedDate" to "b.updated_at_ms",
+        "name" to "b.name COLLATE NOCASE",
+        "number" to "bm.number_sort",
+        "numberSort" to "bm.number_sort",
+        "series" to "sm.title_sort COLLATE NOCASE",
+        "seriesTitle" to "sm.title_sort COLLATE NOCASE",
+        "size" to "b.file_size",
+        "sizeBytes" to "b.file_size",
+        "title" to "bm.title COLLATE NOCASE",
+        "url" to "b.relative_uri COLLATE NOCASE",
+        "media.status" to "sort_media.status COLLATE NOCASE",
+        "media.comment" to "sort_media.comment COLLATE NOCASE",
+        "media.mediaType" to "sort_media.media_type COLLATE NOCASE",
+        "media.pagesCount" to "sort_media.page_count",
+        "metadata.title" to "bm.title COLLATE NOCASE",
+        "metadata.numberSort" to "bm.number_sort",
+        "metadata.releaseDate" to "bm.release_date",
+        "readProgress.lastModified" to "sort_progress.updated_at_ms",
+        "readProgress.readDate" to "sort_progress.read_at_ms",
+        "readList.number" to
+          """
+          (
+            SELECT min(member.position)
+            FROM read_list_member member
+            WHERE member.book_id = b.id
+          )
+          """.trimIndent(),
+      )
+    private val SERIES_SORTS =
+      mapOf(
+        "booksCount" to "s.book_count",
+        "created" to "s.created_at_ms",
+        "createdDate" to "s.created_at_ms",
+        "fileLastModified" to "s.file_modified_ms",
+        "lastModified" to "s.updated_at_ms",
+        "lastModifiedDate" to "s.updated_at_ms",
+        "name" to "s.name COLLATE NOCASE",
+        "title" to "sm.title COLLATE NOCASE",
+        "titleSort" to "sm.title_sort COLLATE NOCASE",
+        "metadata.titleSort" to "sm.title_sort COLLATE NOCASE",
+        "booksMetadata.releaseDate" to "ba.release_date",
+        "readDate" to "sort_series_progress.last_read_at_ms",
+        "collection.number" to
+          """
+          (
+            SELECT min(member.position)
+            FROM series_collection_member member
+            WHERE member.series_id = s.id
+          )
+          """.trimIndent(),
+        "random" to "random()",
+      )
     private val SEARCH_TOKEN = Regex("[\\p{L}\\p{N}]+")
   }
 }
