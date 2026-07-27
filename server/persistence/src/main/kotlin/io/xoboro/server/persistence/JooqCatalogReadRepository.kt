@@ -43,22 +43,28 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
     page: CatalogPageRequest,
   ): CatalogPage<CatalogBook> {
+    val from = bookFrom(query, access)
     val filter = bookFilter(query, access)
-    val total = count("book b JOIN series s ON s.id = b.series_id JOIN book_metadata bm ON bm.book_id = b.id JOIN series_metadata sm ON sm.series_id = s.id", filter)
+    val countFilter =
+      SqlFilter(
+        filter.sql,
+        (from.bindings + filter.bindings).toMutableList(),
+      )
+    val total = count(from.sql, countFilter)
+    val bindings = (from.bindings + filter.bindings).toMutableList()
+    val order = bookOrder(page.sorts, query, access)
+    val limit = page.limitClause(bindings)
     val ids =
       database.dsl
         .fetch(
           """
           SELECT b.id
-          FROM book b
-          JOIN series s ON s.id = b.series_id
-          JOIN book_metadata bm ON bm.book_id = b.id
-          JOIN series_metadata sm ON sm.series_id = s.id
+          FROM ${from.sql}
           WHERE ${filter.sql}
-          ORDER BY ${bookOrder(page.sorts)}
-          ${page.limitClause(filter.bindings)}
+          ORDER BY $order
+          $limit
           """.trimIndent(),
-          *filter.bindings.toTypedArray(),
+          *bindings.toTypedArray(),
         ).map { BookId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
       content = ids.mapNotNull { hydrateBook(it, access.userId) },
@@ -414,6 +420,11 @@ class JooqCatalogReadRepository(
         bindings += userId.value
       }
     }
+    if (query.keepReading) {
+      if (access.userId == null) {
+        parts += "1 = 0"
+      }
+    }
     if (query.duplicatesOnly) {
       parts +=
         """
@@ -615,8 +626,15 @@ class JooqCatalogReadRepository(
       )?.get("item_count"),
     ) as Number).toLong()
 
-  private fun bookOrder(sorts: List<CatalogSort>): String =
-    order(
+  private fun bookOrder(
+    sorts: List<CatalogSort>,
+    query: BookCatalogQuery,
+    access: CatalogAccess,
+  ): String {
+    if (query.keepReading && access.userId != null && sorts.isEmpty()) {
+      return "keep_progress.read_at_ms DESC, b.id ASC"
+    }
+    return order(
       sorts = sorts,
       mappings =
         mapOf(
@@ -633,6 +651,41 @@ class JooqCatalogReadRepository(
         ),
       fallback = "sm.title_sort COLLATE NOCASE ASC, bm.number_sort ASC, b.relative_uri ASC, b.id ASC",
     )
+  }
+
+  private fun bookFrom(
+    query: BookCatalogQuery,
+    access: CatalogAccess,
+  ): SqlFrom {
+    val bindings = mutableListOf<Any?>()
+    val userId = access.userId
+    val keepReadingJoins =
+      if (query.keepReading && userId != null) {
+        bindings += userId.value
+        """
+        JOIN read_progress keep_progress
+          ON keep_progress.book_id = b.id
+          AND keep_progress.user_id = ?
+          AND keep_progress.completed = 0
+        JOIN media keep_media
+          ON keep_media.book_id = b.id
+          AND keep_media.status = 'READY'
+        """.trimIndent()
+      } else {
+        ""
+      }
+    return SqlFrom(
+      sql =
+        """
+        book b
+        JOIN series s ON s.id = b.series_id
+        JOIN book_metadata bm ON bm.book_id = b.id
+        JOIN series_metadata sm ON sm.series_id = s.id
+        $keepReadingJoins
+        """.trimIndent(),
+      bindings = bindings,
+    )
+  }
 
   private fun seriesOrder(sorts: List<CatalogSort>): String =
     order(
@@ -696,6 +749,11 @@ class JooqCatalogReadRepository(
   private fun Any?.asLongOrNull(): Long? = (this as? Number)?.toLong()
 
   private data class SqlFilter(
+    val sql: String,
+    val bindings: MutableList<Any?>,
+  )
+
+  private data class SqlFrom(
     val sql: String,
     val bindings: MutableList<Any?>,
   )
