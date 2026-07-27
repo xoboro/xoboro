@@ -386,7 +386,7 @@ class JooqCatalogReadRepositoryTest {
         )
 
       assertEquals(listOf("series-a"), filtered.content.map { it.series.id.value })
-      assertEquals(listOf("A" to 1, "B" to 1), groups.map { it.group to it.count })
+      assertEquals(listOf("a" to 1, "b" to 1), groups.map { it.group to it.count })
     }
   }
 
@@ -561,6 +561,32 @@ class JooqCatalogReadRepositoryTest {
           Int::class.java,
         ),
       )
+    }
+  }
+
+  @Test
+  fun `preserves 64 bit epoch milliseconds while rebuilding series aggregation`() {
+    withCatalog("aggregation-64-bit") { database ->
+      val metadata = JooqBookMetadataRepository(database)
+      val firstTimestamp = 1_785_171_313_787L
+      listOf("book-1", "book-2", "book-3").forEachIndexed { index, id ->
+        val timestamp = firstTimestamp + index
+        metadata.upsert(
+          requireNotNull(metadata.findByBookIdOrNull(BookId(id))).copy(
+            createdAtMillis = timestamp,
+            updatedAtMillis = timestamp,
+          ),
+        )
+      }
+
+      val aggregate =
+        requireNotNull(
+          JooqCatalogReadRepository(database)
+            .findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()),
+        ).booksMetadata
+
+      assertEquals(firstTimestamp, aggregate.createdAtMillis)
+      assertEquals(firstTimestamp + 2, aggregate.updatedAtMillis)
     }
   }
 

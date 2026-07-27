@@ -75,6 +75,7 @@ class JooqCatalogReadRepository(
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
       unpaged = page.unpaged,
+      sorts = page.sorts,
     )
   }
 
@@ -129,6 +130,7 @@ class JooqCatalogReadRepository(
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
       unpaged = page.unpaged,
+      sorts = page.sorts,
     )
   }
 
@@ -173,7 +175,7 @@ class JooqCatalogReadRepository(
         SELECT
           CASE
             WHEN trim(sm.title_sort) = '' THEN '#'
-            ELSE upper(substr(trim(sm.title_sort), 1, 1))
+            ELSE lower(substr(trim(sm.title_sort), 1, 1))
           END AS group_name,
           count(*) AS group_count
         FROM ${from.sql}

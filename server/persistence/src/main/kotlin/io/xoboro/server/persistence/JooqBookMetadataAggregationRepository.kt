@@ -110,8 +110,14 @@ internal class JooqBookMetadataAggregationRepository(
         SELECT
           series.id AS series_id,
           min(metadata.release_date) AS release_date,
-          coalesce(min(metadata.created_at_ms), series.created_at_ms) AS minimum_created,
-          coalesce(max(metadata.updated_at_ms), series.updated_at_ms) AS maximum_updated,
+          CAST(
+            coalesce(min(metadata.created_at_ms), series.created_at_ms)
+            AS TEXT
+          ) AS minimum_created_64,
+          CAST(
+            coalesce(max(metadata.updated_at_ms), series.updated_at_ms)
+            AS TEXT
+          ) AS maximum_updated_64,
           ranked_summary.summary,
           ranked_summary.number
         FROM series
@@ -197,8 +203,8 @@ internal class JooqBookMetadataAggregationRepository(
         row.get("summary", String::class.java).orEmpty(),
         row.get("number", String::class.java).orEmpty(),
         row.get("release_date", String::class.java),
-        (requireNotNull(row.get("minimum_created")) as Number).toLong(),
-        (requireNotNull(row.get("maximum_updated")) as Number).toLong(),
+        row.requiredLongText("minimum_created_64"),
+        row.requiredLongText("maximum_updated_64"),
       )
     }
     execute(

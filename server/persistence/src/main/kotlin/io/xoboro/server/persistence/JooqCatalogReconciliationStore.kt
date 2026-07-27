@@ -11,7 +11,9 @@ import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.SeriesId
+import java.text.Normalizer
 import java.util.UUID
+import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
 import org.jooq.DSLContext
 import org.jooq.Record
 
@@ -130,6 +132,7 @@ class JooqCatalogReconciliationStore(
         completedAtMillis = completedAtMillis,
         allowCountDecrease = failedEntries == 0L,
       )
+      transaction.renumberScannedSeries(sessionId, libraryId, completedAtMillis)
       if (failedEntries == 0L) {
         transaction.softDeleteMissingSeries(sessionId, libraryId, completedAtMillis)
       }
@@ -776,6 +779,121 @@ class JooqCatalogReconciliationStore(
     )
   }
 
+  private fun DSLContext.renumberScannedSeries(
+    sessionId: ScanSessionId,
+    libraryId: String,
+    completedAtMillis: Long,
+  ) {
+    val seriesIds =
+      fetch(
+        """
+        SELECT DISTINCT series.id
+        FROM series
+        JOIN catalog_scan_candidate candidate
+          ON candidate.series_relative_path = series.relative_uri
+        WHERE candidate.session_id = ?
+          AND series.library_id = ?
+        ORDER BY series.id
+        """.trimIndent(),
+        sessionId.value,
+        libraryId,
+      ).map { it.requiredString("id") }
+    seriesIds.chunked(RENUMBER_QUERY_BATCH_SIZE).forEach { batch ->
+      renumberSeriesBatch(batch, completedAtMillis)
+    }
+  }
+
+  private fun DSLContext.renumberSeriesBatch(
+    seriesIds: List<String>,
+    completedAtMillis: Long,
+  ) {
+    val rows =
+      fetch(
+        """
+        SELECT
+          book.id,
+          book.series_id,
+          book.name,
+          book.relative_uri,
+          book.number,
+          metadata.number AS metadata_number,
+          metadata.number_sort,
+          metadata.number_lock,
+          metadata.number_sort_lock
+        FROM book
+        JOIN book_metadata metadata ON metadata.book_id = book.id
+        WHERE book.deleted_at_ms IS NULL
+          AND book.series_id IN (${seriesIds.joinToString(",") { "?" }})
+        ORDER BY book.series_id, book.relative_uri, book.id
+        """.trimIndent(),
+        *seriesIds.toTypedArray(),
+      ).map { row ->
+        ScannedBookNumber(
+          id = row.requiredString("id"),
+          seriesId = row.requiredString("series_id"),
+          name = row.requiredString("name"),
+          relativePath = row.requiredString("relative_uri"),
+          currentNumber = row.requiredInt("number"),
+          metadataNumber = row.requiredString("metadata_number"),
+          metadataNumberSort = row.requiredDouble("number_sort").toFloat(),
+          numberLocked = row.requiredBoolean("number_lock"),
+          numberSortLocked = row.requiredBoolean("number_sort_lock"),
+        )
+      }
+    val numbered =
+      rows
+        .groupBy(ScannedBookNumber::seriesId)
+        .values
+        .flatMap { books ->
+          books
+            .sortedWith(
+              compareBy<ScannedBookNumber, String>(BOOK_NAME_COMPARATOR) {
+                it.name.normalizedBookName()
+              }
+                .thenBy(ScannedBookNumber::relativePath)
+                .thenBy(ScannedBookNumber::id),
+            ).mapIndexed { index, book -> book to index + 1 }
+        }
+    val changedBooks = numbered.filter { (book, number) -> book.currentNumber != number }
+    if (changedBooks.isNotEmpty()) {
+      batch(
+        """
+        UPDATE book SET number = ?, updated_at_ms = max(updated_at_ms, ?)
+        WHERE id = ?
+        """.trimIndent(),
+        *changedBooks
+          .map { (book, number) -> arrayOf<Any?>(number, completedAtMillis, book.id) }
+          .toTypedArray(),
+      ).execute()
+    }
+    val changedMetadata =
+      numbered.filter { (book, number) ->
+        (!book.numberLocked && book.metadataNumber != number.toString()) ||
+          (!book.numberSortLocked && book.metadataNumberSort != number.toFloat())
+      }
+    if (changedMetadata.isNotEmpty()) {
+      batch(
+        """
+        UPDATE book_metadata SET
+          number = CASE WHEN number_lock = 0 THEN ? ELSE number END,
+          number_sort = CASE WHEN number_sort_lock = 0 THEN ? ELSE number_sort END,
+          updated_at_ms = max(updated_at_ms, ?)
+        WHERE book_id = ?
+        """.trimIndent(),
+        *changedMetadata
+          .map { (book, number) ->
+            arrayOf<Any?>(number.toString(), number.toFloat(), completedAtMillis, book.id)
+          }.toTypedArray(),
+      ).execute()
+    }
+  }
+
+  private fun String.normalizedBookName(): String =
+    Normalizer
+      .normalize(trim(), Normalizer.Form.NFD)
+      .replace(COMBINING_MARKS, "")
+      .replace(WHITESPACE, " ")
+
   private fun DSLContext.softDeleteMissingSeries(
     sessionId: ScanSessionId,
     libraryId: String,
@@ -847,6 +965,9 @@ class JooqCatalogReconciliationStore(
   private fun Record.requiredInt(field: String): Int =
     requireNotNull(get(field, Int::class.java)) { "Database field '$field' must not be null" }
 
+  private fun Record.requiredDouble(field: String): Double =
+    requireNotNull(get(field, Double::class.java)) { "Database field '$field' must not be null" }
+
   private fun Record.requiredLongText(field: String): Long =
     requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
       .toLong()
@@ -878,7 +999,24 @@ class JooqCatalogReconciliationStore(
     val events: List<CatalogMutationEvent>,
   )
 
+  private data class ScannedBookNumber(
+    val id: String,
+    val seriesId: String,
+    val name: String,
+    val relativePath: String,
+    val currentNumber: Int,
+    val metadataNumber: String,
+    val metadataNumberSort: Float,
+    val numberLocked: Boolean,
+    val numberSortLocked: Boolean,
+  )
+
   private companion object {
+    const val RENUMBER_QUERY_BATCH_SIZE = 500
+    val BOOK_NAME_COMPARATOR: Comparator<String> =
+      CaseInsensitiveSimpleNaturalComparator.getInstance()
+    val COMBINING_MARKS = Regex("\\p{M}+")
+    val WHITESPACE = Regex("\\s+")
     val STAGE_CANDIDATE_SQL =
       """
       INSERT INTO catalog_scan_candidate (

@@ -57,6 +57,7 @@ data class CatalogPage<T>(
   val size: Int,
   val totalElements: Long,
   val unpaged: Boolean = false,
+  val sorts: List<CatalogSort> = emptyList(),
 ) {
   init {
     require(page >= 0) { "Catalog page number must not be negative" }

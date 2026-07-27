@@ -12,8 +12,10 @@ verification.
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
 167 schemas. All 165 operations are partially implemented. A digest-pinned live
 Komga harness currently certifies the anonymous claim-status and OAuth-provider
-operations plus the OpenAPI document after normalizing only its runtime server
-URL. Protocol and non-REST inventories are tracked separately in
+operations, the OpenAPI document, and an authenticated synthetic CBZ scan
+through Library, Series, Book, and alphabetical-group responses. The catalog
+suite ignores only independently generated identifiers and timestamps.
+Protocol and non-REST inventories are tracked separately in
 [`docs/compatibility`](compatibility/README.md).
 
 The non-OpenAPI inventory contains 70 operations, including the two OAuth2
@@ -43,7 +45,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, exact-entry page streaming, original-file streaming, stable error codes, and restart tests; differential behavior pending |
+| CBZ and ZIP | PARTIAL | Real synthetic archive analysis, durable worker execution, content partitioning, persisted page/file state, exact-entry page streaming, original-file streaming, stable error codes, restart tests, and live Komga scan-to-catalog differential certification; delivery differential behavior pending |
 | CBR, RAR, and RAR5 | PARTIAL | Signature-routed in-process RAR3-through-RAR7 analysis, bounded dictionary, natural page indexing, dimensions, leading/trailing hashes, indexed page streaming and conversion, RAR4/RAR5 synthetic fixtures, and source lifetime tests; encrypted/multipart and differential fixtures pending |
 | PDF | PARTIAL | PDFBox page analysis, optional crop-box dimensions, bounded page indexing, JPEG rendering, raw single-page PDF extraction, WebPub PDF manifest, source materialization cleanup, and synthetic document tests; encrypted documents, metadata, and differential fixtures pending |
 | EPUB 2 and EPUB 3 | PARTIAL | Secure ZIP/container/package parsing, manifest/spine resources, fixed-layout and DiViNa detection, EPUB3 navigation plus EPUB2 NCX fallback, Readium positions, KEPUB span detection, package metadata import, persisted extensions, resource streaming with CSP, WebPub manifest, bounded KEPUB conversion, and synthetic fixed/reflowable tests; remaining metadata vocabulary and differential fixtures pending |
@@ -93,9 +95,9 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, database-paged read model, Komga DTOs, detail and series-book REST routes, bounded 500-ID batch hydration of parents/metadata/media/progress, stable cross-batch ordering, and transactional/integration tests; differential tests pending |
+| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, database-paged read model, Komga DTOs, detail and series-book REST routes, bounded 500-ID batch hydration of parents/metadata/media/progress, stable cross-batch ordering, Komga natural numbering in bounded reconciliation batches, explicit null/source/media flag projection, transactional/integration tests, and live synthetic list differential certification; detail and one-shot differential tests pending |
 | Full-text search | COMPLETE | Unicode/diacritic-aware FTS5 Book and Series documents cover titles, alternate titles, summaries, contributors/roles, tags, genres, publisher, language, ISBN, and links; initial migration, transactional metadata refresh, parent/child propagation, safe quoted prefix parsing, punctuation isolation, and synthetic update tests are complete |
-| Filtering, sorting, and alphabetical groups | PARTIAL | Every Komga Book and Series sort alias is allowlisted in SQL, with authenticated-user progress, selected read-list/collection manual positions, persisted aggregate release dates, deterministic tie breakers, legacy library/publisher/language/genre/tag filters, stable pagination, alphabetical groups, and bounded recursive `allOf`/`anyOf` conditions across membership, metadata, read/media state, artwork, date/numeric/string/null, and persisted aggregate author/tag/date fields after authorization/content restrictions; differential tests pending |
+| Filtering, sorting, and alphabetical groups | PARTIAL | Every Komga Book and Series sort alias is allowlisted in SQL, with authenticated-user progress, selected read-list/collection manual positions, persisted aggregate release dates, deterministic tie breakers, legacy library/publisher/language/genre/tag filters, stable pagination, request-accurate sort envelopes, Komga lowercase alphabetical groups, and bounded recursive `allOf`/`anyOf` conditions across membership, metadata, read/media state, artwork, date/numeric/string/null, and persisted aggregate author/tag/date fields after authorization/content restrictions; default catalog envelopes and groups are live-differential-certified, advanced filters remain pending |
 | Latest, new, updated, on-deck, keep-reading | COMPLETE | Book latest/on-deck and Series latest/new/updated use explicit database sorts, access filtering, and durable per-series progress aggregates. Keep-reading is joined, filtered, recent-read sorted, counted, and paged in SQL; READY/in-progress semantics, anonymous access, OPDS projection, and pagination beyond 10,000 synthetic items are regression tested |
 | Collections and manual ordering | PARTIAL | Durable ordered membership, case-insensitive unique names, transactional CRUD, ComicInfo `SeriesGroup` creation/idempotent extension, access-filtered list/detail/reverse-membership routes, filtered indicators, member pagination, cascade behavior, and REST integration tests; generated thumbnails and differential filters pending |
 | Read lists and manual ordering | PARTIAL | Durable ordered membership and summaries, transactional CRUD, ComicInfo alternate-series/story-arc import with sparse/collision-safe positions, access-filtered list/detail/book/sibling/reverse-membership routes, filtered indicators, cascade behavior, archive streaming, Mihon progress adapters, and REST integration tests; differential filters pending |

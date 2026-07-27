@@ -9,9 +9,13 @@ on:
       - "gradle/**"
       - "gradlew"
       - "gradle.properties"
+      - "core/**"
       - "compatibility/komga-api/**"
       - "compatibility/komga-differential/**"
       - "server/app/**"
+      - "server/metadata/**"
+      - "server/persistence/**"
+      - "server/sources/**"
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -45,6 +49,7 @@ jobs:
         run: |
           docker run --detach --name komga-reference \
             --publish 127.0.0.1:25610:25600 \
+            --volume "${RUNNER_TEMP}:${RUNNER_TEMP}" \
             gotson/komga@sha256:c4f9885fc077e2e9cd684dc95e8f6cfa5e33b100b46712b2de7f5cc2ff59e6fb
 
       - name: Start Xoboro candidate
@@ -71,6 +76,88 @@ jobs:
           --reference http://127.0.0.1:25610 \
           --candidate http://127.0.0.1:25611 \
           --suite compatibility/komga-differential/suites/komga-1.25.0-anonymous.json"
+
+      - name: Create synthetic catalog
+        env:
+          SYNTHETIC_EMAIL: admin@example.invalid
+          SYNTHETIC_PASSWORD: xoboro-differential-only
+        run: |
+          catalog_root="${RUNNER_TEMP}/catalog"
+          archive_root="${RUNNER_TEMP}/archive"
+          mkdir -p "${catalog_root}/Synthetic Series" "${archive_root}"
+          printf '%s' \
+            'iVBORw0KGgoAAAANSUhEUgAAABgAAAAgAQMAAAAykCp7AAAAA1BMVEUTfItA+kyhAAAADElEQVQI12NgGFgAAACAAAElMfVGAAAAAElFTkSuQmCC' \
+            | base64 --decode >"${archive_root}/0001.png"
+          cp "${archive_root}/0001.png" "${archive_root}/0002.png"
+          (
+            cd "${archive_root}"
+            zip --quiet "${catalog_root}/Synthetic Series/001.cbz" 0001.png 0002.png
+          )
+
+          for port in 25610 25611; do
+            curl --fail --silent --show-error --request POST \
+              "http://127.0.0.1:${port}/api/v1/claim" \
+              --header "X-Komga-Email: ${SYNTHETIC_EMAIL}" \
+              --header "X-Komga-Password: ${SYNTHETIC_PASSWORD}" >/dev/null
+            jq --null-input --compact-output \
+              --arg root "${catalog_root}" \
+              '{
+                name: "Synthetic Library",
+                root: $root,
+                scanInterval: "DISABLED",
+                scanOnStartup: false,
+                scanDirectoryExclusions: [],
+                oneshotsDirectory: "oneshots",
+                hashFiles: false,
+                hashPages: false,
+                analyzeDimensions: true,
+                repairExtensions: false,
+                convertToCbz: false,
+                emptyTrashAfterScan: false,
+                seriesCover: "FIRST"
+              }' |
+              curl --fail --silent --show-error \
+                --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                --request POST "http://127.0.0.1:${port}/api/v1/libraries" \
+                --header "Content-Type: application/json" \
+                --data-binary @- >/dev/null
+          done
+
+          for attempt in $(seq 1 120); do
+            reference_status="$(
+              curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
+                jq --raw-output '.content[0].media.status // ""'
+            )"
+            candidate_status="$(
+              curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
+                jq --raw-output '.content[0].media.status // ""'
+            )"
+            if [ "${reference_status}" = "READY" ] &&
+              [ "${candidate_status}" = "READY" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Compare authenticated synthetic catalog
+        env:
+          SYNTHETIC_EMAIL: admin@example.invalid
+          SYNTHETIC_PASSWORD: xoboro-differential-only
+        run: |
+          KOMGA_DIFFERENTIAL_AUTHORIZATION="$(
+            printf 'Basic %s' "$(
+              printf '%s:%s' "${SYNTHETIC_EMAIL}" "${SYNTHETIC_PASSWORD}" |
+                base64 --wrap=0
+            )"
+          )"
+          export KOMGA_DIFFERENTIAL_AUTHORIZATION
+          ./gradlew :compatibility:komga-differential:run --args="\
+          --reference http://127.0.0.1:25610 \
+          --candidate http://127.0.0.1:25611 \
+          --suite compatibility/komga-differential/suites/komga-1.25.0-catalog.json"
 
       - name: Show server logs after failure
         if: failure()
