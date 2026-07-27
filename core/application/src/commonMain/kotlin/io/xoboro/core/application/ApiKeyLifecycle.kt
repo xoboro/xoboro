@@ -77,6 +77,8 @@ class ApiKeyLifecycle(
     return ApiKeyPrincipal(user, apiKey)
   }
 
+  fun fingerprint(rawToken: String): String = tokenEncoder.encode(rawToken)
+
   private fun now(): Long =
     currentTimeMillis().also {
       require(it >= 0) { "API key lifecycle timestamp must not be negative" }
