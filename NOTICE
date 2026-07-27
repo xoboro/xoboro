@@ -1,0 +1,17 @@
+Xoboro
+Copyright (c) 2026 Xoboro contributors
+
+Xoboro is derived from, inspired by, and designed for behavioral compatibility
+with Komga, an open-source media server created by Gauthier Roebroeck and
+contributors. Komga is licensed under the MIT License.
+
+Komga:
+  https://github.com/gotson/komga
+  Copyright (c) 2019 Gauthier Roebroeck
+
+The complete Komga license notice is included at:
+  third-party/licenses/KOMGA.txt
+
+Xoboro is an independent project and is not affiliated with or endorsed by
+the Komga project or its maintainers.
+
