@@ -256,12 +256,18 @@ class KoboRoutesTest {
             .bodyAsText()
             .encodeToByteArray(),
         )
+        val thumbnail =
+          client.get("/kobo/$KOBO_TOKEN/v1/books/book-1/thumbnail/300/400/false/image.jpg")
         assertContentEquals(
           SyntheticContent.IMAGE_BYTES,
-          client
-            .get("/kobo/$KOBO_TOKEN/v1/books/book-1/thumbnail/300/400/false/image.jpg")
-            .bodyAsText()
-            .encodeToByteArray(),
+          thumbnail.bodyAsText().encodeToByteArray(),
+        )
+        val thumbnailEntityTag = assertNotNull(thumbnail.headers[HttpHeaders.ETag])
+        assertEquals(
+          HttpStatusCode.NotModified,
+          client.get("/kobo/$KOBO_TOKEN/v1/books/book-1/thumbnail/300/400/false/image.jpg") {
+            header(HttpHeaders.IfNoneMatch, thumbnailEntityTag)
+          }.status,
         )
 
         val books = JooqBookRepository(database)

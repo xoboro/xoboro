@@ -6,7 +6,15 @@
       "path": "/api/v1/claim",
       "comparison": {
         "bodyMode": "JSON",
-        "headers": ["Cache-Control", "Content-Length", "ETag"]
+        "headers": [
+          "Cache-Control",
+          "Content-Length",
+          "ETag",
+          "Vary",
+          "X-Content-Type-Options",
+          "X-XSS-Protection",
+          "X-Frame-Options"
+        ]
       }
     },
     {
@@ -15,7 +23,15 @@
       "comparison": {
         "bodyMode": "JSON",
         "compareContentType": true,
-        "headers": ["Cache-Control", "Content-Length", "ETag"]
+        "headers": [
+          "Cache-Control",
+          "Content-Length",
+          "ETag",
+          "Vary",
+          "X-Content-Type-Options",
+          "X-XSS-Protection",
+          "X-Frame-Options"
+        ]
       }
     },
     {

@@ -7,7 +7,7 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondOutputStream
+import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -170,17 +170,9 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondTransientC
   content: MediaContentStream,
 ) {
   try {
-    respondOutputStream(
-      contentType = ContentType.parse(content.mediaType),
-      contentLength = content.contentLength,
-    ) {
-      val buffer = ByteArray(8 * 1_024)
-      while (true) {
-        val read = content.read(buffer)
-        if (read < 0) break
-        write(buffer, 0, read)
-      }
-    }
+    val body = content.readKomgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null)) return
+    respondBytes(body.bytes, ContentType.parse(content.mediaType))
   } finally {
     content.close()
   }
