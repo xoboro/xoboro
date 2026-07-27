@@ -71,6 +71,9 @@ import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SyncPointRepository
+import io.xoboro.server.persistence.DatabaseBackupManager
+import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.XoboroDatabase
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -89,9 +92,11 @@ import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.nio.file.Path
 
-fun main() {
+fun main(args: Array<String>) {
   val config = ServerConfig.fromEnvironment()
+  if (runDatabaseCommand(args, config)) return
   XoboroRuntime.open(config).use { runtime ->
     embeddedServer(
       factory = Netty,
@@ -102,6 +107,40 @@ fun main() {
       },
     ).start(wait = true)
   }
+}
+
+internal fun runDatabaseCommand(
+  args: Array<String>,
+  config: ServerConfig,
+  output: (String) -> Unit = ::println,
+): Boolean {
+  if (args.isEmpty()) return false
+  require(args.size == 2 || (args.size == 3 && args[2] == "--replace")) {
+    "Usage: xoboro <backup|restore|verify-backup> <path> [--replace]"
+  }
+  val path = Path.of(args[1]).toAbsolutePath().normalize()
+  val replace = args.getOrNull(2) == "--replace"
+  when (args[0]) {
+    "backup" -> {
+      XoboroDatabase.open(DatabaseConfig(config.databasePath)).use { database ->
+        output(database.backups.create(path, replaceExisting = replace).toString())
+      }
+    }
+    "restore" -> {
+      output(
+        DatabaseBackupManager
+          .restore(path, config.databasePath, replaceExisting = replace)
+          .toString(),
+      )
+    }
+    "verify-backup" -> {
+      require(!replace) { "verify-backup does not accept --replace" }
+      DatabaseBackupManager.verify(path)
+      output(path.toString())
+    }
+    else -> error("Unknown command: ${args[0]}")
+  }
+  return true
 }
 
 fun Application.xoboroModule(runtime: XoboroRuntime) {

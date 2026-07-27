@@ -35,7 +35,7 @@ Status:
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, active-lease-safe administrator queue clearing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
 | Server-Sent Events | PARTIAL | Authenticated bounded per-user streams, role/user filtering, 15-second heartbeat comments, 10-second administrator task snapshots, graceful runtime shutdown, and Library/read-progress lifecycle publication with route and hub tests; remaining catalog, organization, artwork, session, and differential events pending |
-| Backup and restore | TODO | |
+| Backup and restore | COMPLETE | Live-WAL `VACUUM INTO` snapshots, integrity validation before publish and restore, file flush, same-directory atomic replacement with documented fallback, corrupt-input preservation, stale WAL/SHM cleanup, running-server exclusion, explicit overwrite consent, offline CLI commands, and restart tests |
 
 ## Media
 
@@ -62,7 +62,7 @@ Status:
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
 | Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, library and target-scoped analysis/metadata REST triggers, bounded local inventory/reconciliation, and real-runtime execution tests; differential tests pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, restart tests, SQL-level unchanged-file suppression, and successful-analysis chaining to one Book plus one Series metadata refresh; non-local sources pending |
-| Unavailable storage handling | TODO | |
+| Unavailable storage handling | PARTIAL | Source-level unavailable boundary aborts reconciliation before deletion, records the first outage timestamp, suppresses duplicate transitions, clears on recovery, publishes `LibraryChanged`, and has detached/re-attached local-root integration coverage; remote source adapters pending |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
 | File, page, and KOReader hashes | PARTIAL | Komga-compatible seeded XXH3-128 whole-file hashes reuse source materialization; optional first/last-three page hashes persist during Comic analysis, JPEG pixels are normalized before hashing, and non-empty hashes are indexed; exact KOReader sparse partial-MD5 is computed during shared source materialization and indexed by canonical MediaItem ID with deterministic vectors; differential fixtures pending |
 | Book and series lifecycle | PARTIAL | Administrator Book/Series file deletion emits deduplicated, source-aware durable tasks and schedules catalog reconciliation; restore and differential events pending |
