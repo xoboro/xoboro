@@ -22,7 +22,7 @@ and error-envelope tests pass against the reference behavior.
 OpenAPI does not cover the entire server. Separate inventories and contract
 suites are required for:
 
-- [66 non-REST protocol operations](protocols.md) covering OPDS v1/v2, Kobo,
+- [70 non-REST protocol operations](protocols.md) covering OPDS v1/v2, Kobo,
   KOReader, Server-Sent Events, and OAuth2 browser callbacks
 - media container parsing and byte-range delivery
 - filesystem and scheduled lifecycle behavior
@@ -33,5 +33,5 @@ No percentage may be reported as achieved from source line count or endpoint
 presence alone. A capability becomes compatible only after its observable
 behavior is covered by automated contract tests.
 
-The inventory test currently marks 7 of the 66 operations as implemented in
-progress: KOReader, SSE, and OAuth2 browser flow.
+The inventory test currently marks 55 of the 70 operations as implemented in
+progress: OPDS v1/v2, KOReader, SSE, and OAuth2 browser flow.

@@ -5,23 +5,23 @@ therefore locks those routes separately from the 165-operation REST baseline.
 
 | Surface | Operations | Komga 1.25.0 source SHA-256 |
 |---|---:|---|
-| OPDS v1 | 17 | `adb45e3fd49bfeaa747b15ee6701c0530520385fd7a695662450c9e090a535d8` |
-| OPDS v2 | 27 | `17c0b704b0fc9b920a51783b55a3de9fed352b65a512724662f0bc827cdcb5b6` |
+| OPDS v1 | 18 | `adb45e3fd49bfeaa747b15ee6701c0530520385fd7a695662450c9e090a535d8` |
+| OPDS v2 | 30 | `17c0b704b0fc9b920a51783b55a3de9fed352b65a512724662f0bc827cdcb5b6` |
 | Kobo | 15 | `2add95ed52e455c4c16ea4983d26c6dd1d9ba05c90b8c675cd5e6baa0b9a168b` |
 | KOReader | 4 | `dd7d69c6c255e1269ca91b1161eac50419208b2b4be772bfad1f4a1b5752b9dc` |
 | SSE | 1 | `643833b6a4b4efdd002a94b728ae462c807f38255325a37eb7c61dce7dd239b6` |
 | OAuth2 browser flow | 2 | `a837ccf22aecb57137d9bfd23361e1132e3e7044cce000c33b361f02daa2598f` |
-| Total | 66 | |
+| Total | 70 | |
 
-Seven operations currently have implementations in progress: all four KOReader
-routes, the authenticated SSE stream, and both OAuth2 browser-flow routes. They
-remain partial until differential fixtures certify exact response and failure
-behavior.
+Fifty-five operations currently have implementations in progress: all OPDS
+v1/v2, KOReader, SSE, and OAuth2 browser-flow routes. They remain partial until
+differential fixtures certify exact response and failure behavior.
 
-The route inventory test treats expanded mapping arrays and the five Kobo
-catch-all HTTP methods as distinct observable operations.
+The route inventory test treats the four OPDS aliases declared by the common
+book controller, expanded mapping arrays, and the five Kobo catch-all HTTP
+methods as distinct observable operations.
 
 Together with the REST baseline, the current externally addressable contract
-contains 231 HTTP operations. This does not include scheduled jobs, database
+contains 235 HTTP operations. This does not include scheduled jobs, database
 migration behavior, file-format semantics, or configuration behavior, which
 have their own parity gates.
