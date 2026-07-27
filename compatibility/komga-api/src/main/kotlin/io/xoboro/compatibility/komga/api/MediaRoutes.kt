@@ -3,6 +3,7 @@ package io.xoboro.compatibility.komga.api
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.parseAndSortContentTypeHeader
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
@@ -149,10 +150,43 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
     )
     return
   }
+  val contentNegotiation =
+    if (!raw && deliveryRequest == null) {
+      when (request.queryParameters["contentNegotiation"]?.lowercase()) {
+        null,
+        "true",
+        -> true
+        "false" -> false
+        else -> {
+          respond(
+            HttpStatusCode.BadRequest,
+            mapOf("error" to "contentNegotiation must be true or false"),
+          )
+          return
+        }
+      }
+    } else {
+      false
+    }
+  val negotiatedRaw =
+    if (contentNegotiation && item.media?.profile == MediaProfile.PDF) {
+      try {
+        prefersRawPdfPage(request.headers.getAll(HttpHeaders.Accept).orEmpty())
+      } catch (_: IllegalArgumentException) {
+        respond(
+          HttpStatusCode.BadRequest,
+          mapOf("error" to "Invalid Accept header"),
+        )
+        return
+      }
+    } else {
+      false
+    }
+  val effectiveRaw = raw || negotiatedRaw
   val lastModified = item.media?.updatedAtMillis ?: item.book.updatedAtMillis
   if (respondNotModifiedByTimestamp(lastModified)) return
   val requestedFormat =
-    if (raw || deliveryRequest != null) {
+    if (effectiveRaw || deliveryRequest != null) {
       null
     } else {
       when (val convert = request.queryParameters["convert"]) {
@@ -173,7 +207,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
       content.openPage(
         bookId,
         pageNumber,
-        deliveryRequest ?: PageImageRequest(format = requestedFormat, raw = raw),
+        deliveryRequest ?: PageImageRequest(format = requestedFormat, raw = effectiveRaw),
       )
     } catch (failure: IllegalArgumentException) {
       respond(
@@ -202,6 +236,27 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
     respondBytes(body.bytes, type, HttpStatusCode.OK)
   }
 }
+
+internal fun prefersRawPdfPage(acceptHeaders: List<String>): Boolean {
+  if (acceptHeaders.isEmpty()) return false
+  val accepted =
+    parseAndSortContentTypeHeader(acceptHeaders.joinToString(","))
+      .map { ContentType.parse(it.value) }
+  if (accepted.none { it.isKomgaCompatibleWith(ContentType.Application.Pdf) }) return false
+  return accepted
+    .firstOrNull {
+      it.isKomgaCompatibleWith(ContentType.Application.Pdf) ||
+        it.isKomgaCompatibleWith(ContentType.Image.Any)
+    }?.isKomgaCompatibleWith(ContentType.Application.Pdf) == true
+}
+
+private fun ContentType.isKomgaCompatibleWith(other: ContentType): Boolean =
+  (contentType == "*" || other.contentType == "*" || contentType.equals(other.contentType, true)) &&
+    (
+      contentSubtype == "*" ||
+        other.contentSubtype == "*" ||
+        contentSubtype.equals(other.contentSubtype, true)
+    )
 
 private suspend fun io.ktor.server.application.ApplicationCall.streamBook(
   catalog: CatalogReadRepository,
