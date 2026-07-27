@@ -4,8 +4,14 @@ import io.xoboro.core.domain.Artwork
 import io.xoboro.core.domain.ArtworkContent
 import io.xoboro.core.domain.ArtworkId
 import io.xoboro.core.domain.ArtworkOwner
+import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.ArtworkRepository
 import io.xoboro.core.domain.ArtworkType
+import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.BookRepository
+import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SeriesRepository
 
 data class ProcessedArtwork(
   val bytes: ByteArray,
@@ -90,6 +96,41 @@ class ArtworkLifecycle(
     return requireNotNull(artwork.findByIdOrNull(owner, item.id))
   }
 
+  fun replaceSidecars(
+    owner: ArtworkOwner,
+    inputs: List<ByteArray>,
+  ): List<Artwork> {
+    inputs.forEach { input ->
+      require(input.isNotEmpty()) { "Sidecar artwork must not be empty" }
+      require(input.size <= MAXIMUM_UPLOAD_BYTES) { "Sidecar artwork exceeds the size limit" }
+    }
+    val selected = artwork.findSelectedOrNull(owner)
+    val selectFirst = selected == null || selected.type != ArtworkType.USER_UPLOADED
+    val now = now()
+    val processedInputs =
+      inputs.mapNotNull { input ->
+        runCatching { processor.process(input) }.getOrNull()
+      }
+    val contents =
+      processedInputs.mapIndexed { index, processed ->
+        val item =
+          Artwork(
+            id = ArtworkId(idFactory()),
+            owner = owner,
+            type = ArtworkType.SIDECAR,
+            selected = selectFirst && index == 0,
+            mediaType = processed.mediaType,
+            fileSize = processed.bytes.size.toLong(),
+            width = processed.width,
+            height = processed.height,
+            createdAtMillis = now,
+          )
+        ArtworkContent(item, processed.bytes)
+      }
+    artwork.replaceSidecars(owner, contents)
+    return artwork.findAll(owner).filter { it.type == ArtworkType.SIDECAR }
+  }
+
   fun markSelected(
     owner: ArtworkOwner,
     id: ArtworkId,
@@ -109,5 +150,83 @@ class ArtworkLifecycle(
 
   companion object {
     const val MAXIMUM_UPLOAD_BYTES: Int = 20 * 1_024 * 1_024
+  }
+}
+
+data class SourceArtwork(
+  val name: String,
+  val bytes: ByteArray,
+) {
+  init {
+    require(name.isNotBlank()) { "Source artwork name must not be blank" }
+    require(bytes.isNotEmpty()) { "Source artwork must not be empty" }
+  }
+}
+
+interface SourceArtworkAccess {
+  val sourceId: String
+
+  fun findBookArtwork(
+    rootItemId: String,
+    bookItemId: String,
+    maximumBytes: Int,
+  ): List<SourceArtwork>
+
+  fun findSeriesArtwork(
+    rootItemId: String,
+    seriesItemId: String,
+    maximumBytes: Int,
+  ): List<SourceArtwork>
+}
+
+class LocalArtworkRefreshLifecycle(
+  private val libraries: LibraryRepository,
+  private val books: BookRepository,
+  private val series: SeriesRepository,
+  private val artwork: ArtworkLifecycle,
+  accesses: Collection<SourceArtworkAccess>,
+) {
+  private val accessesBySourceId = accesses.associateBy(SourceArtworkAccess::sourceId)
+
+  init {
+    require(accesses.none { it.sourceId.isBlank() }) { "Artwork source IDs must not be blank" }
+    require(accessesBySourceId.size == accesses.size) { "Artwork source IDs must be unique" }
+  }
+
+  fun refreshBook(bookId: BookId): Int {
+    val book = books.findByIdOrNull(bookId)?.takeIf { it.deletedAtMillis == null } ?: return 0
+    val library = libraries.findById(book.libraryId)
+    if (!library.settings.importLocalArtwork) return 0
+    val access = accessesBySourceId[library.root.sourceId] ?: return 0
+    return artwork.replaceSidecars(
+      owner = ArtworkOwner(ArtworkOwnerKind.MEDIA_ITEM, book.id.value),
+      inputs =
+        access
+          .findBookArtwork(
+            library.root.itemId,
+            book.sourceItemId,
+            ArtworkLifecycle.MAXIMUM_UPLOAD_BYTES,
+          ).map(SourceArtwork::bytes),
+    ).size
+  }
+
+  fun refreshSeries(seriesId: SeriesId): Int {
+    val item =
+      series.findByIdOrNull(seriesId)
+        ?.takeIf { it.deletedAtMillis == null && !it.oneshot }
+        ?: return 0
+    val library = libraries.findById(item.libraryId)
+    if (!library.settings.importLocalArtwork) return 0
+    val access = accessesBySourceId[library.root.sourceId] ?: return 0
+    return artwork.replaceSidecars(
+      owner = ArtworkOwner(ArtworkOwnerKind.SERIES, item.id.value),
+      inputs =
+        access
+          .findSeriesArtwork(
+            library.root.itemId,
+            item.sourceItemId,
+            ArtworkLifecycle.MAXIMUM_UPLOAD_BYTES,
+          ).map(SourceArtwork::bytes),
+    ).size
   }
 }

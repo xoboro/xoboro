@@ -18,6 +18,7 @@ dependencies {
   implementation(project(":core:domain"))
   implementation(project(":server:media"))
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.jsoup)
 
   testImplementation(kotlin("test-junit5"))
 }

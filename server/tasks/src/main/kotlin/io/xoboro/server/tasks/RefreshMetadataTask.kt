@@ -67,6 +67,14 @@ class RefreshMetadataTaskEmitter(
     return emitted
   }
 
+  fun refreshSeriesMetadata(
+    seriesId: SeriesId,
+    priority: Int = TaskPriority.HIGH,
+  ): Boolean {
+    val item = series.findByIdOrNull(seriesId)?.takeIf { it.deletedAtMillis == null } ?: return false
+    return enqueueSeries(item.id, priority, now())
+  }
+
   private fun enqueueBook(
     book: Book,
     priority: Int,
@@ -123,13 +131,15 @@ class RefreshMetadataTaskEmitter(
 
 class RefreshBookMetadataTaskHandler(
   private val metadata: MetadataRefreshLifecycle,
+  private val afterRefresh: (BookId) -> Unit = {},
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
 
   override fun handle(task: DurableTask) {
     require(task.type == taskType) { "Unexpected task type: ${task.type}" }
-    metadata.refreshBook(BookId(task.requiredStringPayload(json, BOOK_ID_FIELD, TASK_TYPE)))
+    val bookId = BookId(task.requiredStringPayload(json, BOOK_ID_FIELD, TASK_TYPE))
+    metadata.refreshBook(bookId)?.let { afterRefresh(bookId) }
   }
 
   companion object {
@@ -140,13 +150,15 @@ class RefreshBookMetadataTaskHandler(
 
 class RefreshSeriesMetadataTaskHandler(
   private val metadata: MetadataRefreshLifecycle,
+  private val afterRefresh: (SeriesId) -> Unit = {},
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
 
   override fun handle(task: DurableTask) {
     require(task.type == taskType) { "Unexpected task type: ${task.type}" }
-    metadata.refreshSeries(SeriesId(task.requiredStringPayload(json, SERIES_ID_FIELD, TASK_TYPE)))
+    val seriesId = SeriesId(task.requiredStringPayload(json, SERIES_ID_FIELD, TASK_TYPE))
+    metadata.refreshSeries(seriesId)?.let { afterRefresh(seriesId) }
   }
 
   companion object {

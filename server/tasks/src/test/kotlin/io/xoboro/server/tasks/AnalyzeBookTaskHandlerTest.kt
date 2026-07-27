@@ -9,12 +9,19 @@ import kotlin.test.assertFailsWith
 class AnalyzeBookTaskHandlerTest {
   @Test
   fun `decodes the reconciliation payload and invokes analysis`() {
-    var received: BookId? = null
-    val handler = AnalyzeBookTaskHandler(analyzeBook = { received = it })
+    val received = mutableListOf<Pair<String, BookId>>()
+    val handler =
+      AnalyzeBookTaskHandler(
+        analyzeBook = { received += "analyze" to it },
+        afterAnalyze = { received += "after" to it },
+      )
 
     handler.handle(task("""{"bookId":"book-1"}"""))
 
-    assertEquals(BookId("book-1"), received)
+    assertEquals(
+      listOf("analyze" to BookId("book-1"), "after" to BookId("book-1")),
+      received,
+    )
   }
 
   @Test
