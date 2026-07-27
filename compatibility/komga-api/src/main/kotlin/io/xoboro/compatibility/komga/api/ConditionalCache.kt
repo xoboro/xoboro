@@ -48,20 +48,21 @@ internal suspend fun ApplicationCall.respondNotModified(
   lastModifiedMillis: Long?,
   cacheControl: String = KOMGA_PRIVATE_REVALIDATE,
 ): Boolean {
-  val ifNoneMatch = request.headers[HttpHeaders.IfNoneMatch]
-  val matches =
-    ifNoneMatch?.let { requested ->
-      requested.trim() == "*" ||
-        requested
-          .split(',')
-          .map(String::trim)
-          .any { candidate -> candidate.weakEntityTag() == body.entityTag }
-    } ?: false
+  val matches = matchesKomgaEntityTag(body.entityTag)
   appendKomgaCacheHeaders(lastModifiedMillis, body.entityTag, cacheControl)
   if (!matches) return false
   respond(HttpStatusCode.NotModified)
   return true
 }
+
+internal fun ApplicationCall.matchesKomgaEntityTag(entityTag: String): Boolean =
+  request.headers[HttpHeaders.IfNoneMatch]?.let { requested ->
+    requested.trim() == "*" ||
+      requested
+        .split(',')
+        .map(String::trim)
+        .any { candidate -> candidate.weakEntityTag() == entityTag }
+  } ?: false
 
 internal fun ApplicationCall.appendKomgaCacheHeaders(
   lastModifiedMillis: Long?,
