@@ -28,7 +28,6 @@ fun Application.installKomgaBasicAuthentication(
   authenticationActivities: AuthenticationActivityLifecycle? = null,
   sessions: UserSessionLifecycle? = null,
   rememberMe: RememberMeTokenService? = null,
-  rememberMeMaxAgeSeconds: Int? = null,
 ) {
   install(Authentication) {
     basic(KOMGA_BASIC_AUTHENTICATION) {
@@ -50,7 +49,7 @@ fun Application.installKomgaBasicAuthentication(
             details = authenticationRequestDetails(),
           )
           sessions?.let { issueSession(principal.user, it) }
-          issueRememberMeIfRequested(principal.user, rememberMe, rememberMeMaxAgeSeconds)
+          issueRememberMeIfRequested(principal.user, rememberMe)
         }
         principal
       }
@@ -88,7 +87,6 @@ fun Application.installKomgaBasicAuthentication(
               context.call.issueRememberMeIfRequested(
                 principal.user,
                 rememberMe,
-                rememberMeMaxAgeSeconds,
               )
               context.principal(
                 KOMGA_API_KEY_AUTHENTICATION,
@@ -164,16 +162,15 @@ fun Application.installKomgaBasicAuthentication(
 private fun ApplicationCall.issueRememberMeIfRequested(
   user: User,
   rememberMe: RememberMeTokenService?,
-  maxAgeSeconds: Int?,
 ) {
   if (request.queryParameters["remember-me"]?.toBooleanStrictOrNull() != true) return
-  if (rememberMe == null || maxAgeSeconds == null) return
+  if (rememberMe == null) return
   response.cookies.append(
     Cookie(
       name = KOMGA_REMEMBER_ME_COOKIE,
       value = rememberMe.issue(user),
       path = "/",
-      maxAge = maxAgeSeconds,
+      maxAge = rememberMe.maxAgeSeconds(),
       httpOnly = true,
       secure = request.local.scheme == "https",
       extensions = mapOf("SameSite" to "Lax"),

@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Twenty-six operations are partially implemented and none are yet
+167 schemas. Twenty-eight operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -25,11 +25,11 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
+| Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
 | SQLite schema and migrations | PARTIAL | Flyway V1-V13 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
-| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
+| Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
 | Server-Sent Events | TODO | |
 | Backup and restore | TODO | |
@@ -105,7 +105,7 @@ Status:
 | Roles and authorization | PARTIAL | Komga role model, durable assignment, implicit USER authority, administrator-only management, self-mutation guards, and 401/403 tests; authorization across remaining APIs pending |
 | Library restrictions | PARTIAL | Admin, all-library, and selected-library access semantics plus persistence tests; query enforcement pending |
 | Age and sharing-label restrictions | PARTIAL | Komga-compatible normalization, allow/exclude precedence, evaluation, and persistence tests; catalog query enforcement pending |
-| Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation; Spring-compatible signed remember-me tokens, durable server key, 365-day cookie, password invalidation, restored-session issuance, and logout cleanup tests; settings rotation and OAuth pending |
+| Sessions and remember-me | PARTIAL | Seven-day in-memory inactivity sessions, SHA-512 token-digest storage, cookie/header transport selection, session reuse and touch, header-to-cookie conversion, GET/POST logout, expiry, and security-change revocation; Spring-compatible signed remember-me tokens, durable and live-rotatable server key, dynamically configurable cookie duration, password invalidation, restored-session issuance, and logout cleanup tests; OAuth pending |
 | Basic authentication | PARTIAL | Komga realm challenge, missing/malformed/unknown/wrong credential rejection, case-insensitive success, and `/api/v2/users/me` tests; remaining protected routes pending |
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
 | OAuth2 providers | TODO | |
@@ -127,7 +127,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | `/api/v1/claim` plus `/api/v2/users` current-user, administration, restriction, password, API-key, and authentication-activity contracts with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, and server settings contracts with production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
@@ -147,7 +147,7 @@ Status:
 | Collections and read-list migration | TODO | |
 | Docker amd64 and arm64 | TODO | |
 | Compose deployment | TODO | |
-| Reverse-proxy and base-path support | TODO | |
+| Reverse-proxy and base-path support | PARTIAL | Restart-applied, database- or environment-configured base path mounts all current routes; forwarded-header trust policy and proxy integration tests pending |
 | Mac mini production comparison | TODO | |
 | Rollback verification | TODO | |
 

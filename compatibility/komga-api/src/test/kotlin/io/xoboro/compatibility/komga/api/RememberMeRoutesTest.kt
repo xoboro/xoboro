@@ -74,7 +74,6 @@ class RememberMeRoutesTest {
             users = lifecycle,
             sessions = sessions,
             rememberMe = rememberMe,
-            rememberMeMaxAgeSeconds = REMEMBER_ME_MAX_AGE_SECONDS,
           )
           routing {
             komgaClaimRoutes(lifecycle)

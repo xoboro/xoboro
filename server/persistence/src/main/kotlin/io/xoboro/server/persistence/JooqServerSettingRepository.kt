@@ -1,9 +1,20 @@
 package io.xoboro.server.persistence
 
+import io.xoboro.core.application.ServerSettingStore
+
 class JooqServerSettingRepository(
   private val database: XoboroDatabase,
-) {
-  fun findOrCreate(
+) : ServerSettingStore {
+  override fun find(key: String): String? {
+    require(key.isNotBlank()) { "Server setting key must not be blank" }
+    return database.dsl
+      .fetchOne(
+        "SELECT setting_value FROM server_setting WHERE setting_key = ?",
+        key,
+      )?.get("setting_value", String::class.java)
+  }
+
+  override fun findOrCreate(
     key: String,
     valueFactory: () -> String,
   ): String {
@@ -36,7 +47,7 @@ class JooqServerSettingRepository(
     }
   }
 
-  fun put(
+  override fun put(
     key: String,
     value: String,
   ) {
@@ -50,6 +61,14 @@ class JooqServerSettingRepository(
       """.trimIndent(),
       key,
       value,
+    )
+  }
+
+  override fun delete(key: String) {
+    require(key.isNotBlank()) { "Server setting key must not be blank" }
+    database.dsl.execute(
+      "DELETE FROM server_setting WHERE setting_key = ?",
+      key,
     )
   }
 }
