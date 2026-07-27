@@ -1,16 +1,23 @@
 package io.xoboro.server
 
+import io.xoboro.core.application.CatalogScanner
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookRepository
+import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.XoboroDatabase
+import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.DurableTaskWorker
+import io.xoboro.server.tasks.ExecutorFixedRateTaskScheduler
+import io.xoboro.server.tasks.LibraryScanScheduler
+import io.xoboro.server.tasks.ScanLibraryTaskEmitter
+import io.xoboro.server.tasks.ScanLibraryTaskHandler
 import io.xoboro.server.tasks.ScheduledLeaseHeartbeat
 import io.xoboro.server.tasks.TaskWorkerPool
 import io.xoboro.server.tasks.TaskWorkerPoolPolicy
@@ -22,6 +29,7 @@ import java.util.logging.Logger
 
 class XoboroRuntime private constructor(
   private val database: XoboroDatabase,
+  private val libraryScanScheduler: LibraryScanScheduler,
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
 ) : AutoCloseable {
@@ -33,7 +41,12 @@ class XoboroRuntime private constructor(
   override fun close() {
     if (!closed.compareAndSet(false, true)) return
     var failure: Throwable? = null
-    listOf<AutoCloseable>(workerPool, heartbeat, database).forEach { resource ->
+    listOf<AutoCloseable>(
+      libraryScanScheduler,
+      workerPool,
+      heartbeat,
+      database,
+    ).forEach { resource ->
       try {
         resource.close()
       } catch (caught: Throwable) {
@@ -60,10 +73,36 @@ class XoboroRuntime private constructor(
         )
       var heartbeat: ScheduledLeaseHeartbeat? = null
       var workerPool: TaskWorkerPool? = null
+      var libraryScanScheduler: LibraryScanScheduler? = null
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
         val media = JooqBookMediaRepository(database)
+        val queue = JooqDurableTaskQueue(database)
+        val catalogScanner =
+          CatalogScanner(
+            inventories = listOf(LocalSourceInventory()),
+            reconciliationStore = JooqCatalogReconciliationStore(database),
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val scanEmitter =
+          ScanLibraryTaskEmitter(
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val createdLibraryScanScheduler =
+          LibraryScanScheduler(
+            libraries = libraries,
+            emitter = scanEmitter,
+            scheduler =
+              ExecutorFixedRateTaskScheduler(
+                shutdownTimeoutMillis = config.shutdownTimeoutMillis,
+                onFailure = { failure ->
+                  logger.log(Level.SEVERE, "Periodic library scan scheduling failed", failure)
+                },
+              ),
+          )
+        libraryScanScheduler = createdLibraryScanScheduler
         val analyzeBook =
           AnalyzeBook(
             books = books,
@@ -77,9 +116,13 @@ class XoboroRuntime private constructor(
         heartbeat = createdHeartbeat
         val worker =
           DurableTaskWorker(
-            queue = JooqDurableTaskQueue(database),
+            queue = queue,
             handlers =
               listOf(
+                ScanLibraryTaskHandler(
+                  libraries = libraries,
+                  scanner = catalogScanner,
+                ),
                 AnalyzeBookTaskHandler(
                   analyzeBook = { bookId ->
                     analyzeBook.execute(bookId)
@@ -106,10 +149,17 @@ class XoboroRuntime private constructor(
             },
           )
         workerPool = createdWorkerPool
-        return XoboroRuntime(database, createdHeartbeat, createdWorkerPool).also {
+        return XoboroRuntime(
+          database = database,
+          libraryScanScheduler = createdLibraryScanScheduler,
+          heartbeat = createdHeartbeat,
+          workerPool = createdWorkerPool,
+        ).also {
           createdWorkerPool.start()
+          createdLibraryScanScheduler.start()
         }
       } catch (failure: Throwable) {
+        runCatching { libraryScanScheduler?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { workerPool?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { heartbeat?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { database.close() }.exceptionOrNull()?.let(failure::addSuppressed)
