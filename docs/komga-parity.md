@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Thirty-eight operations are partially implemented and none are yet
+167 schemas. Thirty-nine operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -29,7 +29,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Komga-compatible administrator settings GET/PATCH, durable defaults and nullable overrides, explicit null wire fields, environment/database/effective source reporting, restart-applied port and context path, live worker resizing, live remember-me duration and key rotation, strict port/database/worker/poll/lease/shutdown parsing, and validation tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V13 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V14 clean-install and V1-to-current upgrade tests |
 | Extensible media domain | PARTIAL | Portable `Library` → `MediaItem` sealed hierarchy for Comic, Novel, Book, Video, and Audio; capability-based page/text/timeline/content behavior; canonical `MediaItemId` and repository; durable semantic discriminator and Komga-row migration tests; write lifecycle remains on the Komga catalog adapter |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, dynamically resizable worker-pool lifecycle, and runtime tests; metrics pending |
@@ -60,7 +60,7 @@ Status:
 |---|---|---|
 | Library CRUD and non-overlapping roots | PARTIAL | Komga v1 list/get/create/PATCH/deprecated PUT/delete routes, full settings DTO, selected-library visibility, administrator-only root disclosure and mutation, durable lifecycle wiring, local path validation, duplicate/overlap rejection, and contract tests; non-local source administration and differential tests pending |
 | Directory exclusions and media filters | PARTIAL | Atomic exclusion replacement, media-setting round trip, and pre-descent local subtree pruning tests |
-| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, highest-priority manual REST trigger, bounded local inventory/reconciliation, and real-runtime execution tests; exact maintenance jobs and differential tests pending |
+| Startup, periodic, manual, and deep scan | PARTIAL | Stable normal/deep scan tasks, strict payload handling, deleted-library no-op, startup emission, fixed-rate scheduling/rescheduling/cancellation from live CRUD, highest-priority manual REST trigger, bounded local inventory/reconciliation, and real-runtime execution tests; differential tests pending |
 | Incremental add/change/move/delete detection | PARTIAL | Set-based initial/idempotent/change/move/restore/delete, ambiguous identity, partial-inventory, real-filesystem, and restart tests; non-local sources pending |
 | Unavailable storage handling | TODO | |
 | Trash, restore, and empty trash | PARTIAL | Logically deleted books and now-empty deleted series are removed atomically, dependent media cascades, administrator REST requests emit deduplicated high-priority durable jobs, and `emptyTrashAfterScan` schedules cleanup after successful scans; restore API and differential tests pending |
@@ -74,15 +74,15 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| ComicInfo.xml import | TODO | |
+| ComicInfo.xml import | PARTIAL | Bounded, secure root-entry CBZ parsing imports book and series fields through source-aware providers; synthetic field, malformed-input, setting, persistence, durable-job, and runtime tests; complete field mapping, collections, read lists, EPUB, and differential fixtures pending |
 | EPUB metadata import | TODO | |
 | Local artwork | TODO | |
-| Mylar metadata | TODO | |
-| Series sidecars, including series.json | TODO | |
+| Mylar metadata | PARTIAL | Source-aware bounded `series.json` import supports textual/formatted descriptions, title, publisher, year/volume naming, status, age rating, and issue count with synthetic tests; complete schema and differential fixtures pending |
+| Series sidecars, including series.json | PARTIAL | Canonical-root containment, traversal and size guards, setting-aware provider selection, durable per-library refresh, and real-runtime persistence tests; artwork sidecars and remote sources pending |
 | One-shot detection | PARTIAL | Configured-directory, root-series, and candidate derivation tests; metadata aggregation pending |
 | ISBN barcode detection | TODO | |
-| Series aggregation | PARTIAL | Transactional path grouping, book counts, restore/delete, and partial-scan safety tests; metadata aggregation pending |
-| Field locks and manual patches | TODO | |
+| Series aggregation | PARTIAL | Transactional path grouping, book counts, restore/delete, partial-scan safety, ordered metadata providers, and lock-preserving book/series merge tests; full Komga aggregation precedence pending |
+| Field locks and manual patches | PARTIAL | Durable normalized lock sets and refresh-time lock preservation for book and series metadata with repository round-trip tests; manual REST patches and lock mutation pending |
 | Bulk metadata updates | TODO | |
 | Multiple thumbnails and selection | TODO | |
 
@@ -90,7 +90,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities and transactional repository tests; lifecycle/metadata pending |
+| Series, books, and one-shots | PARTIAL | Upgrade-safe complete scan-state entities, metadata relations, default-trigger/backfill migrations, and transactional repository tests; catalog read APIs pending |
 | Full-text search | TODO | |
 | Filtering, sorting, and alphabetical groups | TODO | |
 | Latest, new, updated, on-deck, keep-reading | TODO | |
@@ -130,7 +130,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, server settings, and nine library CRUD/scan/analyze/trash operations with production runtime wiring; remaining controllers pending |
+| Komga REST API v1/v2 | PARTIAL | Claim, user administration, restrictions, passwords, API keys, authentication activity, sessions, client settings, announcements, server settings, and ten library CRUD/scan/analyze/trash/metadata-refresh operations with production runtime wiring; remaining controllers pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |

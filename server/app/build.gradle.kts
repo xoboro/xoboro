@@ -24,6 +24,7 @@ dependencies {
   implementation(project(":core:application"))
   implementation(project(":core:domain"))
   implementation(project(":server:media"))
+  implementation(project(":server:metadata"))
   implementation(project(":server:persistence"))
   implementation(project(":server:security"))
   implementation(project(":server:sources:local"))

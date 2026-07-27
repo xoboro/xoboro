@@ -17,6 +17,7 @@ import io.xoboro.core.application.LibraryLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
 import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.MetadataRefreshLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.OAuth2LoginLifecycle
@@ -36,12 +37,15 @@ import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqAnnouncementReadRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookRepository
+import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
 import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqLibraryTrashStore
 import io.xoboro.server.persistence.JooqMediaItemRepository
+import io.xoboro.server.persistence.JooqSeriesMetadataRepository
+import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
@@ -50,9 +54,12 @@ import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
+import io.xoboro.server.metadata.ComicInfoMetadataProvider
+import io.xoboro.server.metadata.MylarSeriesMetadataProvider
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
+import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
@@ -61,6 +68,9 @@ import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
 import io.xoboro.server.tasks.ExecutorFixedRateTaskScheduler
 import io.xoboro.server.tasks.LibraryScanScheduler
+import io.xoboro.server.tasks.RefreshBookMetadataTaskHandler
+import io.xoboro.server.tasks.RefreshMetadataTaskEmitter
+import io.xoboro.server.tasks.RefreshSeriesMetadataTaskHandler
 import io.xoboro.server.tasks.ScanLibraryTaskEmitter
 import io.xoboro.server.tasks.ScanLibraryTaskHandler
 import io.xoboro.server.tasks.ScheduledLeaseHeartbeat
@@ -147,6 +157,9 @@ class XoboroRuntime private constructor(
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
+        val series = JooqSeriesRepository(database)
+        val bookMetadata = JooqBookMetadataRepository(database)
+        val seriesMetadata = JooqSeriesMetadataRepository(database)
         val mediaItems = JooqMediaItemRepository(database, books)
         val media = JooqBookMediaRepository(database)
         val queue = JooqDurableTaskQueue(database)
@@ -336,6 +349,31 @@ class XoboroRuntime private constructor(
             queue = queue,
             currentTimeMillis = System::currentTimeMillis,
           )
+        val localMediaAccess = LocalSourceMediaAccess()
+        val comicInfoMetadataProvider =
+          ComicInfoMetadataProvider(listOf(localMediaAccess))
+        val metadataRefreshLifecycle =
+          MetadataRefreshLifecycle(
+            libraries = libraries,
+            books = books,
+            series = series,
+            bookMetadata = bookMetadata,
+            seriesMetadata = seriesMetadata,
+            bookProviders = listOf(comicInfoMetadataProvider),
+            seriesProviders =
+              listOf(
+                comicInfoMetadataProvider,
+                MylarSeriesMetadataProvider(listOf(LocalSourceSidecarAccess())),
+              ),
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val refreshMetadataTaskEmitter =
+          RefreshMetadataTaskEmitter(
+            books = books,
+            series = series,
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val emptyLibraryTrashTaskEmitter =
           EmptyLibraryTrashTaskEmitter(
             queue = queue,
@@ -344,6 +382,7 @@ class XoboroRuntime private constructor(
         val libraryMaintenanceRequester =
           DurableLibraryMaintenanceRequester(
             analysis = analyzeBookTaskEmitter,
+            metadata = refreshMetadataTaskEmitter,
             trash = emptyLibraryTrashTaskEmitter,
           )
         val libraryTrashStore = JooqLibraryTrashStore(database)
@@ -351,7 +390,7 @@ class XoboroRuntime private constructor(
           AnalyzeBook(
             books = books,
             libraries = libraries,
-            accesses = listOf(LocalSourceMediaAccess()),
+            accesses = listOf(localMediaAccess),
             media = media,
             zipAnalyzer = ZipMediaAnalyzer(),
             currentTimeMillis = System::currentTimeMillis,
@@ -378,6 +417,8 @@ class XoboroRuntime private constructor(
                   },
                 ),
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
+                RefreshBookMetadataTaskHandler(metadataRefreshLifecycle),
+                RefreshSeriesMetadataTaskHandler(metadataRefreshLifecycle),
               ),
             heartbeat = createdHeartbeat,
             currentTimeMillis = System::currentTimeMillis,
