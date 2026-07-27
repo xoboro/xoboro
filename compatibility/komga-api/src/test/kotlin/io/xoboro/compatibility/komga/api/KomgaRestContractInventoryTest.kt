@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(126, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(133, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(39, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(32, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -73,6 +73,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/authors/names"),
         RestEndpoint("GET", "/api/v1/authors/roles"),
         RestEndpoint("GET", "/api/v1/books"),
+        RestEndpoint("GET", "/api/v1/books/duplicates"),
         RestEndpoint("PATCH", "/api/v1/books/metadata"),
         RestEndpoint("GET", "/api/v1/books/latest"),
         RestEndpoint("POST", "/api/v1/books/list"),
@@ -123,6 +124,12 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/metadata/refresh"),
         RestEndpoint("POST", "/api/v1/libraries/{libraryId}/scan"),
         RestEndpoint("GET", "/api/v1/oauth2/providers"),
+        RestEndpoint("GET", "/api/v1/page-hashes"),
+        RestEndpoint("PUT", "/api/v1/page-hashes"),
+        RestEndpoint("GET", "/api/v1/page-hashes/unknown"),
+        RestEndpoint("GET", "/api/v1/page-hashes/unknown/{pageHash}/thumbnail"),
+        RestEndpoint("GET", "/api/v1/page-hashes/{pageHash}"),
+        RestEndpoint("GET", "/api/v1/page-hashes/{pageHash}/thumbnail"),
         RestEndpoint("GET", "/api/v1/publishers"),
         RestEndpoint("GET", "/api/v1/readlists"),
         RestEndpoint("POST", "/api/v1/readlists"),

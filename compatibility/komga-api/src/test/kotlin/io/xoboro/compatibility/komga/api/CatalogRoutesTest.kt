@@ -8,6 +8,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.patch
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -22,6 +23,7 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
@@ -42,6 +44,7 @@ import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqPageHashRepository
 import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqReadProgressRepository
@@ -68,6 +71,11 @@ class CatalogRoutesTest {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("catalog-api.sqlite"))).use {
         database ->
       seedCatalog(database)
+      val booksRepository = JooqBookRepository(database)
+      (1..2).forEach { number ->
+        val book = requireNotNull(booksRepository.findByIdOrNull(BookId("book-$number")))
+        booksRepository.update(book.copy(fileHash = "shared-file", fileSize = 1_024))
+      }
       var userSequence = 0
       val users =
         UserLifecycle(
@@ -78,6 +86,8 @@ class CatalogRoutesTest {
         )
       val catalog = JooqCatalogReadRepository(database)
       val content = SyntheticBookContentAccess()
+      val pageHashes = JooqPageHashRepository(database)
+      val pageHashLifecycle = PageHashLifecycle(pageHashes) { 40 }
       val collections = JooqSeriesCollectionRepository(database)
       val readLists = JooqReadListRepository(database)
       var organizationSequence = 0
@@ -109,6 +119,7 @@ class CatalogRoutesTest {
             komgaClaimRoutes(users)
             komgaCatalogRoutes(catalog)
             komgaMediaRoutes(catalog, content)
+            komgaPageHashRoutes(pageHashes, pageHashLifecycle, content)
             komgaReadProgressRoutes(catalog, progress)
             komgaOrganizationRoutes(collections, readLists, organizations, catalog)
           }
@@ -242,6 +253,61 @@ class CatalogRoutesTest {
           }.status,
         )
         assertEquals(8, content.closedStreams)
+
+        val duplicateBooks =
+          client
+            .get("/api/v1/books/duplicates") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<KomgaBookDto>>()
+        assertEquals(2, duplicateBooks.totalElements)
+        assertEquals(
+          HttpStatusCode.Forbidden,
+          client.get("/api/v1/books/duplicates") {
+            basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          }.status,
+        )
+        val unknownHashes =
+          client
+            .get("/api/v1/page-hashes/unknown") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<PageHashUnknownDto>>()
+        assertEquals(1, unknownHashes.totalElements)
+        assertEquals(2, unknownHashes.content.single().matchCount)
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/page-hashes/unknown/shared-page/thumbnail?resize=300") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.Accepted,
+          client.put("/api/v1/page-hashes") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              PageHashCreationDto(
+                hash = "shared-page",
+                size = 4,
+                action = io.xoboro.core.domain.PageHashAction.IGNORE,
+              ),
+            )
+          }.status,
+        )
+        val knownHashes =
+          client
+            .get("/api/v1/page-hashes?action=IGNORE") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<PageHashKnownDto>>()
+        assertEquals(1, knownHashes.totalElements)
+        assertEquals(2, knownHashes.content.single().matchCount)
+        assertEquals(
+          2,
+          client
+            .get("/api/v1/page-hashes/shared-page") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            }.body<KomgaPageDto<PageHashMatchDto>>()
+            .totalElements,
+        )
 
         val collection =
           client
@@ -548,6 +614,16 @@ class CatalogRoutesTest {
           status = MediaStatus.READY,
           mediaType = "application/zip",
           profile = MediaProfile.DIVINA,
+          pages =
+            listOf(
+              BookPage(
+                number = 1,
+                fileName = "001.png",
+                mediaType = "image/png",
+                fileSize = 4,
+                fileHash = "shared-page",
+              ),
+            ),
           pageCount = 2,
           createdAtMillis = 1,
         ),

@@ -174,6 +174,29 @@ class JooqCatalogReadRepositoryTest {
     }
   }
 
+  @Test
+  fun `finds only books sharing both file hash and size`() {
+    withCatalog("duplicates") { database ->
+      val books = JooqBookRepository(database)
+      val first = requireNotNull(books.findByIdOrNull(BookId("book-1")))
+      val second = requireNotNull(books.findByIdOrNull(BookId("book-2")))
+      val differentSize = requireNotNull(books.findByIdOrNull(BookId("book-3")))
+      books.update(first.copy(fileHash = "shared-file", fileSize = 100))
+      books.update(second.copy(fileHash = "shared-file", fileSize = 100))
+      books.update(differentSize.copy(fileHash = "shared-file", fileSize = 101))
+
+      val duplicates =
+        JooqCatalogReadRepository(database).findBooks(
+          query = BookCatalogQuery(duplicatesOnly = true),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(),
+        )
+
+      assertEquals(2, duplicates.totalElements)
+      assertEquals(setOf("book-1", "book-2"), duplicates.content.map { it.book.id.value }.toSet())
+    }
+  }
+
   private fun withCatalog(
     name: String,
     block: (XoboroDatabase) -> Unit,

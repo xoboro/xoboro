@@ -11,7 +11,9 @@ import java.util.zip.ZipOutputStream
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class ZipMediaAnalyzerTest {
@@ -68,6 +70,31 @@ class ZipMediaAnalyzerTest {
 
     assertEquals(MediaStatus.READY, media.status)
     assertNull(media.pages.single().dimension)
+  }
+
+  @Test
+  fun `hashes only the configured leading and trailing pages`() {
+    val image = png(10, 20)
+    val archive =
+      createZip(
+        "hashes.cbz",
+        (1..8).associate { number -> "%03d.png".format(number) to image },
+      )
+
+    val media =
+      ZipMediaAnalyzer(pageHashing = 3).analyze(
+        bookId = BookId("book-1"),
+        path = archive,
+        analyzeDimensions = false,
+        hashPages = true,
+        createdAtMillis = 1,
+      )
+
+    assertTrue(media.pages.take(3).all { it.fileHash.isNotBlank() })
+    assertEquals(listOf("", ""), media.pages.drop(3).take(2).map { it.fileHash })
+    assertTrue(media.pages.takeLast(3).all { it.fileHash.isNotBlank() })
+    assertEquals(1, media.pages.map { it.fileHash }.filter(String::isNotBlank).distinct().size)
+    assertNotEquals("", media.pages.first().fileHash)
   }
 
   @Test

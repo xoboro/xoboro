@@ -114,6 +114,24 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
             ).toBookPageDto(principal.user),
         )
       }
+      get("/duplicates") {
+        val principal = call.catalogPrincipal()
+        if (!principal.user.isAdmin) {
+          call.respond(HttpStatusCode.Forbidden)
+          return@get
+        }
+        call.respond(
+          catalog
+            .findBooks(
+              query = BookCatalogQuery(deleted = false, duplicatesOnly = true),
+              access = principal.user.catalogAccess(),
+              page =
+                call.catalogPageRequest(
+                  defaultSort = listOf(CatalogSort("fileHash")),
+                ),
+            ).toBookPageDto(principal.user),
+        )
+      }
       get("/{bookId}") {
         val principal = call.catalogPrincipal()
         val item =

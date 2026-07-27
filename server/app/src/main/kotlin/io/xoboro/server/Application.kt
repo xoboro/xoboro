@@ -4,6 +4,7 @@ import io.xoboro.compatibility.komga.api.komgaClaimRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogRoutes
 import io.xoboro.compatibility.komga.api.komgaCatalogMaintenanceRoutes
 import io.xoboro.compatibility.komga.api.komgaMediaRoutes
+import io.xoboro.compatibility.komga.api.komgaPageHashRoutes
 import io.xoboro.compatibility.komga.api.komgaMetadataRoutes
 import io.xoboro.compatibility.komga.api.komgaOrganizationRoutes
 import io.xoboro.compatibility.komga.api.komgaReadProgressRoutes
@@ -30,6 +31,8 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.PageHashLifecycle
+import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
@@ -94,6 +97,8 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
+    pageHashRepository = runtime.pageHashRepository,
+    pageHashLifecycle = runtime.pageHashLifecycle,
     organizationLifecycle = runtime.organizationLifecycle,
     seriesCollectionRepository = runtime.seriesCollectionRepository,
     readListRepository = runtime.readListRepository,
@@ -124,6 +129,8 @@ fun Application.xoboroModule(
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
+  pageHashRepository: PageHashRepository? = null,
+  pageHashLifecycle: PageHashLifecycle? = null,
   organizationLifecycle: OrganizationLifecycle? = null,
   seriesCollectionRepository: SeriesCollectionRepository? = null,
   readListRepository: ReadListRepository? = null,
@@ -220,6 +227,17 @@ fun Application.xoboroModule(
       }
       if (catalogReadRepository != null && bookContentAccess != null) {
         komgaMediaRoutes(catalogReadRepository, bookContentAccess)
+      }
+      if (
+        pageHashRepository != null &&
+        pageHashLifecycle != null &&
+        bookContentAccess != null
+      ) {
+        komgaPageHashRoutes(
+          hashes = pageHashRepository,
+          lifecycle = pageHashLifecycle,
+          content = bookContentAccess,
+        )
       }
       if (
         catalogReadRepository != null &&

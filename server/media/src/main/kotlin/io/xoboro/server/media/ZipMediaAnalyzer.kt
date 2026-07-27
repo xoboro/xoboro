@@ -17,7 +17,13 @@ import org.apache.tika.Tika
 
 class ZipMediaAnalyzer(
   private val tika: Tika = Tika(),
+  private val hasher: Xxh3ContentHasher = Xxh3ContentHasher(),
+  private val pageHashing: Int = DEFAULT_PAGE_HASHING,
 ) {
+  init {
+    require(pageHashing >= 0) { "Page hashing count must not be negative" }
+  }
+
   private val naturalComparator: Comparator<String> =
     CaseInsensitiveSimpleNaturalComparator.getInstance()
 
@@ -25,6 +31,7 @@ class ZipMediaAnalyzer(
     bookId: BookId,
     path: Path,
     analyzeDimensions: Boolean,
+    hashPages: Boolean = false,
     createdAtMillis: Long,
     updatedAtMillis: Long = createdAtMillis,
   ): BookMedia =
@@ -37,7 +44,7 @@ class ZipMediaAnalyzer(
             .sortedWith(compareBy(naturalComparator, ZipEntry::getName))
             .map { entry -> analyzeEntry(archive, entry, analyzeDimensions) }
             .toList()
-        val pages =
+        val indexedPages =
           entries
             .filter { it.mediaType?.startsWith(IMAGE_TYPE_PREFIX) == true }
             .mapIndexed { index, entry ->
@@ -49,6 +56,26 @@ class ZipMediaAnalyzer(
                 dimension = entry.dimension,
               )
             }
+        val pages =
+          if (hashPages && pageHashing > 0) {
+            indexedPages.mapIndexed { index, page ->
+              if (index < pageHashing || index >= indexedPages.size - pageHashing) {
+                page.copy(
+                  fileHash =
+                    runCatching {
+                      val entry = requireNotNull(archive.getEntry(page.fileName))
+                      archive.getInputStream(entry).buffered().use { input ->
+                        hasher.hashPage(input, page.mediaType)
+                      }
+                    }.getOrDefault(""),
+                )
+              } else {
+                page
+              }
+            }
+          } else {
+            indexedPages
+          }
         val files =
           entries
             .filterNot { it.mediaType?.startsWith(IMAGE_TYPE_PREFIX) == true }
@@ -168,5 +195,6 @@ class ZipMediaAnalyzer(
     const val ERROR_NO_PAGES: String = "ERR_1006"
     const val ERROR_ENTRY: String = "ERR_1007"
     private const val IMAGE_TYPE_PREFIX = "image/"
+    const val DEFAULT_PAGE_HASHING: Int = 3
   }
 }
