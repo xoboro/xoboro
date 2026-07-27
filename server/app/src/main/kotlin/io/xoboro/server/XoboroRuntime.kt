@@ -15,6 +15,7 @@ import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CompatibilityMaintenanceRequester
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
@@ -27,12 +28,14 @@ import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.PageHashRepository
+import io.xoboro.core.application.FontResourceCatalog
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.RoutingLibraryRootAccess
 import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
+import io.xoboro.core.application.ServerReleaseCatalog
 import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.application.TransientBookLifecycle
 import io.xoboro.core.application.SequentialReadProgressLifecycle
@@ -51,6 +54,7 @@ import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.LocalTransientBookLifecycle
+import io.xoboro.server.media.LocalFontResourceCatalog
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
@@ -98,10 +102,14 @@ import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
 import io.xoboro.server.tasks.DurableCatalogMaintenanceRequester
 import io.xoboro.server.tasks.DurableCatalogFileLifecycleRequester
+import io.xoboro.server.tasks.DurableCompatibilityMaintenanceRequester
 import io.xoboro.server.tasks.CatalogSourceFileLifecycle
 import io.xoboro.server.tasks.DeleteBookFileTaskHandler
 import io.xoboro.server.tasks.DeleteSeriesFileTaskHandler
 import io.xoboro.server.tasks.ImportBookTaskHandler
+import io.xoboro.server.tasks.GenerateBookArtworkTaskHandler
+import io.xoboro.server.tasks.FindBookArtworkTaskHandler
+import io.xoboro.server.tasks.RemoveDuplicatePagesTaskHandler
 import io.xoboro.server.tasks.DurableTaskWorker
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
@@ -151,6 +159,9 @@ class XoboroRuntime private constructor(
   val historicalEventRepository: HistoricalEventRepository,
   val syncPointRepository: SyncPointRepository,
   val readListImportLifecycle: ReadListImportLifecycle,
+  val fontResourceCatalog: FontResourceCatalog,
+  val serverReleaseCatalog: ServerReleaseCatalog,
+  val compatibilityMaintenanceRequester: CompatibilityMaintenanceRequester,
   val metadataEditingLifecycle: MetadataEditingLifecycle,
   val metadataFacetRepository: MetadataFacetRepository,
   val pageHashRepository: PageHashRepository,
@@ -536,6 +547,13 @@ class XoboroRuntime private constructor(
             idFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
           )
+        val compatibilityMaintenanceRequester =
+          DurableCompatibilityMaintenanceRequester(
+            books = books,
+            queue = queue,
+            taskIdFactory = { UUID.randomUUID().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val libraryTrashStore = JooqLibraryTrashStore(database)
         val analyzeBook =
           AnalyzeBook(
@@ -584,6 +602,21 @@ class XoboroRuntime private constructor(
                 DeleteBookFileTaskHandler(catalogSourceFileLifecycle),
                 DeleteSeriesFileTaskHandler(catalogSourceFileLifecycle),
                 ImportBookTaskHandler(catalogSourceFileLifecycle),
+                GenerateBookArtworkTaskHandler(bookContentAccess, artworkLifecycle),
+                FindBookArtworkTaskHandler(
+                  catalog = catalogReads,
+                  artwork = artworkLifecycle,
+                  queue = queue,
+                  taskIdFactory = { UUID.randomUUID().toString() },
+                  currentTimeMillis = System::currentTimeMillis,
+                ),
+                RemoveDuplicatePagesTaskHandler(
+                  books = books,
+                  libraries = libraries,
+                  pageHashes = pageHashes,
+                  mutations = listOf(LocalSourceMutationAccess()),
+                  scanEmitter = scanEmitter,
+                ),
               ),
             heartbeat = createdHeartbeat,
             currentTimeMillis = System::currentTimeMillis,
@@ -632,6 +665,9 @@ class XoboroRuntime private constructor(
           historicalEventRepository = historicalEvents,
           syncPointRepository = syncPoints,
           readListImportLifecycle = readListImports,
+          fontResourceCatalog = LocalFontResourceCatalog(config.fontsDirectory),
+          serverReleaseCatalog = GithubReleaseCatalog(createdOAuthHttpClient),
+          compatibilityMaintenanceRequester = compatibilityMaintenanceRequester,
           metadataEditingLifecycle = metadataEditing,
           metadataFacetRepository = metadataFacets,
           pageHashRepository = pageHashes,

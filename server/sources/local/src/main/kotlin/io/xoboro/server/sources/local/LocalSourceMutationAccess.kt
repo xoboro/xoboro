@@ -8,6 +8,9 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class LocalSourceMutationAccess : SourceMutationAccess {
   override val sourceId: String = LocalLibraryRootInspector.SOURCE_ID
@@ -67,6 +70,49 @@ class LocalSourceMutationAccess : SourceMutationAccess {
         atomicHardLink(source, destination, request.replaceExisting)
     }
     return destination.toUri().toString()
+  }
+
+  override fun removeArchiveEntries(
+    rootItemId: String,
+    itemId: String,
+    entryNames: Set<String>,
+  ): Int {
+    require(entryNames.isNotEmpty()) { "Archive entry names must not be empty" }
+    require(entryNames.none(String::isBlank)) { "Archive entry names must not be blank" }
+    val root = rootItemId.filePath("Local media root").toRealPath()
+    require(Files.isDirectory(root)) { "Local media root must be a directory: $root" }
+    val archive = itemId.filePath("Local media item").toRealPath()
+    require(archive.startsWith(root)) { "Local media item must remain inside its library root" }
+    require(Files.isRegularFile(archive)) { "Local media item must be a regular file: $archive" }
+    val temporary = Files.createTempFile(archive.parent, ".xoboro-rewrite-", ".tmp")
+    var removed = 0
+    try {
+      ZipInputStream(Files.newInputStream(archive).buffered()).use { input ->
+        ZipOutputStream(Files.newOutputStream(temporary).buffered()).use { output ->
+          while (true) {
+            val entry = input.nextEntry ?: break
+            if (entry.name in entryNames) {
+              removed += 1
+            } else {
+              val replacement =
+                ZipEntry(entry.name).apply {
+                  comment = entry.comment
+                  time = entry.time
+                  extra = entry.extra
+                }
+              output.putNextEntry(replacement)
+              input.copyTo(output)
+              output.closeEntry()
+            }
+            input.closeEntry()
+          }
+        }
+      }
+      if (removed > 0) moveIntoPlace(temporary, archive, replaceExisting = true)
+      return removed
+    } finally {
+      Files.deleteIfExists(temporary)
+    }
   }
 
   private fun atomicCopy(

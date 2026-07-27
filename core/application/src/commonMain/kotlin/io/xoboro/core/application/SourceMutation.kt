@@ -33,4 +33,13 @@ interface SourceMutationAccess {
     destinationParentItemId: String,
     request: SourceImportRequest,
   ): String
+
+  fun removeArchiveEntries(
+    rootItemId: String,
+    itemId: String,
+    entryNames: Set<String>,
+  ): Int =
+    throw UnsupportedOperationException(
+      "Archive entry removal is not supported by source '$sourceId'",
+    )
 }

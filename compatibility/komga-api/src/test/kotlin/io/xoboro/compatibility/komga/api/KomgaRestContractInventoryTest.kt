@@ -37,9 +37,9 @@ class KomgaRestContractInventoryTest {
     assertEquals(130, paths.size)
     assertEquals(165, endpoints.size)
     assertEquals(167, schemas.size)
-    assertEquals(157, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
+    assertEquals(165, PARTIALLY_IMPLEMENTED_ENDPOINTS.size)
     assertTrue(endpoints.containsAll(PARTIALLY_IMPLEMENTED_ENDPOINTS))
-    assertEquals(8, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
+    assertEquals(0, endpoints.minus(PARTIALLY_IMPLEMENTED_ENDPOINTS).size)
     assertTrue(bytes.decodeToString().none { it in '\uAC00'..'\uD7A3' })
   }
 
@@ -61,6 +61,7 @@ class KomgaRestContractInventoryTest {
     val HTTP_METHODS = setOf("get", "post", "put", "patch", "delete", "head", "options")
     val PARTIALLY_IMPLEMENTED_ENDPOINTS =
       setOf(
+        RestEndpoint("GET", "/actuator/info"),
         RestEndpoint("GET", "/api/logout"),
         RestEndpoint("POST", "/api/logout"),
         RestEndpoint("GET", "/api/v1/announcements"),
@@ -103,6 +104,7 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnail"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnails"),
         RestEndpoint("POST", "/api/v1/books/{bookId}/thumbnails"),
+        RestEndpoint("PUT", "/api/v1/books/thumbnails"),
         RestEndpoint("DELETE", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}"),
         RestEndpoint("GET", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}"),
         RestEndpoint("PUT", "/api/v1/books/{bookId}/thumbnails/{thumbnailId}/selected"),
@@ -124,6 +126,9 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/genres"),
         RestEndpoint("GET", "/api/v1/history"),
         RestEndpoint("POST", "/api/v1/filesystem"),
+        RestEndpoint("GET", "/api/v1/fonts/families"),
+        RestEndpoint("GET", "/api/v1/fonts/resource/{fontFamily}/css"),
+        RestEndpoint("GET", "/api/v1/fonts/resource/{fontFamily}/{fontFile}"),
         RestEndpoint("GET", "/api/v1/languages"),
         RestEndpoint("GET", "/api/v1/libraries"),
         RestEndpoint("POST", "/api/v1/libraries"),
@@ -142,8 +147,11 @@ class KomgaRestContractInventoryTest {
         RestEndpoint("GET", "/api/v1/page-hashes/unknown/{pageHash}/thumbnail"),
         RestEndpoint("GET", "/api/v1/page-hashes/{pageHash}"),
         RestEndpoint("GET", "/api/v1/page-hashes/{pageHash}/thumbnail"),
+        RestEndpoint("POST", "/api/v1/page-hashes/{pageHash}/delete-all"),
+        RestEndpoint("POST", "/api/v1/page-hashes/{pageHash}/delete-match"),
         RestEndpoint("GET", "/api/v1/publishers"),
         RestEndpoint("GET", "/api/v1/readlists"),
+        RestEndpoint("GET", "/api/v1/releases"),
         RestEndpoint("POST", "/api/v1/readlists"),
         RestEndpoint("POST", "/api/v1/readlists/match/comicrack"),
         RestEndpoint("DELETE", "/api/v1/readlists/{id}"),

@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. One hundred fifty-seven operations are partially implemented and none are yet
+167 schemas. All 165 operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -48,7 +48,7 @@ Status:
 | Content and extension detection | PARTIAL | Tika entry-content detection and corrupt/empty archive tests; outer signatures and non-ZIP formats pending |
 | Natural page ordering | PARTIAL | Komga-compatible case-insensitive natural comparator fixture; RAR/PDF/EPUB pending |
 | Page dimensions and media profiles | PARTIAL | Optional ImageIO dimensions, DIVINA profile, 64-bit page sizes, and persistence tests; remaining profiles pending |
-| Cover and thumbnail generation | PARTIAL | Durable owner-scoped Book/Series/Collection/ReadList artwork, bounded multipart upload, decoded-pixel safety, JPEG normalization/resizing, atomic selection, uploaded-only deletion, authenticated byte delivery, and first-visible-book page fallback; generated thumbnail persistence, sidecars, and differential caching pending |
+| Cover and thumbnail generation | PARTIAL | Durable owner-scoped Book/Series/Collection/ReadList artwork, bounded multipart upload, decoded-pixel safety, JPEG normalization/resizing, atomic selection, uploaded-only deletion, authenticated byte delivery, first-visible-book page fallback, and low-priority bulk Book poster generation with generated-only atomic replacement; sidecars and differential caching pending |
 | Page streaming and conversion | PARTIAL | Exact analyzed-entry streaming, EPUB resource streaming, PDF JPEG rendering and raw single-page extraction, raw and zero-based routes, JPEG/PNG conversion, bounded page thumbnails, role and catalog-access enforcement, CSP, and resource-lifetime tests; PDF Accept negotiation and differential caching semantics pending |
 | Book, series, and read-list downloads | PARTIAL | Original book download streams source materialization with attachment naming and single-byte-range responses; Series and ReadList ZIPs stream entries without whole-archive buffering with role/access enforcement and collision-safe names; differential archive metadata pending |
 | Incorrect extension repair | TODO | |
@@ -69,7 +69,7 @@ Status:
 | File import, upgrade, and deletion | PARTIAL | Administrator COPY/MOVE/HARDLINK imports and upgrades use canonical root containment, validated destination leaves, sibling temporary files, atomic replacement, retry-safe deletion, and durable tasks; non-local mutation adapters pending |
 | Filesystem and transient import discovery | PARTIAL | Administrator filesystem listing hides dot entries and validates absolute directories; session-scoped transient CBZ/ZIP, EPUB, and PDF discovery rejects Library overlap, reuses production analysis, and streams previews; differential envelopes and remote import pending |
 | Duplicate file detection | PARTIAL | Administrator Book route groups non-empty equal file hashes and sizes in SQLite with stable paging and Komga DTO projection; differential sorting pending |
-| Duplicate page detection and removal | PARTIAL | Known/unknown/match queries, action updates, live bounded thumbnails, SQL aggregation/paging, restart persistence, and administrator routes are implemented; atomic source mutation and automatic deletion remain pending |
+| Duplicate page detection and removal | PARTIAL | Known/unknown/match queries, action updates, live bounded thumbnails, SQL aggregation/paging, restart persistence, administrator routes, highest-priority per-Book jobs, atomic local CBZ rewriting, deletion counters, and scan reconciliation are implemented; non-local mutation and automatic policy execution remain pending |
 
 ## Metadata
 
@@ -132,7 +132,7 @@ Status:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Komga REST API v1/v2 | PARTIAL | 157 of 165 operations have an implementation in progress, including security/settings/library surfaces, catalog reads, media/WebPub delivery, organization, metadata, artwork, target maintenance, source-aware file lifecycle, archives, filesystem discovery, transient analysis, history, sync-point cleanup, ComicRack matching, and Mihon progress adapters; differential completion and the remaining eight operations pending |
+| Komga REST API v1/v2 | PARTIAL | All 165 pinned operations have an implementation in progress, including management info, font resources, release discovery, durable poster regeneration, and atomic duplicate-page removal; differential certification and exact schema/error completion pending |
 | Komga authentication and session semantics | PARTIAL | Basic, `X-API-Key`, `KOMGA-SESSION`, `X-Auth-Token`, and `komga-remember-me` authentication, multi-provider principal propagation, seven-day inactivity, 365-day remember-me restoration, transport conversion, logout, credential deletion, password-signature invalidation, and security-change invalidation tests; OAuth pending |
 | OpenAPI document | TODO | |
 | OPDS v1 | TODO | |
