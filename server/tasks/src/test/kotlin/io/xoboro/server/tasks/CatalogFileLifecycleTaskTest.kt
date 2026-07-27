@@ -7,6 +7,7 @@ import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.HistoricalEventPageRequest
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -14,6 +15,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqHistoricalEventRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
@@ -80,6 +82,8 @@ class CatalogFileLifecycleTaskTest {
     withCatalog("execution") { database, root, seriesDirectory ->
       val queue = JooqDurableTaskQueue(database)
       val scanEmitter = ScanLibraryTaskEmitter(queue) { 200 }
+      val history = JooqHistoricalEventRepository(database)
+      var eventSequence = 0
       val lifecycle =
         CatalogSourceFileLifecycle(
           books = JooqBookRepository(database),
@@ -87,6 +91,9 @@ class CatalogFileLifecycleTaskTest {
           libraries = JooqLibraryRepository(database),
           mutations = listOf(LocalSourceMutationAccess()),
           scanEmitter = scanEmitter,
+          history = history,
+          historyIdFactory = { "event-${++eventSequence}" },
+          currentTimeMillis = { 300 + eventSequence.toLong() },
         )
       val importedSource = Files.writeString(tempDirectory.resolve("import.cbz"), "imported")
 
@@ -106,6 +113,16 @@ class CatalogFileLifecycleTaskTest {
       lifecycle.deleteBook(BOOK_ID)
       assertTrue(!Files.exists(existing))
       assertEquals(1, queue.counts().pending)
+      val events =
+        history.findAll(
+          HistoricalEventPageRequest(
+            unpaged = true,
+          ),
+        ).content
+      assertEquals(listOf("BookFileDeleted", "BookImported"), events.map { it.type })
+      assertEquals(BOOK_ID, events.first().bookId)
+      assertEquals(SERIES_ID, events.first().seriesId)
+      assertEquals("No", events.last().properties["upgrade"])
     }
   }
 

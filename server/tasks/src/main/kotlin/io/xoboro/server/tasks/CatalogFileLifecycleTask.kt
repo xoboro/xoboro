@@ -12,8 +12,11 @@ import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryRepository
+import io.xoboro.core.domain.HistoricalEvent
+import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesRepository
+import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -114,6 +117,9 @@ class CatalogSourceFileLifecycle(
   private val libraries: LibraryRepository,
   mutations: Collection<SourceMutationAccess>,
   private val scanEmitter: ScanLibraryTaskEmitter,
+  private val history: HistoricalEventRepository? = null,
+  private val historyIdFactory: () -> String = { UUID.randomUUID().toString() },
+  private val currentTimeMillis: () -> Long = System::currentTimeMillis,
 ) {
   private val mutationsBySourceId = mutations.associateBy(SourceMutationAccess::sourceId)
 
@@ -128,7 +134,18 @@ class CatalogSourceFileLifecycle(
     val book = books.findByIdOrNull(id) ?: return
     if (book.deletedAtMillis != null) return
     val library = libraries.findById(book.libraryId)
-    mutation(library).delete(library.root.itemId, book.sourceItemId)
+    if (mutation(library).delete(library.root.itemId, book.sourceItemId)) {
+      record(
+        type = "BookFileDeleted",
+        bookId = book.id,
+        seriesId = book.seriesId,
+        properties =
+          mapOf(
+            "reason" to "File was deleted by user request",
+            "name" to book.relativePath,
+          ),
+      )
+    }
     scanEmitter.scanLibrary(library.id, priority = TaskPriority.HIGHEST)
   }
 
@@ -139,7 +156,20 @@ class CatalogSourceFileLifecycle(
     val source = mutation(library)
     books.findAllBySeriesId(item.id)
       .filter { it.deletedAtMillis == null }
-      .forEach { book -> source.delete(library.root.itemId, book.sourceItemId) }
+      .forEach { book ->
+        if (source.delete(library.root.itemId, book.sourceItemId)) {
+          record(
+            type = "BookFileDeleted",
+            bookId = book.id,
+            seriesId = book.seriesId,
+            properties =
+              mapOf(
+                "reason" to "File was deleted by user request",
+                "name" to book.relativePath,
+              ),
+          )
+        }
+      }
     scanEmitter.scanLibrary(library.id, priority = TaskPriority.HIGHEST)
   }
 
@@ -172,7 +202,38 @@ class CatalogSourceFileLifecycle(
     if (upgrade != null && upgrade.sourceItemId != importedItemId) {
       source.delete(library.root.itemId, upgrade.sourceItemId)
     }
+    record(
+      type = "BookImported",
+      seriesId = target.id,
+      properties =
+        mapOf(
+          "name" to importedItemId,
+          "source" to command.sourceFile,
+          "upgrade" to if (upgrade == null) "No" else "Yes",
+        ),
+    )
     scanEmitter.scanLibrary(library.id, priority = TaskPriority.HIGHEST)
+  }
+
+  private fun record(
+    type: String,
+    bookId: BookId? = null,
+    seriesId: SeriesId? = null,
+    properties: Map<String, String>,
+  ) {
+    val repository = history ?: return
+    val now = currentTimeMillis()
+    require(now >= 0) { "Historical event timestamp must not be negative" }
+    repository.insert(
+      HistoricalEvent(
+        id = historyIdFactory(),
+        type = type,
+        timestampMillis = now,
+        bookId = bookId,
+        seriesId = seriesId,
+        properties = properties,
+      ),
+    )
   }
 
   private fun mutation(library: Library): SourceMutationAccess =

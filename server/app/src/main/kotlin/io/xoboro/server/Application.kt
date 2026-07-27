@@ -21,6 +21,10 @@ import io.xoboro.compatibility.komga.api.komgaLibraryRoutes
 import io.xoboro.compatibility.komga.api.komgaFileSystemRoutes
 import io.xoboro.compatibility.komga.api.komgaFileLifecycleRoutes
 import io.xoboro.compatibility.komga.api.komgaTransientBookRoutes
+import io.xoboro.compatibility.komga.api.komgaHistoryRoutes
+import io.xoboro.compatibility.komga.api.komgaSyncPointRoutes
+import io.xoboro.compatibility.komga.api.komgaTachiyomiProgressRoutes
+import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -45,11 +49,15 @@ import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.TransientBookLifecycle
+import io.xoboro.core.application.SequentialReadProgressLifecycle
+import io.xoboro.core.application.ReadListImportLifecycle
+import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
+import io.xoboro.core.domain.SyncPointRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -103,6 +111,10 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     catalogMaintenanceRequester = runtime.catalogMaintenanceRequester,
     catalogFileLifecycleRequester = runtime.catalogFileLifecycleRequester,
     transientBookLifecycle = runtime.transientBookLifecycle,
+    sequentialReadProgressLifecycle = runtime.sequentialReadProgressLifecycle,
+    historicalEventRepository = runtime.historicalEventRepository,
+    syncPointRepository = runtime.syncPointRepository,
+    readListImportLifecycle = runtime.readListImportLifecycle,
     metadataEditingLifecycle = runtime.metadataEditingLifecycle,
     metadataFacetRepository = runtime.metadataFacetRepository,
     bookContentAccess = runtime.bookContentAccess,
@@ -137,6 +149,10 @@ fun Application.xoboroModule(
   catalogMaintenanceRequester: CatalogMaintenanceRequester? = null,
   catalogFileLifecycleRequester: CatalogFileLifecycleRequester? = null,
   transientBookLifecycle: TransientBookLifecycle? = null,
+  sequentialReadProgressLifecycle: SequentialReadProgressLifecycle? = null,
+  historicalEventRepository: HistoricalEventRepository? = null,
+  syncPointRepository: SyncPointRepository? = null,
+  readListImportLifecycle: ReadListImportLifecycle? = null,
   metadataEditingLifecycle: MetadataEditingLifecycle? = null,
   metadataFacetRepository: MetadataFacetRepository? = null,
   bookContentAccess: BookContentAccess? = null,
@@ -236,6 +252,10 @@ fun Application.xoboroModule(
       catalogMaintenanceRequester?.let(::komgaCatalogMaintenanceRoutes)
       catalogFileLifecycleRequester?.let(::komgaFileLifecycleRoutes)
       transientBookLifecycle?.let(::komgaTransientBookRoutes)
+      sequentialReadProgressLifecycle?.let(::komgaTachiyomiProgressRoutes)
+      historicalEventRepository?.let(::komgaHistoryRoutes)
+      syncPointRepository?.let(::komgaSyncPointRoutes)
+      readListImportLifecycle?.let(::komgaComicRackRoutes)
       if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
         komgaMetadataRoutes(metadataEditingLifecycle, metadataFacetRepository)
       }
