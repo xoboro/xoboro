@@ -176,7 +176,7 @@ class OAuth2RoutesTest {
   private class FakeGateway : OAuth2IdentityGateway {
     var authorizationCode: String? = null
 
-    override fun authorizationUrl(
+    override suspend fun authorizationUrl(
       registration: OAuth2ClientRegistration,
       redirectUri: String,
       state: String,

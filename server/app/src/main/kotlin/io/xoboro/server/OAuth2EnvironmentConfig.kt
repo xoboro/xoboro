@@ -50,15 +50,15 @@ object OAuth2EnvironmentConfig {
       authorizationUri =
         environment["${providerPrefix}AUTHORIZATION_URI"]
           ?: builtIn?.authorizationUri
-          ?: error("Missing OAuth2 authorization URI for $registrationId"),
+          ?: requiredForOAuth2(protocol, "authorization URI", registrationId),
       tokenUri =
         environment["${providerPrefix}TOKEN_URI"]
           ?: builtIn?.tokenUri
-          ?: error("Missing OAuth2 token URI for $registrationId"),
+          ?: requiredForOAuth2(protocol, "token URI", registrationId),
       userInfoUri =
         environment["${providerPrefix}USER_INFO_URI"]
           ?: builtIn?.userInfoUri
-          ?: error("Missing OAuth2 user-info URI for $registrationId"),
+          ?: requiredForOAuth2(protocol, "user-info URI", registrationId),
       scopes = scopes,
       protocol = protocol,
       issuerUri = issuer,
@@ -79,6 +79,17 @@ object OAuth2EnvironmentConfig {
 
   private fun Map<String, String>.required(key: String): String =
     get(key)?.takeIf(String::isNotBlank) ?: error("Missing required OAuth2 setting: $key")
+
+  private fun requiredForOAuth2(
+    protocol: OAuth2Protocol,
+    setting: String,
+    registrationId: String,
+  ): String? =
+    if (protocol == OAuth2Protocol.OAUTH2) {
+      error("Missing OAuth2 $setting for $registrationId")
+    } else {
+      null
+    }
 
   private data class BuiltInProvider(
     val clientName: String,
