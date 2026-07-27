@@ -104,6 +104,49 @@ class LibraryMaintenanceTaskTest {
     }
   }
 
+  @Test
+  fun `metadata refresh queues active books before their series in one exclusion group`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("metadata.sqlite"))).use { database ->
+      val queue = JooqDurableTaskQueue(database)
+      insertCatalog(database)
+      val emitter =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 300 },
+        )
+
+      assertEquals(2, emitter.refreshLibrary(LIBRARY_ID))
+      val bookTask =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-1",
+            leaseToken = "lease-book",
+            nowMillis = 300,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+      assertEquals("REFRESH_BOOK_METADATA_book-active", bookTask.task.id)
+      assertEquals(RefreshBookMetadataTaskHandler.TASK_TYPE, bookTask.task.type)
+      assertEquals(SERIES_ID.value, bookTask.task.groupId)
+      assertTrue(queue.complete(bookTask.task.id, "lease-book"))
+
+      val seriesTask =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-1",
+            leaseToken = "lease-series",
+            nowMillis = 300,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+      assertEquals("REFRESH_SERIES_METADATA_series-1", seriesTask.task.id)
+      assertEquals(RefreshSeriesMetadataTaskHandler.TASK_TYPE, seriesTask.task.type)
+      assertEquals(SERIES_ID.value, seriesTask.task.groupId)
+    }
+  }
+
   private fun insertCatalog(database: XoboroDatabase) {
     JooqLibraryRepository(database).insert(
       Library(

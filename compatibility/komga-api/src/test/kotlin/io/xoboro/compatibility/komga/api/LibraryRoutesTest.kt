@@ -68,6 +68,7 @@ class LibraryRoutesTest {
         _,
         _,
         _,
+        _,
       ->
       client.claimAdministrator()
       assertEquals(
@@ -202,6 +203,7 @@ class LibraryRoutesTest {
         _,
         scans,
         analyses,
+        metadataRefreshes,
         trash,
       ->
       client.claimAdministrator()
@@ -282,6 +284,13 @@ class LibraryRoutesTest {
       )
       assertEquals(
         HttpStatusCode.Accepted,
+        client.post("/api/v1/libraries/${created.id}/metadata/refresh") {
+          adminCredentials()
+        }.status,
+      )
+      assertEquals(listOf(LibraryId(created.id)), metadataRefreshes)
+      assertEquals(
+        HttpStatusCode.Accepted,
         client.post("/api/v1/libraries/${created.id}/empty-trash") {
           adminCredentials()
         }.status,
@@ -306,6 +315,7 @@ class LibraryRoutesTest {
         maintenance: RecordingMaintenanceQueue,
         scans: MutableList<Pair<LibraryId, Boolean>>,
         analyses: MutableList<LibraryId>,
+        metadataRefreshes: MutableList<LibraryId>,
         trash: MutableList<LibraryId>,
       ) -> Unit,
   ) {
@@ -340,6 +350,7 @@ class LibraryRoutesTest {
         )
       val scans = mutableListOf<Pair<LibraryId, Boolean>>()
       val analyses = mutableListOf<LibraryId>()
+      val metadataRefreshes = mutableListOf<LibraryId>()
       val trash = mutableListOf<LibraryId>()
       testApplication {
         application {
@@ -363,6 +374,11 @@ class LibraryRoutesTest {
                     return 1
                   }
 
+                  override fun refreshMetadata(libraryId: LibraryId): Int {
+                    metadataRefreshes += libraryId
+                    return 1
+                  }
+
                   override fun emptyTrash(libraryId: LibraryId): Boolean {
                     trash += libraryId
                     return true
@@ -377,7 +393,16 @@ class LibraryRoutesTest {
               json(KOMGA_JSON)
             }
           }
-        assertions(client, users, libraries, maintenance, scans, analyses, trash)
+        assertions(
+          client,
+          users,
+          libraries,
+          maintenance,
+          scans,
+          analyses,
+          metadataRefreshes,
+          trash,
+        )
       }
     }
   }
