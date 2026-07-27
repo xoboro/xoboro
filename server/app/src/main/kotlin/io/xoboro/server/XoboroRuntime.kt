@@ -1,12 +1,18 @@
 package io.xoboro.server
 
 import com.github.f4b6a3.tsid.TsidCreator
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.serialization.kotlinx.json.json
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
+import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
@@ -30,6 +36,7 @@ import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
 import io.xoboro.server.security.InMemoryUserSessionRepository
+import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.sources.local.LocalSourceInventory
@@ -45,20 +52,25 @@ import io.xoboro.server.tasks.TaskWorkerPool
 import io.xoboro.server.tasks.TaskWorkerPoolPolicy
 import io.xoboro.server.tasks.TaskWorkerPolicy
 import java.util.UUID
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
+import kotlinx.serialization.json.Json
 
 class XoboroRuntime private constructor(
   private val database: XoboroDatabase,
   private val libraryScanScheduler: LibraryScanScheduler,
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
+  private val oauthHttpClient: HttpClient,
   val userLifecycle: UserLifecycle,
   val apiKeyLifecycle: ApiKeyLifecycle,
   val authenticationActivityLifecycle: AuthenticationActivityLifecycle,
   val userSessionLifecycle: UserSessionLifecycle,
   val rememberMeTokenService: RememberMeTokenService,
+  val oauth2LoginLifecycle: OAuth2LoginLifecycle,
   val serverSettingsLifecycle: ServerSettingsLifecycle,
   val clientSettingsLifecycle: ClientSettingsLifecycle,
   val announcementLifecycle: AnnouncementLifecycle,
@@ -81,6 +93,7 @@ class XoboroRuntime private constructor(
       libraryScanScheduler,
       workerPool,
       heartbeat,
+      oauthHttpClient,
       database,
     ).forEach { resource ->
       try {
@@ -111,6 +124,7 @@ class XoboroRuntime private constructor(
       var heartbeat: ScheduledLeaseHeartbeat? = null
       var workerPool: TaskWorkerPool? = null
       var libraryScanScheduler: LibraryScanScheduler? = null
+      var oauthHttpClient: HttpClient? = null
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
@@ -162,6 +176,35 @@ class XoboroRuntime private constructor(
             plainTokenFactory = { UUID.randomUUID().toString().replace("-", "") },
             currentTimeMillis = System::currentTimeMillis,
             inactivityTimeoutMillis = DEFAULT_SESSION_TIMEOUT_MILLIS,
+          )
+        val createdOAuthHttpClient =
+          HttpClient(CIO) {
+            expectSuccess = true
+            followRedirects = false
+            install(HttpTimeout) {
+              requestTimeoutMillis = 15_000
+              connectTimeoutMillis = 10_000
+              socketTimeoutMillis = 15_000
+            }
+            install(ContentNegotiation) {
+              json(Json { ignoreUnknownKeys = true })
+            }
+          }
+        oauthHttpClient = createdOAuthHttpClient
+        val secureRandom = SecureRandom()
+        val oauth2LoginLifecycle =
+          OAuth2LoginLifecycle(
+            registrations = config.oauth2Registrations,
+            users = userLifecycle,
+            pendingAuthorizations = InMemoryOAuth2PendingAuthorizationStore(),
+            identityGateway = HttpOAuth2IdentityGateway(createdOAuthHttpClient),
+            accountCreationEnabled = config.oauth2AccountCreation,
+            oidcEmailVerificationEnabled = config.oidcEmailVerification,
+            randomPasswordFactory = { secureRandom.urlToken(24) },
+            stateFactory = { secureRandom.urlToken(32) },
+            browserBindingFactory = { secureRandom.urlToken(32) },
+            nonceFactory = { secureRandom.urlToken(32) },
+            currentTimeMillis = System::currentTimeMillis,
           )
         val rememberMeTokenService =
           SpringCompatibleRememberMeTokenService(
@@ -257,11 +300,13 @@ class XoboroRuntime private constructor(
           libraryScanScheduler = createdLibraryScanScheduler,
           heartbeat = createdHeartbeat,
           workerPool = createdWorkerPool,
+          oauthHttpClient = createdOAuthHttpClient,
           userLifecycle = userLifecycle,
           apiKeyLifecycle = apiKeyLifecycle,
           authenticationActivityLifecycle = authenticationActivityLifecycle,
           userSessionLifecycle = userSessionLifecycle,
           rememberMeTokenService = rememberMeTokenService,
+          oauth2LoginLifecycle = oauth2LoginLifecycle,
           serverSettingsLifecycle = serverSettingsLifecycle,
           clientSettingsLifecycle = clientSettingsLifecycle,
           announcementLifecycle = announcementLifecycle,
@@ -277,9 +322,17 @@ class XoboroRuntime private constructor(
         runCatching { libraryScanScheduler?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { workerPool?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { heartbeat?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+        runCatching { oauthHttpClient?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { database.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         throw failure
       }
     }
   }
+}
+
+private fun SecureRandom.urlToken(byteCount: Int): String {
+  require(byteCount > 0)
+  return ByteArray(byteCount)
+    .also(::nextBytes)
+    .let(Base64.getUrlEncoder().withoutPadding()::encodeToString)
 }

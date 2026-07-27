@@ -91,9 +91,18 @@ editing source:
 | `XOBORO_TASK_FAILURE_POLL_MILLIS` | `1000` |
 | `XOBORO_TASK_LEASE_MILLIS` | `600000` |
 | `XOBORO_SHUTDOWN_TIMEOUT_MILLIS` | `30000` |
+| `KOMGA_OAUTH2_ACCOUNT_CREATION` | `false` |
+| `KOMGA_OIDC_EMAIL_VERIFICATION` | `true` |
 
 Malformed or out-of-range overrides fail startup instead of silently falling
 back to another value.
+
+OAuth2 clients use Spring Security's environment naming, for example
+`SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID` and the matching
+`..._CLIENT_SECRET`. Custom providers also set the corresponding
+`SPRING_SECURITY_OAUTH2_CLIENT_PROVIDER_<ID>_AUTHORIZATION_URI`, `TOKEN_URI`,
+and `USER_INFO_URI`; OIDC providers additionally set `ISSUER_URI` and
+`JWK_SET_URI`. Secrets are read at startup and are never returned by an API.
 
 At startup, Xoboro enqueues scans for libraries with `scanOnStartup` enabled
 and registers each non-disabled `scanInterval`. Filesystem work runs through

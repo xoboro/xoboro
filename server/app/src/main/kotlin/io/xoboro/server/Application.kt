@@ -6,6 +6,7 @@ import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
 import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
+import io.xoboro.compatibility.komga.api.komgaOAuth2Routes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -13,6 +14,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
+import io.xoboro.core.application.OAuth2LoginLifecycle
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
@@ -58,6 +60,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     authenticationActivityLifecycle = runtime.authenticationActivityLifecycle,
     userSessionLifecycle = runtime.userSessionLifecycle,
     rememberMeTokenService = runtime.rememberMeTokenService,
+    oauth2LoginLifecycle = runtime.oauth2LoginLifecycle,
     clientSettingsLifecycle = runtime.clientSettingsLifecycle,
     announcementLifecycle = runtime.announcementLifecycle,
     serverSettingsLifecycle = runtime.serverSettingsLifecycle,
@@ -74,6 +77,7 @@ fun Application.xoboroModule(
   authenticationActivityLifecycle: AuthenticationActivityLifecycle? = null,
   userSessionLifecycle: UserSessionLifecycle? = null,
   rememberMeTokenService: RememberMeTokenService? = null,
+  oauth2LoginLifecycle: OAuth2LoginLifecycle? = null,
   clientSettingsLifecycle: ClientSettingsLifecycle? = null,
   announcementLifecycle: AnnouncementLifecycle? = null,
   serverSettingsLifecycle: ServerSettingsLifecycle? = null,
@@ -140,6 +144,13 @@ fun Application.xoboroModule(
       clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
       announcementLifecycle?.let(::komgaAnnouncementRoutes)
       serverSettingsLifecycle?.let(::komgaServerSettingsRoutes)
+      oauth2LoginLifecycle?.let { oauth2 ->
+        komgaOAuth2Routes(
+          oauth2 = oauth2,
+          sessions = requireNotNull(userSessionLifecycle),
+          authenticationActivities = authenticationActivityLifecycle,
+        )
+      }
     }
     if (contextPath == null) {
       routes()
