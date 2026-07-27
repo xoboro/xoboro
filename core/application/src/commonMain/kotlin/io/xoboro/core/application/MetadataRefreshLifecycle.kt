@@ -27,7 +27,18 @@ data class BookMetadataPatch(
   val tags: Set<String>? = null,
   val isbn: String? = null,
   val links: List<WebLink>? = null,
+  val readLists: List<ReadListMetadataEntry> = emptyList(),
 )
+
+data class ReadListMetadataEntry(
+  val name: String,
+  val number: Int? = null,
+) {
+  init {
+    require(name.isNotBlank()) { "Read-list metadata name must not be blank" }
+    require(name == name.trim()) { "Read-list metadata name must be trimmed" }
+  }
+}
 
 data class SeriesMetadataPatch(
   val status: SeriesStatus? = null,
@@ -42,6 +53,7 @@ data class SeriesMetadataPatch(
   val tags: Set<String>? = null,
   val totalBookCount: Int? = null,
   val links: List<WebLink>? = null,
+  val collections: Set<String> = emptySet(),
 )
 
 fun interface BookMetadataProvider {
@@ -49,6 +61,8 @@ fun interface BookMetadataProvider {
     library: Library,
     book: Book,
   ): BookMetadataPatch?
+
+  fun shouldApplyBookMetadata(library: Library): Boolean = true
 }
 
 fun interface SeriesMetadataProvider {
@@ -57,6 +71,21 @@ fun interface SeriesMetadataProvider {
     series: Series,
     books: List<Book>,
   ): SeriesMetadataPatch?
+
+  fun shouldApplySeriesMetadata(library: Library): Boolean = true
+}
+
+interface MetadataOrganizationWriter {
+  fun addBookToReadList(
+    name: String,
+    bookId: BookId,
+    number: Int?,
+  )
+
+  fun addSeriesToCollection(
+    name: String,
+    seriesId: SeriesId,
+  )
 }
 
 interface SourceSidecarAccess {
@@ -80,6 +109,7 @@ class MetadataRefreshLifecycle(
   private val seriesProviders: List<SeriesMetadataProvider>,
   private val currentTimeMillis: () -> Long,
   private val eventPublisher: CatalogMutationEventPublisher = CatalogMutationEventPublisher {},
+  private val organizationWriter: MetadataOrganizationWriter? = null,
 ) {
   fun refreshBook(bookId: BookId): BookMetadata? {
     val book = books.findByIdOrNull(bookId) ?: return null
@@ -94,11 +124,21 @@ class MetadataRefreshLifecycle(
           createdAtMillis = book.createdAtMillis,
           updatedAtMillis = book.updatedAtMillis,
         )
-    val updated =
-      bookProviders.fold(existing) { metadata, provider ->
-        provider.provide(library, book)?.let { patch -> metadata.applyPatch(patch) } ?: metadata
-      }.copy(updatedAtMillis = now(existing.updatedAtMillis))
-    bookMetadata.upsert(updated)
+    var updated = existing
+    var metadataChanged = false
+    bookProviders.forEach { provider ->
+      provider.provide(library, book)?.let { patch ->
+        patch.readLists.forEach { entry ->
+          organizationWriter?.addBookToReadList(entry.name, book.id, entry.number)
+        }
+        if (provider.shouldApplyBookMetadata(library)) {
+          updated = updated.applyPatch(patch)
+          metadataChanged = true
+        }
+      }
+    }
+    if (!metadataChanged) return existing
+    bookMetadata.upsert(updated.copy(updatedAtMillis = now(existing.updatedAtMillis)))
     return bookMetadata.findByBookIdOrNull(book.id)?.also {
       eventPublisher.publish(
         CatalogMutationEvent.Book(
@@ -123,13 +163,21 @@ class MetadataRefreshLifecycle(
           createdAtMillis = item.createdAtMillis,
           updatedAtMillis = item.updatedAtMillis,
         )
-    val updated =
-      seriesProviders.fold(existing) { metadata, provider ->
-        provider.provide(library, item, seriesBooks)?.let { patch ->
-          metadata.applyPatch(patch)
-        } ?: metadata
-      }.copy(updatedAtMillis = now(existing.updatedAtMillis))
-    seriesMetadata.upsert(updated)
+    var updated = existing
+    var metadataChanged = false
+    seriesProviders.forEach { provider ->
+      provider.provide(library, item, seriesBooks)?.let { patch ->
+        patch.collections.forEach { name ->
+          organizationWriter?.addSeriesToCollection(name, item.id)
+        }
+        if (provider.shouldApplySeriesMetadata(library)) {
+          updated = updated.applyPatch(patch)
+          metadataChanged = true
+        }
+      }
+    }
+    if (!metadataChanged) return existing
+    seriesMetadata.upsert(updated.copy(updatedAtMillis = now(existing.updatedAtMillis)))
     return seriesMetadata.findBySeriesIdOrNull(item.id)?.also {
       eventPublisher.publish(
         CatalogMutationEvent.Series(

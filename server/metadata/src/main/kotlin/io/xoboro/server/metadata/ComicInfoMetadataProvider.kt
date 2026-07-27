@@ -2,6 +2,7 @@ package io.xoboro.server.metadata
 
 import io.xoboro.core.application.BookMetadataPatch
 import io.xoboro.core.application.BookMetadataProvider
+import io.xoboro.core.application.ReadListMetadataEntry
 import io.xoboro.core.application.SeriesMetadataPatch
 import io.xoboro.core.application.SeriesMetadataProvider
 import io.xoboro.core.domain.Author
@@ -35,7 +36,12 @@ class ComicInfoMetadataProvider(
     library: Library,
     book: Book,
   ): BookMetadataPatch? {
-    if (!library.settings.importComicInfoBook) return null
+    if (
+      !library.settings.importComicInfoBook &&
+      !library.settings.importComicInfoReadList
+    ) {
+      return null
+    }
     val comicInfo = readComicInfo(library, book) ?: return null
     return BookMetadataPatch(
       title = comicInfo.nonBlank("Title"),
@@ -44,18 +50,33 @@ class ComicInfoMetadataProvider(
       numberSort = comicInfo.nonBlank("Number")?.toFloatOrNull(),
       releaseDate = comicInfo.releaseDate(),
       authors = comicInfo.authors().ifEmpty { null },
-      tags = comicInfo.commaSeparated("Tags").ifEmpty { null },
+      tags = comicInfo.commaSeparated("Tags").mapTo(linkedSetOf()) { it.lowercase() }
+        .ifEmpty { null },
       isbn = comicInfo.validIsbnOrNull(),
       links = comicInfo.links().ifEmpty { null },
+      readLists =
+        if (library.settings.importComicInfoReadList) {
+          comicInfo.readLists()
+        } else {
+          emptyList()
+        },
     )
   }
+
+  override fun shouldApplyBookMetadata(library: Library): Boolean =
+    library.settings.importComicInfoBook
 
   override fun provide(
     library: Library,
     series: Series,
     books: List<Book>,
   ): SeriesMetadataPatch? {
-    if (!library.settings.importComicInfoSeries) return null
+    if (
+      !library.settings.importComicInfoSeries &&
+      !library.settings.importComicInfoCollection
+    ) {
+      return null
+    }
     val source =
       books
         .asSequence()
@@ -90,8 +111,17 @@ class ComicInfoMetadataProvider(
       language = source.normalizedLanguage(),
       genres = source.commaSeparated("Genre").ifEmpty { null },
       totalBookCount = source.nonBlank("Count")?.toIntOrNull(),
+      collections =
+        if (library.settings.importComicInfoCollection) {
+          source.commaSeparated("SeriesGroup")
+        } else {
+          emptySet()
+        },
     )
   }
+
+  override fun shouldApplySeriesMetadata(library: Library): Boolean =
+    library.settings.importComicInfoSeries
 
   private fun readComicInfo(
     library: Library,
@@ -200,6 +230,36 @@ class ComicInfoMetadataProvider(
           WebLink(uri.host ?: uri.scheme, uri.toString())
         }.getOrNull()
       }.orEmpty()
+
+  private fun Map<String, String>.readLists(): List<ReadListMetadataEntry> =
+    buildList {
+      nonBlank("AlternateSeries")?.let { name ->
+        add(
+          ReadListMetadataEntry(
+            name = name,
+            number = nonBlank("AlternateNumber")?.toIntOrNull(),
+          ),
+        )
+      }
+      val arcs =
+        nonBlank("StoryArc")
+          ?.split(',')
+          ?.map { it.trim().ifBlank { null } }
+          .orEmpty()
+      val numbers =
+        nonBlank("StoryArcNumber")
+          ?.split(',')
+          ?.map { it.trim().toIntOrNull() }
+      if (numbers.isNullOrEmpty()) {
+        addAll(arcs.filterNotNull().map(::ReadListMetadataEntry))
+      } else {
+        arcs.zip(numbers).forEach { (arc, number) ->
+          if (arc != null && number != null) {
+            add(ReadListMetadataEntry(arc, number))
+          }
+        }
+      }
+    }
 
   private fun Map<String, String>.validIsbnOrNull(): String? {
     val candidate =
