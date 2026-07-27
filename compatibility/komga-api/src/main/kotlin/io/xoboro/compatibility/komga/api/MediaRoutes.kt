@@ -389,7 +389,7 @@ internal fun komgaContentDisposition(
     "filename*=UTF-8''$encodedParameter"
 }
 
-private fun String.komgaFileExtension(fileName: String?): String =
+internal fun String.komgaFileExtension(fileName: String?): String =
   when (substringBefore(';').lowercase()) {
     "image/jpeg" -> ".jpg"
     "image/png" -> ".png"

@@ -1,6 +1,7 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
@@ -8,8 +9,9 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondOutputStream
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -303,7 +305,7 @@ private fun Route.opdsV1Routes(
     call.respondOpdsThumbnail(catalog, artwork, content, maximumDimension = 1_600)
   }
   get("/opds/v1.2/books/{bookId}/pages/{pageNumber}") {
-    call.respondOpdsPage(catalog, content)
+    call.respondOpdsPage(catalog, content, zeroBasedPageNumber = true)
   }
 }
 
@@ -571,7 +573,7 @@ private fun Route.opdsV2Routes(
     )
   }
   get("/opds/v2/books/{bookId}/pages/{pageNumber}") {
-    call.respondOpdsPage(catalog, content)
+    call.respondOpdsPage(catalog, content, zeroBasedPageNumber = false)
   }
   get("/opds/v2/books/{bookId}/thumbnail") {
     call.respondOpdsThumbnail(catalog, artwork, content, maximumDimension = 1_600)
@@ -1046,12 +1048,9 @@ private suspend fun ApplicationCall.respondOpdsThumbnail(
       ArtworkOwner(ArtworkOwnerKind.MEDIA_ITEM, bookId.value),
     )
   if (selected != null) {
-    respondOutputStream(
-      contentType = ContentType.parse(selected.artwork.mediaType),
-      contentLength = selected.bytes.size.toLong(),
-    ) {
-      write(selected.bytes)
-    }
+    val body = selected.bytes.komgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null)) return
+    respondBytes(body.bytes, ContentType.parse(selected.artwork.mediaType))
     return
   }
   val opened =
@@ -1067,17 +1066,9 @@ private suspend fun ApplicationCall.respondOpdsThumbnail(
     return
   }
   try {
-    respondOutputStream(
-      contentType = ContentType.Image.JPEG,
-      contentLength = opened.contentLength,
-    ) {
-      val buffer = ByteArray(OPDS_STREAM_BUFFER_SIZE)
-      while (true) {
-        val read = opened.read(buffer)
-        if (read < 0) break
-        if (read > 0) write(buffer, 0, read)
-      }
-    }
+    val body = opened.readKomgaCachedBody()
+    if (respondNotModified(body, lastModifiedMillis = null)) return
+    respondBytes(body.bytes, ContentType.Image.JPEG)
   } finally {
     opened.close()
   }
@@ -1086,6 +1077,7 @@ private suspend fun ApplicationCall.respondOpdsThumbnail(
 private suspend fun ApplicationCall.respondOpdsPage(
   catalog: CatalogReadRepository,
   content: BookContentAccess,
+  zeroBasedPageNumber: Boolean,
 ) {
   val user = opdsUser()
   if (UserRole.PAGE_STREAMING !in user.roles) {
@@ -1093,17 +1085,21 @@ private suspend fun ApplicationCall.respondOpdsPage(
     return
   }
   val bookId = BookId(requireNotNull(parameters["bookId"]))
-  if (catalog.findBookByIdOrNull(bookId, user.catalogAccess()) == null) {
+  val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
+  if (item == null) {
     respond(HttpStatusCode.NotFound)
     return
   }
-  val page = parameters["pageNumber"]?.toIntOrNull()
-  if (page == null) {
+  val requestedPage = parameters["pageNumber"]?.toIntOrNull()
+  if (requestedPage == null) {
     respond(HttpStatusCode.BadRequest)
     return
   }
+  val page = if (zeroBasedPageNumber) requestedPage + 1 else requestedPage
+  val lastModified = item.media?.updatedAtMillis ?: item.book.updatedAtMillis
+  if (respondNotModifiedByTimestamp(lastModified)) return
   val format =
-    when (request.queryParameters["convert"]) {
+    when (request.queryParameters["convert"]?.lowercase()) {
       null -> null
       "jpeg" -> PageImageFormat.JPEG
       "png" -> PageImageFormat.PNG
@@ -1119,19 +1115,20 @@ private suspend fun ApplicationCall.respondOpdsPage(
     return
   }
   try {
-    respondOutputStream(
-      contentType =
-        runCatching { ContentType.parse(opened.mediaType) }
-          .getOrDefault(ContentType.Application.OctetStream),
-      contentLength = opened.contentLength,
-    ) {
-      val buffer = ByteArray(OPDS_STREAM_BUFFER_SIZE)
-      while (true) {
-        val read = opened.read(buffer)
-        if (read < 0) break
-        if (read > 0) write(buffer, 0, read)
-      }
-    }
+    val body = opened.readKomgaCachedBody()
+    if (respondNotModified(body, lastModified)) return
+    response.header(
+      HttpHeaders.ContentDisposition,
+      komgaContentDisposition(
+        disposition = "inline",
+        fileName = "${item.book.name}-$page${opened.mediaType.komgaFileExtension(opened.fileName)}",
+      ),
+    )
+    respondBytes(
+      body.bytes,
+      runCatching { ContentType.parse(opened.mediaType) }
+        .getOrDefault(ContentType.Application.OctetStream),
+    )
   } finally {
     opened.close()
   }
@@ -1282,4 +1279,3 @@ private const val OPDS_V2_MEDIA_TYPE = "application/opds+json"
 private const val OPDS_AUTH_MEDIA_TYPE = "application/opds-authentication+json"
 private const val OPDS_SUBSECTION_REL = "subsection"
 private const val OPDS_ACQUISITION_REL = "http://opds-spec.org/acquisition"
-private const val OPDS_STREAM_BUFFER_SIZE = 64 * 1_024
