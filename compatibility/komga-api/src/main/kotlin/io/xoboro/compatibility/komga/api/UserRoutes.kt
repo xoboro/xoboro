@@ -42,6 +42,7 @@ fun Route.komgaAuthenticatedUserRoutes(
   authenticate(
     KOMGA_BASIC_AUTHENTICATION,
     KOMGA_API_KEY_AUTHENTICATION,
+    KOMGA_SESSION_AUTHENTICATION,
     strategy = AuthenticationStrategy.FirstSuccessful,
   ) {
     route("/api/v2/users") {
@@ -55,7 +56,11 @@ fun Route.komgaAuthenticatedUserRoutes(
           call.respondValidation("password", "must not be blank")
           return@patch
         }
-        users.updatePassword(principal.user.id, request.password)
+        users.updatePassword(
+          id = principal.user.id,
+          rawPassword = request.password,
+          expireSessions = false,
+        )
         call.respond(HttpStatusCode.NoContent)
       }
       apiKeys?.let { lifecycle ->
@@ -188,7 +193,11 @@ fun Route.komgaAuthenticatedUserRoutes(
           call.respondValidation("password", "must not be blank")
           return@patch
         }
-        users.updatePassword(id, request.password)
+        users.updatePassword(
+          id = id,
+          rawPassword = request.password,
+          expireSessions = id != principal.user.id,
+        )
         call.respond(HttpStatusCode.NoContent)
       }
     }
