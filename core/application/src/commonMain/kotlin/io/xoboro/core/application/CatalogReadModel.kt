@@ -88,6 +88,7 @@ data class SeriesCatalogQuery(
 data class CatalogBook(
   val book: Book,
   val seriesTitle: String,
+  val seriesMetadata: SeriesMetadata,
   val metadata: BookMetadata,
   val media: BookMedia?,
   val readProgress: ReadProgress?,

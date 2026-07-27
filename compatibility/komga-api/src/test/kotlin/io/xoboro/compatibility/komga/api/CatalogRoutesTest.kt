@@ -1,6 +1,7 @@
 package io.xoboro.compatibility.komga.api
 
 import io.ktor.client.call.body
+import io.ktor.client.statement.bodyAsText
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.basicAuth
 import io.ktor.client.request.delete
@@ -35,6 +36,7 @@ import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.ReadingDirection
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -121,6 +123,7 @@ class CatalogRoutesTest {
             komgaMediaRoutes(catalog, content)
             komgaPageHashRoutes(pageHashes, pageHashLifecycle, content)
             komgaReadProgressRoutes(catalog, progress)
+            komgaWebPubRoutes(catalog, progress)
             komgaOrganizationRoutes(collections, readLists, organizations, catalog)
           }
         }
@@ -172,6 +175,10 @@ class CatalogRoutesTest {
         assertEquals(
           HttpStatusCode.Unauthorized,
           client.get("/api/v1/books/book-1/pages").status,
+        )
+        assertEquals(
+          HttpStatusCode.Unauthorized,
+          client.get("/api/v1/books/book-1/manifest").status,
         )
 
         val pages =
@@ -253,6 +260,83 @@ class CatalogRoutesTest {
           }.status,
         )
         assertEquals(8, content.closedStreams)
+
+        val manifestResponse =
+          client.get("/api/v1/books/book-1/manifest") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, manifestResponse.status)
+        assertEquals(
+          "application/divina+json",
+          manifestResponse.headers[HttpHeaders.ContentType],
+        )
+        val manifest =
+          KOMGA_JSON.decodeFromString<WPPublicationDto>(manifestResponse.bodyAsText())
+        assertEquals("Synthetic chapter 1", manifest.metadata.title)
+        assertEquals("rtl", manifest.metadata.readingProgression)
+        assertEquals(2, manifest.metadata.numberOfPages)
+        assertEquals(2, manifest.readingOrder.size)
+        assertTrue(manifest.readingOrder.first().href.orEmpty().contains("/pages/1"))
+        assertEquals(
+          HttpStatusCode.OK,
+          client.get("/api/v1/books/book-1/manifest/divina") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.get("/api/v1/books/book-1/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.status,
+        )
+        val progression =
+          R2ProgressionDto(
+            modified = "2030-01-02T03:04:05Z",
+            device = R2DeviceDto(id = "synthetic-device", name = "Synthetic Reader"),
+            locator =
+              R2LocatorDto(
+                href = "/api/v1/books/book-1/pages/1",
+                type = "image/png",
+                locations = R2LocationDto(position = 1),
+              ),
+          )
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/api/v1/books/book-1/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(progression)
+          }.status,
+        )
+        val savedProgressionResponse =
+          client.get("/api/v1/books/book-1/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, savedProgressionResponse.status)
+        val savedProgression =
+          KOMGA_JSON.decodeFromString<R2ProgressionDto>(savedProgressionResponse.bodyAsText())
+        assertEquals(progression, savedProgression)
+        assertEquals(
+          HttpStatusCode.Conflict,
+          client.put("/api/v1/books/book-1/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(progression.copy(modified = "2029-01-02T03:04:05Z"))
+          }.status,
+        )
+        assertEquals(
+          HttpStatusCode.BadRequest,
+          client.put("/api/v1/books/book-1/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              progression.copy(
+                modified = "2031-01-02T03:04:05Z",
+                locator = progression.locator.copy(locations = R2LocationDto(position = 99)),
+              ),
+            )
+          }.status,
+        )
 
         val duplicateBooks =
           client
@@ -604,6 +688,7 @@ class CatalogRoutesTest {
       seriesMetadata.findBySeriesIdOrNull(seriesId)!!.copy(
         title = "Synthetic catalog",
         titleSort = "Synthetic catalog",
+        readingDirection = ReadingDirection.RIGHT_TO_LEFT,
         updatedAtMillis = 2,
       ),
     )
@@ -622,6 +707,13 @@ class CatalogRoutesTest {
                 mediaType = "image/png",
                 fileSize = 4,
                 fileHash = "shared-page",
+              ),
+              BookPage(
+                number = 2,
+                fileName = "002.png",
+                mediaType = "image/png",
+                fileSize = 4,
+                fileHash = "unique-page-${index + 1}",
               ),
             ),
           pageCount = 2,
