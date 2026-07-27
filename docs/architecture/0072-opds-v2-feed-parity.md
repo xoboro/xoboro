@@ -28,8 +28,9 @@ at the REST download route instead of Komga's OPDS alias.
 - Compare catalog, browse, and search against the digest-pinned Komga 1.25.0
   image in CI, ignoring only generated timestamps, origins, and identifiers
   embedded in links.
-- Revalidate all three feeds with their server-generated ETags on both
-  implementations.
+- Verify that both implementations emit shallow ETags for all three feeds.
+  Their generated `modified` timestamp deliberately makes the representation
+  dynamic, so a later conditional request is not guaranteed to return 304.
 
 ## Consequences
 

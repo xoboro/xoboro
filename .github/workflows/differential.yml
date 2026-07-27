@@ -229,12 +229,6 @@ jobs:
                   }'
               )"
               test -n "${etag}"
-              http_status="$(
-                curl --silent --output /dev/null --write-out '%{http_code}' \
-                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
-                  --header "If-None-Match: ${etag}" "${url}"
-              )"
-              test "${http_status}" = "304"
             done
           done
 
