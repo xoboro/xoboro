@@ -5,6 +5,7 @@ import io.xoboro.compatibility.komga.api.komgaAnnouncementRoutes
 import io.xoboro.compatibility.komga.api.komgaClientSettingsRoutes
 import io.xoboro.compatibility.komga.api.komgaAuthenticationActivityRoutes
 import io.xoboro.compatibility.komga.api.komgaSessionRoutes
+import io.xoboro.compatibility.komga.api.komgaServerSettingsRoutes
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
@@ -12,6 +13,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.RememberMeTokenService
+import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -26,7 +28,9 @@ import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.response.respond
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -37,7 +41,7 @@ fun main() {
     embeddedServer(
       factory = Netty,
       host = "0.0.0.0",
-      port = config.port,
+      port = runtime.effectiveServerPort,
       module = {
         xoboroModule(runtime)
       },
@@ -54,10 +58,11 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     authenticationActivityLifecycle = runtime.authenticationActivityLifecycle,
     userSessionLifecycle = runtime.userSessionLifecycle,
     rememberMeTokenService = runtime.rememberMeTokenService,
-    rememberMeMaxAgeSeconds = XoboroRuntime.DEFAULT_REMEMBER_ME_MAX_AGE_SECONDS,
     clientSettingsLifecycle = runtime.clientSettingsLifecycle,
     announcementLifecycle = runtime.announcementLifecycle,
+    serverSettingsLifecycle = runtime.serverSettingsLifecycle,
     libraryRepository = runtime.libraryRepository,
+    contextPath = runtime.effectiveServerContextPath,
   )
 }
 
@@ -69,10 +74,11 @@ fun Application.xoboroModule(
   authenticationActivityLifecycle: AuthenticationActivityLifecycle? = null,
   userSessionLifecycle: UserSessionLifecycle? = null,
   rememberMeTokenService: RememberMeTokenService? = null,
-  rememberMeMaxAgeSeconds: Int? = null,
   clientSettingsLifecycle: ClientSettingsLifecycle? = null,
   announcementLifecycle: AnnouncementLifecycle? = null,
+  serverSettingsLifecycle: ServerSettingsLifecycle? = null,
   libraryRepository: LibraryRepository? = null,
+  contextPath: String? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
     onStop()
@@ -92,7 +98,6 @@ fun Application.xoboroModule(
       authenticationActivities = authenticationActivityLifecycle,
       sessions = userSessionLifecycle,
       rememberMe = rememberMeTokenService,
-      rememberMeMaxAgeSeconds = rememberMeMaxAgeSeconds,
     )
   }
   install(StatusPages) {
@@ -106,33 +111,41 @@ fun Application.xoboroModule(
   }
 
   routing {
-    get("/health") {
-      call.respond(HealthResponse())
-    }
-    get("/ready") {
-      val ready = readiness()
-      call.respond(
-        status = if (ready) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable,
-        message = HealthResponse(status = if (ready) "UP" else "DOWN"),
-      )
-    }
-    userLifecycle?.let {
-      komgaClaimRoutes(it)
-      komgaAuthenticatedUserRoutes(
-        users = it,
-        libraries = requireNotNull(libraryRepository),
-        apiKeys = apiKeyLifecycle,
-      )
-      authenticationActivityLifecycle?.let { activities ->
-        komgaAuthenticationActivityRoutes(
-          users = it,
-          activities = activities,
+    val routes: Route.() -> Unit = {
+      get("/health") {
+        call.respond(HealthResponse())
+      }
+      get("/ready") {
+        val ready = readiness()
+        call.respond(
+          status = if (ready) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable,
+          message = HealthResponse(status = if (ready) "UP" else "DOWN"),
         )
       }
-      userSessionLifecycle?.let(::komgaSessionRoutes)
+      userLifecycle?.let {
+        komgaClaimRoutes(it)
+        komgaAuthenticatedUserRoutes(
+          users = it,
+          libraries = requireNotNull(libraryRepository),
+          apiKeys = apiKeyLifecycle,
+        )
+        authenticationActivityLifecycle?.let { activities ->
+          komgaAuthenticationActivityRoutes(
+            users = it,
+            activities = activities,
+          )
+        }
+        userSessionLifecycle?.let(::komgaSessionRoutes)
+      }
+      clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
+      announcementLifecycle?.let(::komgaAnnouncementRoutes)
+      serverSettingsLifecycle?.let(::komgaServerSettingsRoutes)
     }
-    clientSettingsLifecycle?.let(::komgaClientSettingsRoutes)
-    announcementLifecycle?.let(::komgaAnnouncementRoutes)
+    if (contextPath == null) {
+      routes()
+    } else {
+      route(contextPath, routes)
+    }
   }
 }
 

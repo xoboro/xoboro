@@ -60,6 +60,18 @@ class ApplicationTest {
     }
 
   @Test
+  fun `mounts every endpoint beneath the effective context path`() =
+    testApplication {
+      application {
+        xoboroModule(contextPath = "/reader")
+      }
+
+      assertEquals(HttpStatusCode.NotFound, client.get("/health").status)
+      assertEquals(HttpStatusCode.OK, client.get("/reader/health").status)
+      assertEquals(HttpStatusCode.OK, client.get("/reader/ready").status)
+    }
+
+  @Test
   fun `application stop closes its runtime owner`() {
     var stopped = false
 

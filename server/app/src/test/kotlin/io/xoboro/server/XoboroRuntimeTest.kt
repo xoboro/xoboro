@@ -8,6 +8,7 @@ import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import java.nio.file.Files
 import java.nio.file.Path
@@ -119,6 +120,39 @@ class XoboroRuntimeTest {
           rawPassword = "synthetic-password",
         ) != null,
       )
+    }
+  }
+
+  @Test
+  fun `applies persisted startup settings and live worker resizing`() {
+    val databasePath = tempDirectory.resolve("settings-runtime.sqlite")
+    XoboroDatabase.open(DatabaseConfig(databasePath)).use { database ->
+      val settings = JooqServerSettingRepository(database)
+      settings.put("SERVER_PORT", "29001")
+      settings.put("SERVER_CONTEXT_PATH", "/reader")
+      settings.put("TASK_POOL_SIZE", "2")
+    }
+    val config =
+      ServerConfig(
+        port = 25_600,
+        databasePath = databasePath,
+        workerCount = 1,
+        taskPollMillis = 10,
+        taskFailurePollMillis = 10,
+        taskLeaseMillis = 1_000,
+        shutdownTimeoutMillis = 2_000,
+        configuredPort = null,
+      )
+
+    XoboroRuntime.open(config).use { runtime ->
+      assertEquals(29_001, runtime.effectiveServerPort)
+      assertEquals("/reader", runtime.effectiveServerContextPath)
+      assertEquals(2, runtime.taskWorkerCount())
+
+      runtime.serverSettingsLifecycle.update(
+        io.xoboro.core.application.ServerSettingsUpdate(taskPoolSize = 3),
+      )
+      assertEquals(3, runtime.taskWorkerCount())
     }
   }
 

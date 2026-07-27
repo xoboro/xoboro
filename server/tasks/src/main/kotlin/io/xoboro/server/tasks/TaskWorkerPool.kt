@@ -1,6 +1,7 @@
 package io.xoboro.server.tasks
 
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -23,27 +24,61 @@ class TaskWorkerPool(
   private val policy: TaskWorkerPoolPolicy = TaskWorkerPoolPolicy(),
   private val onFailure: (Throwable) -> Unit = {},
 ) : AutoCloseable {
+  private val lock = Any()
   private val running = AtomicBoolean(false)
   private val closed = AtomicBoolean(false)
+  private var desiredWorkerCount = policy.workerCount
+  private var workerSequence = 0
+  private val workers = linkedMapOf<Int, WorkerHandle>()
   private val executor =
-    Executors.newFixedThreadPool(policy.workerCount) { runnable ->
+    Executors.newCachedThreadPool { runnable ->
       Thread(runnable).apply { isDaemon = true }
     }
 
   fun start() {
-    check(!closed.get()) { "Task worker pool is closed" }
-    if (!running.compareAndSet(false, true)) return
-    repeat(policy.workerCount) { index ->
-      executor.submit {
-        val workerId = "worker-${index + 1}"
-        Thread.currentThread().name = "xoboro-$workerId"
-        runLoop(workerId)
-      }
+    synchronized(lock) {
+      check(!closed.get()) { "Task worker pool is closed" }
+      if (!running.compareAndSet(false, true)) return
+      reconcileWorkers()
     }
   }
 
-  private fun runLoop(workerId: String) {
-    while (running.get() && !Thread.currentThread().isInterrupted) {
+  fun resize(workerCount: Int) {
+    require(workerCount in 1..64) { "Task worker count must be between 1 and 64" }
+    synchronized(lock) {
+      check(!closed.get()) { "Task worker pool is closed" }
+      desiredWorkerCount = workerCount
+      if (running.get()) reconcileWorkers()
+    }
+  }
+
+  fun workerCount(): Int =
+    synchronized(lock) { workers.size }
+
+  private fun reconcileWorkers() {
+    while (workers.size < desiredWorkerCount) {
+      workerSequence += 1
+      val sequence = workerSequence
+      val enabled = AtomicBoolean(true)
+      val future =
+        executor.submit {
+          val workerId = "worker-$sequence"
+          Thread.currentThread().name = "xoboro-$workerId"
+          runLoop(workerId, enabled)
+        }
+      workers[sequence] = WorkerHandle(enabled, future)
+    }
+    while (workers.size > desiredWorkerCount) {
+      val sequence = requireNotNull(workers.keys.maxOrNull())
+      requireNotNull(workers.remove(sequence)).retire()
+    }
+  }
+
+  private fun runLoop(
+    workerId: String,
+    enabled: AtomicBoolean,
+  ) {
+    while (running.get() && enabled.get() && !Thread.currentThread().isInterrupted) {
       val delayMillis =
         try {
           when (runner.runOnce(workerId)) {
@@ -68,12 +103,30 @@ class TaskWorkerPool(
     }
 
   override fun close() {
-    if (!closed.compareAndSet(false, true)) return
-    running.set(false)
+    synchronized(lock) {
+      if (!closed.compareAndSet(false, true)) return
+      running.set(false)
+      workers.values.forEach(WorkerHandle::stopNow)
+      workers.clear()
+    }
     executor.shutdown()
     if (!executor.awaitTermination(policy.shutdownTimeoutMillis, TimeUnit.MILLISECONDS)) {
       executor.shutdownNow()
       executor.awaitTermination(policy.shutdownTimeoutMillis, TimeUnit.MILLISECONDS)
+    }
+  }
+
+  private data class WorkerHandle(
+    val enabled: AtomicBoolean,
+    val future: Future<*>,
+  ) {
+    fun retire() {
+      enabled.set(false)
+    }
+
+    fun stopNow() {
+      enabled.set(false)
+      future.cancel(true)
     }
   }
 }
