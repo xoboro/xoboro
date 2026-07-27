@@ -12,6 +12,7 @@ allprojects {
 
 tasks.named("check") {
   dependsOn(":compatibility:komga-api:check")
+  dependsOn(":compatibility:komga-differential:check")
   dependsOn(":core:application:check")
   dependsOn(":core:domain:check")
   dependsOn(":server:app:check")
