@@ -7,6 +7,7 @@ import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.komgaAuthenticatedUserRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.LibraryRepository
@@ -48,6 +49,8 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     apiKeyLifecycle = runtime.apiKeyLifecycle,
     authenticationActivityLifecycle = runtime.authenticationActivityLifecycle,
     userSessionLifecycle = runtime.userSessionLifecycle,
+    rememberMeTokenService = runtime.rememberMeTokenService,
+    rememberMeMaxAgeSeconds = XoboroRuntime.DEFAULT_REMEMBER_ME_MAX_AGE_SECONDS,
     libraryRepository = runtime.libraryRepository,
   )
 }
@@ -59,6 +62,8 @@ fun Application.xoboroModule(
   apiKeyLifecycle: ApiKeyLifecycle? = null,
   authenticationActivityLifecycle: AuthenticationActivityLifecycle? = null,
   userSessionLifecycle: UserSessionLifecycle? = null,
+  rememberMeTokenService: RememberMeTokenService? = null,
+  rememberMeMaxAgeSeconds: Int? = null,
   libraryRepository: LibraryRepository? = null,
 ) {
   monitor.subscribe(ApplicationStopped) {
@@ -78,6 +83,8 @@ fun Application.xoboroModule(
       apiKeys = apiKeyLifecycle,
       authenticationActivities = authenticationActivityLifecycle,
       sessions = userSessionLifecycle,
+      rememberMe = rememberMeTokenService,
+      rememberMeMaxAgeSeconds = rememberMeMaxAgeSeconds,
     )
   }
   install(StatusPages) {
