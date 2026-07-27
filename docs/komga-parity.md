@@ -10,7 +10,7 @@ line count. A row is complete only after implementation and automated
 verification.
 
 The locked Komga 1.25.0 REST inventory contains 130 paths, 165 operations, and
-167 schemas. Eighteen operations are partially implemented and none are yet
+167 schemas. Twenty-four operations are partially implemented and none are yet
 certified by differential tests. Protocol and non-REST inventories are tracked
 separately in [`docs/compatibility`](compatibility/README.md).
 
@@ -26,7 +26,7 @@ Status:
 | Capability | Status | Evidence |
 |---|---|---|
 | Configuration and environment overrides | PARTIAL | Strict port/database/worker/poll/lease/shutdown environment parsing and default tests; full Komga property surface pending |
-| SQLite schema and migrations | PARTIAL | Flyway V1-V10 clean-install and V1-to-current upgrade tests |
+| SQLite schema and migrations | PARTIAL | Flyway V1-V11 clean-install and V1-to-current upgrade tests |
 | Transactions and restart recovery | PARTIAL | WAL, rollback, close/reopen durability, and filesystem scan restart tests |
 | Durable prioritized task queue | PARTIAL | Priority/FIFO, deduplication, group exclusion, heartbeat, lease loss/recovery, exponential retry, dead-letter, concurrent claim, scan/analysis routing, worker-pool lifecycle, and runtime tests; metrics pending |
 | Structured logs, health, readiness, metrics | PARTIAL | Worker failure logging plus `/health` liveness and SQLite-backed `/ready` contract tests; structured fields and metrics pending |
@@ -109,7 +109,7 @@ Status:
 | API keys | PARTIAL | Dashless UUID generation, TSID IDs, ten-attempt collision handling, Komga SHA-512 storage, redacted list, duplicate comment, owner deletion, cascade, and `X-API-Key` authentication tests; demo mode and protocol-specific key transports pending |
 | OAuth2 providers | TODO | |
 | Authentication activity | PARTIAL | Durable success/failure ledger, password and API-key source recording, credential-safe failed-key fingerprinting, User-Agent/IP capture, current-user/admin pagination and sorting, API-key-filtered latest lookup, retention cutoff, cascade cleanup, and restart tests; sessions, OAuth, demo mode, proxy IP policy, and scheduled cleanup pending |
-| Per-user client settings | TODO | |
+| Per-user client settings | PARTIAL | Global and per-user namespaced string settings, anonymous visibility filtering, administrator authorization, user isolation, transactional upsert, selective deletion, cascade cleanup, restart persistence, validation, and six REST operation tests |
 | Announcements | TODO | |
 
 ## Reading

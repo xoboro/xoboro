@@ -45,13 +45,15 @@ class XoboroDatabaseTest {
             "user_api_key",
             "authentication_activity",
             "server_setting",
+            "client_setting_global",
+            "client_setting_user",
           ),
         ),
       )
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(10, database.migrationResult.migrationsExecuted)
+      assertEquals(11, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -140,7 +142,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(9, database.migrationResult.migrationsExecuted)
+      assertEquals(10, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
