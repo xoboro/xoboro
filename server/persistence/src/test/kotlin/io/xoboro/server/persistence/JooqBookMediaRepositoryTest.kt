@@ -66,6 +66,37 @@ class JooqBookMediaRepositoryTest {
   }
 
   @Test
+  fun `batch hydration preserves each media subtree`() {
+    withRepository("batch") { repository, database ->
+      val secondId = BookId("book-2")
+      JooqBookRepository(database).insert(
+        Book(
+          id = secondId,
+          libraryId = LIBRARY_ID,
+          seriesId = SERIES_ID,
+          name = "Second synthetic book",
+          relativePath = "series/book-2.cbz",
+          sourceItemId = "file:///synthetic/series/book-2.cbz",
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+          fileModifiedAtMillis = 2,
+          createdAtMillis = 2,
+        ),
+      )
+      val first = mediaFixture()
+      val second = mediaFixture().copy(bookId = secondId)
+      repository.upsert(first)
+      repository.upsert(second)
+
+      assertEquals(
+        mapOf(BOOK_ID to first, secondId to second),
+        repository
+          .findAllByBookIds(listOf(secondId, BookId("missing"), BOOK_ID))
+          .associateBy(BookMedia::bookId),
+      )
+    }
+  }
+
+  @Test
   fun `book deletion cascades through media subtree`() {
     withRepository("cascade") { repository, database ->
       repository.upsert(mediaFixture())

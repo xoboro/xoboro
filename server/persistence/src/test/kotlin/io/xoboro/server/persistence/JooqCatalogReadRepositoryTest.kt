@@ -182,6 +182,136 @@ class JooqCatalogReadRepositoryTest {
   }
 
   @Test
+  fun `aggregates the first nonblank summary earliest release authors and tags`() {
+    withCatalog("aggregation") { database ->
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
+          summary = "",
+          releaseDate = "2022-03-01",
+          authors = listOf(Author("Shared Author", "writer")),
+          tags = setOf("first"),
+          updatedAtMillis = 10,
+        ),
+      )
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-2"))).copy(
+          summary = "First nonblank synthetic summary",
+          releaseDate = "2020-02-01",
+          authors =
+            listOf(
+              Author("Shared Author", "writer"),
+              Author("Second Author", "artist"),
+            ),
+          tags = setOf("second"),
+          updatedAtMillis = 11,
+        ),
+      )
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-3"))).copy(
+          summary = "Later synthetic summary",
+          releaseDate = "2021-01-01",
+          authors = listOf(Author("Third Author", "writer")),
+          tags = setOf("first", "third"),
+          updatedAtMillis = 12,
+        ),
+      )
+
+      val result =
+        requireNotNull(
+          JooqCatalogReadRepository(database)
+            .findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()),
+        ).booksMetadata
+
+      assertEquals("First nonblank synthetic summary", result.summary)
+      assertEquals("2", result.summaryNumber)
+      assertEquals("2020-02-01", result.releaseDate)
+      assertEquals(
+        listOf(
+          Author("Shared Author", "writer"),
+          Author("Second Author", "artist"),
+          Author("Third Author", "writer"),
+        ),
+        result.authors,
+      )
+      assertEquals(setOf("first", "second", "third"), result.tags)
+      assertEquals(1, result.createdAtMillis)
+      assertEquals(12, result.updatedAtMillis)
+    }
+  }
+
+  @Test
+  fun `hydrates series across bounded query batches`() {
+    withCatalog("series-batches") { database ->
+      val libraryId = LibraryId("library-1")
+      JooqSeriesRepository(database).insertAll(
+        (1..501).map { number ->
+          Series(
+            id = SeriesId("batch-series-$number"),
+            libraryId = libraryId,
+            name = "Synthetic batch series $number",
+            relativePath = "batch-series-$number",
+            sourceItemId = "file:///synthetic/batch-series-$number",
+            fileModifiedAtMillis = number.toLong(),
+            createdAtMillis = number.toLong(),
+          )
+        },
+      )
+
+      val result =
+        JooqCatalogReadRepository(database).findSeries(
+          query = SeriesCatalogQuery(deleted = false),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(unpaged = true),
+        )
+
+      assertEquals(503, result.totalElements)
+      assertEquals(503, result.content.size)
+      val empty = requireNotNull(result.content.firstOrNull { it.series.id.value == "batch-series-1" })
+      assertEquals("", empty.booksMetadata.summary)
+      assertEquals(1, empty.booksMetadata.createdAtMillis)
+    }
+  }
+
+  @Test
+  fun `hydrates books across bounded query batches`() {
+    withCatalog("book-batches") { database ->
+      val libraryId = LibraryId("library-1")
+      val seriesId = SeriesId("series-a")
+      JooqBookRepository(database).insertAll(
+        (1..501).map { number ->
+          Book(
+            id = BookId("batch-book-$number"),
+            libraryId = libraryId,
+            seriesId = seriesId,
+            name = "Synthetic batch book $number",
+            relativePath = "series-a/batch-book-$number.cbz",
+            sourceItemId = "file:///synthetic/series-a/batch-book-$number.cbz",
+            mediaKind = MediaKind.COMIC_ARCHIVE,
+            fileModifiedAtMillis = number.toLong(),
+            number = number + 10,
+            createdAtMillis = number.toLong(),
+          )
+        },
+      )
+
+      val result =
+        JooqCatalogReadRepository(database).findBooks(
+          query = BookCatalogQuery(seriesId = seriesId, deleted = false),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(unpaged = true),
+        )
+
+      assertEquals(504, result.totalElements)
+      assertEquals(504, result.content.size)
+      assertEquals(
+        "Synthetic series a",
+        result.content.first { it.book.id.value == "batch-book-1" }.seriesTitle,
+      )
+    }
+  }
+
+  @Test
   fun `finds only books sharing both file hash and size`() {
     withCatalog("duplicates") { database ->
       val books = JooqBookRepository(database)

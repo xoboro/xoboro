@@ -15,6 +15,18 @@ class JooqBookRepository(
   override fun findByIdOrNull(id: BookId): Book? =
     database.dsl.fetchOne("$SELECT_BOOK WHERE id = ?", id.value)?.toBook()
 
+  override fun findAllByIds(ids: Collection<BookId>): List<Book> =
+    ids
+      .distinct()
+      .chunked(QUERY_BATCH_SIZE)
+      .flatMap { batch ->
+        database.dsl
+          .fetch(
+            "$SELECT_BOOK WHERE id IN (${batch.placeholders()}) ORDER BY id",
+            *batch.map { it.value }.toTypedArray(),
+          ).map { it.toBook() }
+      }
+
   override fun findAllByLibraryId(libraryId: LibraryId): List<Book> =
     database.dsl
       .fetch(
@@ -210,7 +222,10 @@ class JooqBookRepository(
       MediaKind.PDF -> "BOOK"
     }
 
+  private fun Collection<*>.placeholders(): String = joinToString(",") { "?" }
+
   companion object {
+    private const val QUERY_BATCH_SIZE = 500
     private const val SELECT_BOOK =
       """
       SELECT book.*,
