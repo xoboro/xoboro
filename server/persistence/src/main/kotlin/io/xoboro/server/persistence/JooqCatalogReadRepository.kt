@@ -20,9 +20,11 @@ import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.RestrictionMode
+import io.xoboro.core.domain.ReadProgressRepository
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadataRepository
 import io.xoboro.core.domain.SeriesRepository
+import io.xoboro.core.domain.UserId
 
 class JooqCatalogReadRepository(
   private val database: XoboroDatabase,
@@ -31,6 +33,7 @@ class JooqCatalogReadRepository(
   private val bookMetadata: BookMetadataRepository = JooqBookMetadataRepository(database),
   private val seriesMetadata: SeriesMetadataRepository = JooqSeriesMetadataRepository(database),
   private val media: BookMediaRepository = JooqBookMediaRepository(database),
+  private val readProgress: ReadProgressRepository = JooqReadProgressRepository(database),
 ) : CatalogReadRepository {
   override fun findBooks(
     query: BookCatalogQuery,
@@ -55,7 +58,7 @@ class JooqCatalogReadRepository(
           *filter.bindings.toTypedArray(),
         ).map { BookId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
-      content = ids.mapNotNull(::hydrateBook),
+      content = ids.mapNotNull { hydrateBook(it, access.userId) },
       page = if (page.unpaged) 0 else page.page,
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
@@ -102,7 +105,7 @@ class JooqCatalogReadRepository(
           *filter.bindings.toTypedArray(),
         ).map { SeriesId(requireNotNull(it.get("id", String::class.java))) }
     return CatalogPage(
-      content = ids.mapNotNull(::hydrateSeries),
+      content = ids.mapNotNull { hydrateSeries(it, access.userId) },
       page = if (page.unpaged) 0 else page.page,
       size = if (page.unpaged) ids.size.coerceAtLeast(1) else page.size,
       totalElements = total,
@@ -131,7 +134,10 @@ class JooqCatalogReadRepository(
         """.trimIndent(),
         *filter.bindings.toTypedArray(),
       ) ?: return null
-    return hydrateSeries(SeriesId(requireNotNull(found.get("id", String::class.java))))
+    return hydrateSeries(
+      SeriesId(requireNotNull(found.get("id", String::class.java))),
+      access.userId,
+    )
   }
 
   override fun countSeriesByFirstCharacter(
@@ -186,7 +192,10 @@ class JooqCatalogReadRepository(
         """.trimIndent(),
         *filter.bindings.toTypedArray(),
       ) ?: return null
-    return hydrateBook(BookId(requireNotNull(found.get("id", String::class.java))))
+    return hydrateBook(
+      BookId(requireNotNull(found.get("id", String::class.java))),
+      access.userId,
+    )
   }
 
   private fun findSibling(
@@ -237,10 +246,16 @@ class JooqCatalogReadRepository(
         """.trimIndent(),
         *filter.bindings.toTypedArray(),
       ) ?: return null
-    return hydrateBook(BookId(requireNotNull(found.get("id", String::class.java))))
+    return hydrateBook(
+      BookId(requireNotNull(found.get("id", String::class.java))),
+      access.userId,
+    )
   }
 
-  private fun hydrateBook(id: BookId): CatalogBook? {
+  private fun hydrateBook(
+    id: BookId,
+    userId: UserId?,
+  ): CatalogBook? {
     val book = books.findByIdOrNull(id) ?: return null
     val parent = series.findByIdOrNull(book.seriesId) ?: return null
     val metadata = bookMetadata.findByBookIdOrNull(id) ?: return null
@@ -250,10 +265,14 @@ class JooqCatalogReadRepository(
       seriesTitle = parentMetadata.title,
       metadata = metadata,
       media = media.findByBookIdOrNull(id),
+      readProgress = userId?.let { readProgress.findByBookIdAndUserIdOrNull(id, it) },
     )
   }
 
-  private fun hydrateSeries(id: SeriesId): CatalogSeries? {
+  private fun hydrateSeries(
+    id: SeriesId,
+    userId: UserId?,
+  ): CatalogSeries? {
     val item = series.findByIdOrNull(id) ?: return null
     val metadata = seriesMetadata.findBySeriesIdOrNull(id) ?: return null
     val summary =
@@ -335,6 +354,7 @@ class JooqCatalogReadRepository(
           updatedAtMillis =
             timestamps?.get("maximum_updated").asLongOrNull() ?: item.updatedAtMillis,
         ),
+      readProgress = userId?.let { readProgress.findSeriesByIdAndUserIdOrNull(id, it) },
     )
   }
 
@@ -353,6 +373,42 @@ class JooqCatalogReadRepository(
     }
     query.deleted?.let {
       parts += if (it) "b.deleted_at_ms IS NOT NULL" else "b.deleted_at_ms IS NULL"
+    }
+    if (query.onDeck) {
+      val userId = access.userId
+      if (userId == null) {
+        parts += "1 = 0"
+      } else {
+        parts +=
+          """
+          EXISTS (
+            SELECT 1
+            FROM read_progress_series series_progress
+            WHERE series_progress.series_id = b.series_id
+              AND series_progress.user_id = ?
+              AND series_progress.books_read_count > 0
+              AND series_progress.books_in_progress_count = 0
+          )
+          """.trimIndent()
+        bindings += userId.value
+        parts +=
+          """
+          b.id = (
+            SELECT unread.id
+            FROM book unread
+            JOIN book_metadata unread_metadata ON unread_metadata.book_id = unread.id
+            LEFT JOIN read_progress unread_progress
+              ON unread_progress.book_id = unread.id
+              AND unread_progress.user_id = ?
+            WHERE unread.series_id = b.series_id
+              AND unread.deleted_at_ms IS NULL
+              AND unread_progress.book_id IS NULL
+            ORDER BY unread_metadata.number_sort, unread.relative_uri, unread.id
+            LIMIT 1
+          )
+          """.trimIndent()
+        bindings += userId.value
+      }
     }
     query.fullTextSearch?.trim()?.takeIf(String::isNotEmpty)?.let {
       parts +=
