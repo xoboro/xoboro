@@ -48,12 +48,13 @@ exactly one object key or array index:
 Every exception must be narrow and reviewed. Do not ignore all identifiers,
 timestamps, or nested payloads to make a mismatch pass.
 
-`ignoreXmlPaths` uses the same slash-separated wildcard form. Attribute
-segments start with `@`:
+`ignoreXmlPaths` and `unorderedXmlPaths` use the same slash-separated wildcard
+form. Attribute segments start with `@`:
 
 ```json
 {
-  "ignoreXmlPaths": ["/feed/updated", "/feed/link/@href"]
+  "ignoreXmlPaths": ["/feed/updated", "/feed/link/@href"],
+  "unorderedXmlPaths": ["/feed/entry"]
 }
 ```
 

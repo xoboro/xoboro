@@ -125,7 +125,10 @@ class DifferentialRunnerTest {
         <atom:feed xmlns:atom="urn:synthetic:atom">
           <atom:updated>reference-time</atom:updated>
           <atom:entry fixture="same" volatile="reference">
-            <atom:title>Synthetic item</atom:title>
+            <atom:title>Synthetic item one</atom:title>
+          </atom:entry>
+          <atom:entry fixture="same" volatile="reference">
+            <atom:title>Synthetic item two</atom:title>
           </atom:entry>
         </atom:feed>
         """,
@@ -134,13 +137,15 @@ class DifferentialRunnerTest {
       xmlSnapshot(
         """
         <feed xmlns="urn:synthetic:atom"><updated>candidate-time</updated><entry
-          volatile="candidate" fixture="same"><title>Synthetic item</title></entry></feed>
+          volatile="candidate" fixture="same"><title>Synthetic item two</title></entry><entry
+          volatile="candidate" fixture="same"><title>Synthetic item one</title></entry></feed>
         """,
       )
     val policy =
       ComparisonPolicy(
         bodyMode = BodyMode.XML,
         ignoreXmlPaths = setOf("/feed/updated", "/feed/entry/@volatile"),
+        unorderedXmlPaths = setOf("/feed/entry"),
       )
 
     val report =

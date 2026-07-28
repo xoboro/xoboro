@@ -29,6 +29,10 @@ status, and total count incompatible.
 - Treat default unsorted REST result arrays and equal-timestamp OPDS latest
   publication arrays as sets in the harness. Their complete elements remain
   compared; database-dependent tie order is not a contract.
+- Extend XML normalization with narrowly configured unordered sibling sets for
+  equal-timestamp Atom entries.
+- Match Komga's OPDS handling of a zero page size by falling back to the
+  default size of 20 instead of coercing it to one.
 
 ## Consequences
 
@@ -38,4 +42,5 @@ projection against the digest-pinned Komga 1.25.0 container.
 
 One-shot metadata promotion is isolated from ComicInfo and EPUB parsing, so
 future source adapters can reuse the same domain rule after producing Book
-metadata.
+metadata. The existing 23-case OPDS v1 suite remains exact with the expanded
+fixture and now exercises multi-Series zero-size pagination.

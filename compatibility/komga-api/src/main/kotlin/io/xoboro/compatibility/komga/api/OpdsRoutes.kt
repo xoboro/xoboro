@@ -1772,16 +1772,18 @@ private fun <T> List<T>.toPage(request: CatalogPageRequest): CatalogPage<T> {
 
 private fun ApplicationCall.opdsPageRequest(
   defaultSorts: List<CatalogSort> = emptyList(),
-): CatalogPageRequest =
-  CatalogPageRequest(
+): CatalogPageRequest {
+  val requestedSize = request.queryParameters["size"]?.toIntOrNull()
+  return CatalogPageRequest(
     page = request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0,
     size =
-      request.queryParameters["size"]
-        ?.toIntOrNull()
-        ?.coerceIn(1, CatalogPageRequest.MAXIMUM_PAGE_SIZE)
+      requestedSize
+        ?.takeIf { it > 0 }
+        ?.coerceAtMost(CatalogPageRequest.MAXIMUM_PAGE_SIZE)
         ?: 20,
     sorts = defaultSorts,
   )
+}
 
 private fun LibraryRepository.visibleTo(user: User): List<Library> =
   if (user.canAccessAllLibraries()) findAll() else findAllByIds(user.sharedLibraryIds)

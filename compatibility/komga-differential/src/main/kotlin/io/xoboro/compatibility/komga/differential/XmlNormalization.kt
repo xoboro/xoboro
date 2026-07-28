@@ -8,8 +8,10 @@ import org.w3c.dom.Node
 
 internal class XmlNormalizer(
   ignorePaths: Set<String>,
+  unorderedPaths: Set<String> = emptySet(),
 ) {
   private val ignored = ignorePaths.map(::XmlPathPattern)
+  private val unordered = unorderedPaths.map(::XmlPathPattern)
 
   fun normalize(bytes: ByteArray): String {
     val factory =
@@ -52,18 +54,47 @@ internal class XmlNormalizer(
         .map { element.childNodes.item(it) }
         .mapNotNull { child ->
           when (child.nodeType) {
-            Node.ELEMENT_NODE -> normalizeElement(child as Element, path)
+            Node.ELEMENT_NODE -> {
+              val childPath = path + child.localNameOrNodeName()
+              normalizeElement(child as Element, path)?.let {
+                NormalizedChild(
+                  value = it,
+                  unorderedKey = childPath.takeIf { candidate -> unordered.any { match -> match.matches(candidate) } },
+                )
+              }
+            }
             Node.TEXT_NODE, Node.CDATA_SECTION_NODE ->
               child.nodeValue
                 ?.takeUnless(String::isBlank)
                 ?.escaped()
                 ?.let { "#text=$it" }
+                ?.let(::NormalizedChild)
             else -> null
           }
-        }.joinToString(separator = "")
+        }
+    val unorderedValues =
+      children
+        .mapNotNull(NormalizedChild::unorderedKey)
+        .distinct()
+        .associateWith { key ->
+          children
+            .filter { it.unorderedKey == key }
+            .map(NormalizedChild::value)
+            .sorted()
+            .iterator()
+        }
+    val normalizedChildren =
+      children.joinToString(separator = "") { child ->
+        child.unorderedKey?.let { unorderedValues.getValue(it).next() } ?: child.value
+      }
 
-    return "<${element.expandedName()}$attributes>$children</${element.expandedName()}>"
+    return "<${element.expandedName()}$attributes>$normalizedChildren</${element.expandedName()}>"
   }
+
+  private data class NormalizedChild(
+    val value: String,
+    val unorderedKey: List<String>? = null,
+  )
 
   private fun Node.localNameOrNodeName(): String = localName ?: nodeName.substringAfter(':')
 
