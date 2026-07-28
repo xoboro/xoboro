@@ -1,12 +1,14 @@
 package io.xoboro.server.security
 
+import com.password4j.BcryptFunction
+import com.password4j.Password
+import com.password4j.types.Bcrypt
 import io.xoboro.core.application.PasswordHasher
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 
 class BCryptPasswordHasher(
-  strength: Int = DEFAULT_STRENGTH,
+  private val strength: Int = DEFAULT_STRENGTH,
 ) : PasswordHasher {
-  private val encoder = BCryptPasswordEncoder(strength)
+  private val function = BcryptFunction.getInstance(Bcrypt.A, strength)
 
   init {
     require(strength in 4..31) { "BCrypt strength must be between 4 and 31" }
@@ -14,9 +16,7 @@ class BCryptPasswordHasher(
 
   override fun hash(rawPassword: String): String {
     require(rawPassword.isNotBlank()) { "Raw password must not be blank" }
-    return requireNotNull(encoder.encode(rawPassword)) {
-      "BCrypt encoder returned no password hash"
-    }
+    return Password.hash(rawPassword).with(function).result
   }
 
   override fun matches(
@@ -25,7 +25,9 @@ class BCryptPasswordHasher(
   ): Boolean {
     if (rawPassword.isBlank() || passwordHash.isBlank()) return false
     return runCatching {
-      encoder.matches(rawPassword, passwordHash)
+      Password
+        .check(rawPassword, passwordHash)
+        .with(BcryptFunction.getInstanceFromHash(passwordHash))
     }.getOrDefault(false)
   }
 

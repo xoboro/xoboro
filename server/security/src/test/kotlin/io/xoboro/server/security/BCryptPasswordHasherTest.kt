@@ -28,4 +28,12 @@ class BCryptPasswordHasherTest {
     assertFalse(hasher.matches("", hash))
     assertFalse(hasher.matches("synthetic-password", "not-a-bcrypt-hash"))
   }
+
+  @Test
+  fun `verifies an existing Spring BCrypt password hash`() {
+    val springHash = "\$2a\$10\$w9UjUcbPJ6Xu8R5UrlVX5OI0zix0wduRUs2uwz2i5QLR/5VltZXWS"
+
+    assertTrue(hasher.matches("synthetic-password", springHash))
+    assertFalse(hasher.matches("wrong-password", springHash))
+  }
 }
