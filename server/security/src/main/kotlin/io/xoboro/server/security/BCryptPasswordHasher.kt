@@ -1,12 +1,14 @@
 package io.xoboro.server.security
 
 import io.xoboro.core.application.PasswordHasher
+import org.springframework.security.crypto.bcrypt.BCrypt
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder.BCryptVersion
 
 class BCryptPasswordHasher(
   strength: Int = DEFAULT_STRENGTH,
 ) : PasswordHasher {
-  private val encoder = BCryptPasswordEncoder(strength)
+  private val encoder = BCryptPasswordEncoder(BCryptVersion.`$2A`, strength)
 
   init {
     require(strength in 4..31) { "BCrypt strength must be between 4 and 31" }
@@ -25,7 +27,7 @@ class BCryptPasswordHasher(
   ): Boolean {
     if (rawPassword.isBlank() || passwordHash.isBlank()) return false
     return runCatching {
-      encoder.matches(rawPassword, passwordHash)
+      BCrypt.checkpw(rawPassword, passwordHash)
     }.getOrDefault(false)
   }
 
