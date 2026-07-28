@@ -20,7 +20,8 @@ BCrypt adds a framework-specific dependency without improving the HTTP boundary.
   boundary wherever their challenge behavior can represent the Komga contract.
 - Keep hashing behind the portable `PasswordHasher` application port.
 - Use Password4j's Argon2id implementation for new and changed passwords with OWASP's
-  minimum profile: 19 MiB memory, two iterations, one lane, and a 32-byte output.
+  minimum profile: 19 MiB memory, two iterations, one lane, a 16-byte random salt,
+  and a 32-byte output.
 - Continue verifying imported BCrypt hashes with Password4j. After a successful login,
   replace the stored hash with Argon2id using a compare-and-set database update.
 - Rehash valid Argon2id credentials when their stored parameters no longer match the

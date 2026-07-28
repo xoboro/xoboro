@@ -1,6 +1,8 @@
 package io.xoboro.server.security
 
+import java.util.Base64
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -15,6 +17,10 @@ class AdaptivePasswordHasherTest {
 
     assertTrue(first.startsWith("\$argon2id\$v=19\$m=19456,t=2,p=1\$"))
     assertTrue(second.startsWith("\$argon2id\$v=19\$m=19456,t=2,p=1\$"))
+    assertEquals(
+      AdaptivePasswordHasher.DEFAULT_SALT_LENGTH,
+      Base64.getDecoder().decode(first.split('$')[4]).size,
+    )
     assertNotEquals(first, second)
     assertTrue(hasher.matches("synthetic-password", first))
     assertTrue(hasher.matches("synthetic-password", second))

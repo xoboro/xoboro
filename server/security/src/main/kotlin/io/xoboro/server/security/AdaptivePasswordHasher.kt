@@ -24,7 +24,7 @@ class AdaptivePasswordHasher(
 
   override fun hash(rawPassword: String): String {
     require(rawPassword.isNotBlank()) { "Raw password must not be blank" }
-    return Password.hash(rawPassword).with(function).result
+    return hashWithCurrentFunction(rawPassword)
   }
 
   override fun matches(
@@ -58,7 +58,7 @@ class AdaptivePasswordHasher(
       verified = verified,
       replacementHash =
         if (verified && storedFunction != function) {
-          Password.hash(rawPassword).with(function).result
+          hashWithCurrentFunction(rawPassword)
         } else {
           null
         },
@@ -73,11 +73,18 @@ class AdaptivePasswordHasher(
     val verified = Password.check(rawPassword, passwordHash).with(legacyFunction)
     return PasswordVerification(
       verified = verified,
-      replacementHash = if (verified) Password.hash(rawPassword).with(function).result else null,
+      replacementHash = if (verified) hashWithCurrentFunction(rawPassword) else null,
     )
   }
 
+  private fun hashWithCurrentFunction(rawPassword: String): String =
+    Password.hash(rawPassword)
+      .addRandomSalt(DEFAULT_SALT_LENGTH)
+      .with(function)
+      .result
+
   companion object {
+    const val DEFAULT_SALT_LENGTH: Int = 16
     const val DEFAULT_MEMORY_KIB: Int = 19_456
     const val DEFAULT_ITERATIONS: Int = 2
     const val DEFAULT_PARALLELISM: Int = 1
