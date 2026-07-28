@@ -7,14 +7,16 @@ Komga 1.25.0.
 
 Work in this order:
 
-1. Finish the UI-free backend at 99.9% Komga feature coverage.
+1. Finish the useful UI-free backend workflows tracked by the release gate.
 2. Port the simple-komga reader UI and build a new administrator UI.
 3. Profile and eliminate Komga's backend bottlenecks.
 
-Feature coverage does not require wire compatibility, database compatibility,
-or reproduction of Komga defects. Preserve standards-based client protocols
-where interoperability requires it. Provide explicit migration tools for
-historical Komga data.
+There is no percentage, line-count, or endpoint-parity target. Feature coverage
+is a prioritization inventory for user-visible workflows, not a requirement to
+copy every Komga capability. Do not require wire compatibility, database
+compatibility, or reproduction of Komga defects. Preserve standards-based
+client protocols where interoperability requires it. Provide explicit migration
+tools for historical Komga data.
 
 Do not begin UI implementation while required backend rows in
 `docs/feature-coverage.md` remain incomplete.
