@@ -26,6 +26,7 @@ fun Route.xoboroNativeCatalogRoutes(
       XOBORO_COOKIE_AUTHENTICATION,
       strategy = AuthenticationStrategy.FirstSuccessful,
     ) {
+      install(XoboroCookieCsrfProtection)
       route("/libraries") {
         get {
           val user = call.nativeUser()
@@ -150,21 +151,21 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondAdjacentMe
   }
 }
 
-private fun io.ktor.server.application.ApplicationCall.nativeUser(): User =
+internal fun io.ktor.server.application.ApplicationCall.nativeUser(): User =
   requireNotNull(principal<XoboroPrincipal>()).user
 
-private fun User.nativeCatalogAccess(): CatalogAccess =
+internal fun User.nativeCatalogAccess(): CatalogAccess =
   CatalogAccess(
     userId = id,
     libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
     restrictions = restrictions,
   )
 
-private fun io.ktor.server.application.ApplicationCall.requiredParameter(name: String): String =
+internal fun io.ktor.server.application.ApplicationCall.requiredParameter(name: String): String =
   requireNotNull(parameters[name]).takeIf(String::isNotBlank)
     ?: throw XoboroInvalidQueryException("$name must not be blank")
 
-private suspend fun io.ktor.server.application.ApplicationCall.respondNativeNotFound(
+internal suspend fun io.ktor.server.application.ApplicationCall.respondNativeNotFound(
   code: String,
   message: String,
 ) {

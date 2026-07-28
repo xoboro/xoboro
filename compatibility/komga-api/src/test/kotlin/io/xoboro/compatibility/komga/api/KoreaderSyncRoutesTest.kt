@@ -238,6 +238,100 @@ class KoreaderSyncRoutesTest {
     }
   }
 
+  @Test
+  fun `accepts repeated progress updates at the same timestamp`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("repeated-progress.sqlite"))).use { database ->
+      seed(database)
+      val userRepository = JooqUserRepository(database)
+      val users =
+        UserLifecycle(
+          users = userRepository,
+          passwordHasher = AdaptivePasswordHasher(),
+          userIdFactory = { "user-1" },
+          currentTimeMillis = { 10 },
+        )
+      val user = users.claimInitialAdministrator("reader@example.invalid", "SyntheticPassword1!")
+      val apiKeys =
+        ApiKeyLifecycle(
+          users = userRepository,
+          apiKeys = JooqApiKeyRepository(database),
+          tokenEncoder = Sha512TokenEncoder(),
+          apiKeyIdFactory = { "key-1" },
+          plainTextKeyFactory = { TOKEN },
+          currentTimeMillis = { 20 },
+        )
+      apiKeys.create(user.id, "KOReader")
+      val books = JooqBookRepository(database)
+      val media = JooqBookMediaRepository(database)
+      val sync =
+        KoreaderSyncLifecycle(
+          fingerprints = JooqMediaItemFingerprintIndex(database),
+          books = books,
+          media = media,
+          progress =
+            ReadProgressLifecycle(
+              books = books,
+              series = JooqSeriesRepository(database),
+              media = media,
+              progresses = JooqReadProgressRepository(database),
+              currentTimeMillis = { 20 },
+            ),
+          currentTimeMillis = { 20 },
+        )
+
+      testApplication {
+        application {
+          install(ServerContentNegotiation) {
+            json()
+          }
+          installKomgaBasicAuthentication(users, apiKeys)
+          routing {
+            komgaKoreaderSyncRoutes(sync)
+          }
+        }
+        val client =
+          createClient {
+            install(ContentNegotiation) {
+              json()
+            }
+          }
+        val update =
+          KoreaderDocumentProgressDto(
+            document = "epub-fingerprint",
+            percentage = 0.75F,
+            progress = "/body/DocFragment[2]/body/p[1]/text().0",
+            device = "Synthetic device",
+            deviceId = "device-1",
+          )
+
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/koreader/syncs/progress") {
+            header(KOMGA_KOREADER_AUTHENTICATION_HEADER, TOKEN)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(update)
+          }.status,
+        )
+        // The fixed clock makes the resend carry an identical timestamp. Vary the device so a
+        // rejected write is distinguishable from an accepted write of identical values.
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/koreader/syncs/progress") {
+            header(KOMGA_KOREADER_AUTHENTICATION_HEADER, TOKEN)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(update.copy(device = "Other device", deviceId = "device-2"))
+          }.status,
+        )
+        val saved =
+          client.get("/koreader/syncs/progress/epub-fingerprint") {
+            header(KOMGA_KOREADER_AUTHENTICATION_HEADER, TOKEN)
+          }.body<KoreaderDocumentProgressDto>()
+        assertEquals("Synthetic device", saved.device)
+        assertEquals("device-1", saved.deviceId)
+      }
+    }
+  }
+
   private fun seed(
     database: XoboroDatabase,
     duplicate: Boolean = false,

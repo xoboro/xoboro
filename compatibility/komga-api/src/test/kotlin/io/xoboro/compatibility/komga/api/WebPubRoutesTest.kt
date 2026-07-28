@@ -5,6 +5,8 @@ import io.ktor.client.request.basicAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -220,6 +222,95 @@ class WebPubRoutesTest {
           HttpStatusCode.Unauthorized,
           client.get("/api/v1/books/book-epub/positions").status,
         )
+      }
+    }
+  }
+
+  @Test
+  fun `accepts an identical WebPub progression resend`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("webpub-progression.sqlite"))).use { database ->
+      seed(database)
+      val users =
+        UserLifecycle(
+          users = JooqUserRepository(database),
+          passwordHasher = AdaptivePasswordHasher(),
+          userIdFactory = { "user-admin" },
+          currentTimeMillis = { 10 },
+        )
+      val progress =
+        ReadProgressLifecycle(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          media = JooqBookMediaRepository(database),
+          progresses = JooqReadProgressRepository(database),
+          currentTimeMillis = { 20 },
+        )
+      testApplication {
+        application {
+          install(ServerContentNegotiation) {
+            json(JSON)
+          }
+          installKomgaBasicAuthentication(users)
+          routing {
+            komgaClaimRoutes(users)
+            komgaWebPubRoutes(
+              JooqCatalogReadRepository(database),
+              progress,
+              SyntheticContent(),
+            )
+          }
+        }
+        val client =
+          createClient {
+            install(ContentNegotiation) {
+              json(JSON)
+            }
+          }
+        assertEquals(
+          HttpStatusCode.OK,
+          client.post("/api/v1/claim") {
+            header("X-Komga-Email", ADMIN_EMAIL)
+            header("X-Komga-Password", ADMIN_PASSWORD)
+          }.status,
+        )
+        val update =
+          R2ProgressionDto(
+            modified = "2026-01-01T00:00:00Z",
+            device = R2DeviceDto(id = "device-1", name = "Synthetic reader"),
+            locator =
+              R2LocatorDto(
+                href = "OEBPS/chapter.xhtml",
+                type = "application/xhtml+xml",
+                locations = R2LocationDto(position = 1, progression = 0.5F),
+              ),
+          )
+
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/api/v1/books/book-epub/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, "application/json")
+            setBody(update)
+          }.status,
+        )
+        // Identical timestamp, different device. A stale write must be rejected, so the stored
+        // device below must still be the first one; an identical body could not prove that.
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.put("/api/v1/books/book-epub/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, "application/json")
+            setBody(update.copy(device = R2DeviceDto(id = "device-2", name = "Other reader")))
+          }.status,
+        )
+        val saved =
+          client.get("/api/v1/books/book-epub/progression") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }
+        assertEquals(HttpStatusCode.OK, saved.status)
+        val savedProgression = JSON.decodeFromString<R2ProgressionDto>(saved.bodyAsText())
+        assertEquals(1, savedProgression.locator.locations?.position)
+        assertEquals("device-1", savedProgression.device.id)
       }
     }
   }

@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session and read-only library/series/media-item discovery are implemented; add administration commands, artwork/content delivery, progress, events, cursor pagination, and OpenAPI |
+| Xoboro-native HTTP API | PARTIAL | Setup/session and read-only library/series/media-item discovery are implemented; add administration commands, artwork/content delivery, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
@@ -84,7 +84,7 @@ Statuses:
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |
 | Authentication activity | PARTIAL | Record session/OAuth flows and schedule retention cleanup |
 | Per-user client settings | READY | Replace arbitrary compatibility keys with versioned native preferences where possible |
-| Page and Readium locator progress | PARTIAL | Native device mutation/conflict contract and reader acceptance |
+| Page and Readium locator progress | PARTIAL | Reader acceptance of the mutation/conflict contract |
 | Mark read/unread, keep reading, and previous/next navigation | PARTIAL | Native API/UI plus end-to-end multi-item navigation tests |
 
 ## Interoperability and migration

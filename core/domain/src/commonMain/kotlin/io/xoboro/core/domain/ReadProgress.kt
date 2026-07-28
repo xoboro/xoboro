@@ -69,6 +69,16 @@ interface ReadProgressRepository {
 
   fun upsert(progress: ReadProgress)
 
+  /**
+   * Applies [progress] when it is newer than the stored progress.
+   *
+   * Implementations MUST apply the write atomically. They MUST return false without mutating
+   * stored state when
+   * [ReadProgress.readAtMillis] is less than or equal to the stored value, and MUST return true
+   * when a row was inserted or updated.
+   */
+  fun upsertIfNewer(progress: ReadProgress): Boolean
+
   fun upsertAll(progresses: Collection<ReadProgress>)
 
   fun delete(

@@ -227,6 +227,33 @@ class KoboRoutesTest {
           KoboResultDto.SUCCESS,
           JSON.decodeFromString<KoboRequestResultDto>(updateResponse.bodyAsText()).requestResult,
         )
+        // Resend the same lastModified but a different position. A stale write must be
+        // rejected, so the reading state below must still reflect the first update. An
+        // identical body could not tell rejection apart from an accepted overwrite.
+        val staleUpdate =
+          update.copy(
+            readingStates =
+              update.readingStates.map { state ->
+                state.copy(
+                  currentBookmark =
+                    state.currentBookmark.copy(
+                      progressPercent = 100F,
+                      contentSourceProgressPercent = 100F,
+                    ),
+                )
+              },
+          )
+        val repeatedUpdateResponse =
+          client.put("/kobo/$KOBO_TOKEN/v1/library/book-1/state") {
+            jsonBody(JSON.encodeToString(staleUpdate))
+          }
+        assertEquals(HttpStatusCode.OK, repeatedUpdateResponse.status)
+        assertEquals(
+          KoboResultDto.SUCCESS,
+          JSON
+            .decodeFromString<KoboRequestResultDto>(repeatedUpdateResponse.bodyAsText())
+            .requestResult,
+        )
 
         val state =
           JSON.parseToJsonElement(

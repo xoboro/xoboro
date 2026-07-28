@@ -84,6 +84,7 @@ import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroInvalidQueryException
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
+import io.xoboro.server.api.xoboroNativeProgressRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.KomgaDatabaseImporter
@@ -465,6 +466,9 @@ fun Application.xoboroModule(
               libraries = libraryAdministrationLifecycle,
               catalog = catalogReadRepository,
             )
+            readProgressLifecycle?.let {
+              xoboroNativeProgressRoutes(catalogReadRepository, it)
+            }
           }
         }
         komgaFileSystemRoutes()
