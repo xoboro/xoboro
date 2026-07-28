@@ -43,7 +43,7 @@ import io.xoboro.server.persistence.JooqReadProgressRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import io.xoboro.server.security.Sha512TokenEncoder
 import java.nio.file.Path
 import kotlin.test.Test
@@ -64,7 +64,7 @@ class KoreaderSyncRoutesTest {
       val users =
         UserLifecycle(
           users = userRepository,
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = userIds::removeFirst,
           currentTimeMillis = { now++ },
         )
@@ -225,7 +225,7 @@ class KoreaderSyncRoutesTest {
       val users =
         UserLifecycle(
           users = userRepository,
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-1" },
           currentTimeMillis = { 10 },
         )

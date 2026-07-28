@@ -22,7 +22,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.OffsetDateTime
@@ -154,7 +154,7 @@ class BasicAuthenticationTest {
       val lifecycle =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-1" },
           currentTimeMillis = { 1_000 },
         )

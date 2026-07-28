@@ -23,7 +23,7 @@ import io.xoboro.core.domain.UserRole
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -41,7 +41,7 @@ class FileLifecycleRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-${++sequence}" },
           currentTimeMillis = { 10 },
         )

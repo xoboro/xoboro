@@ -48,7 +48,7 @@ import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqSyncPointRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -69,7 +69,7 @@ class InteroperabilityRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { USER_ID.value },
           currentTimeMillis = { 10 },
         )

@@ -25,7 +25,7 @@ authority, excludes the password, and omits null fields.
 - Generate persisted user IDs with the same TSID-256 library and representation used by
   Komga 1.25.0.
 - Assemble the adapter only in the production server runtime, where SQLite persistence
-  and BCrypt hashing are available.
+  and adaptive password hashing are available.
 
 ## Consequences
 

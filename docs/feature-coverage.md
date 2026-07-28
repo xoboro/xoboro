@@ -18,7 +18,7 @@ Statuses:
 | Xoboro-native HTTP API | MISSING | Define versioned resources, commands, errors, pagination, authentication, and OpenAPI; expose existing application services without Komga DTOs |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
-| Authentication hardening | PARTIAL | Store new passwords with Argon2id while accepting imported BCrypt, persist/revoke sessions safely, apply cookie CSRF protection and login throttling, and complete authorization review |
+| Authentication hardening | PARTIAL | Persist/revoke sessions safely, apply cookie CSRF protection and login throttling, and complete authorization review; new passwords use Argon2id and imported BCrypt upgrades after verified login |
 | Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
 
 ## Server foundation
@@ -78,7 +78,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Initial administrator and multi-user management | PARTIAL | Native setup/user API, automated initial-user option, and hardened password storage |
+| Initial administrator and multi-user management | PARTIAL | Native setup/user API and automated initial-user option; adaptive password storage is implemented |
 | Roles, library grants, age ratings, and sharing-label restrictions | PARTIAL | Audit enforcement across every native and protocol interface |
 | API keys | PARTIAL | Native management API, scoped keys, expiration, and protocol-specific transport review |
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |

@@ -17,7 +17,7 @@ import io.xoboro.core.domain.UserRole
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,7 +35,7 @@ class ClaimRoutesTest {
   fun `reports claim status and creates a Komga-compatible administrator`() {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("claim.sqlite"))).use { database ->
       val repository = JooqUserRepository(database)
-      val hasher = BCryptPasswordHasher()
+      val hasher = AdaptivePasswordHasher()
       val lifecycle = lifecycle(repository, hasher)
 
       testApplication {
@@ -83,7 +83,7 @@ class ClaimRoutesTest {
   fun `rejects missing invalid and blank credential headers`() {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("validation.sqlite"))).use { database ->
       val repository = JooqUserRepository(database)
-      val lifecycle = lifecycle(repository, BCryptPasswordHasher())
+      val lifecycle = lifecycle(repository, AdaptivePasswordHasher())
 
       testApplication {
         application {
@@ -119,7 +119,7 @@ class ClaimRoutesTest {
   fun `rejects a second claim without replacing the administrator`() {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("claimed.sqlite"))).use { database ->
       val repository = JooqUserRepository(database)
-      val lifecycle = lifecycle(repository, BCryptPasswordHasher())
+      val lifecycle = lifecycle(repository, AdaptivePasswordHasher())
 
       testApplication {
         application {
@@ -154,7 +154,7 @@ class ClaimRoutesTest {
 
   private fun lifecycle(
     repository: JooqUserRepository,
-    hasher: BCryptPasswordHasher,
+    hasher: AdaptivePasswordHasher,
   ): UserLifecycle =
     UserLifecycle(
       users = repository,
