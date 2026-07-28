@@ -33,6 +33,7 @@ Large Collections and Read Lists no longer require full member hydration, and
 the same authorization and content-restriction boundary used by the main
 catalog applies before paging.
 
-The top-level organization lists still hydrate their visible membership to
-produce Komga's filtered DTOs. A dedicated organization projection can replace
-that path independently if organization counts become large.
+Top-level organization lists hydrate their visible membership in bounded
+500-organization catalog queries, as specified by ADR 0081. A dedicated
+organization projection can still replace their in-memory name search and page
+envelope independently if organization counts become large.
