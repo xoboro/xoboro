@@ -100,10 +100,10 @@ class DifferentialRunner(
     val mode =
       when (case.comparison.bodyMode) {
         BodyMode.AUTO ->
-          if (reference.header("Content-Type").any { "json" in it.lowercase() }) {
-            BodyMode.JSON
-          } else {
-            BodyMode.BINARY
+          when {
+            reference.header("Content-Type").any { "json" in it.lowercase() } -> BodyMode.JSON
+            reference.header("Content-Type").any { "xml" in it.lowercase() } -> BodyMode.XML
+            else -> BodyMode.BINARY
           }
         else -> case.comparison.bodyMode
       }
@@ -113,6 +113,7 @@ class DifferentialRunner(
         when (mode) {
           BodyMode.NONE -> error("NONE body mode must return before normalization")
           BodyMode.JSON -> normalizeJson(case, reference.body) to normalizeJson(case, candidate.body)
+          BodyMode.XML -> normalizeXml(case, reference.body) to normalizeXml(case, candidate.body)
           BodyMode.TEXT ->
             reference.body.toText().normalizeLineEndings() to
               candidate.body.toText().normalizeLineEndings()
@@ -143,6 +144,11 @@ class DifferentialRunner(
       ).normalize(element)
     return json.encodeToString(normalized)
   }
+
+  private fun normalizeXml(
+    case: DifferentialCase,
+    body: ByteArray,
+  ): String = XmlNormalizer(case.comparison.ignoreXmlPaths).normalize(body)
 
   private fun ByteArray.toText(): String = toString(StandardCharsets.UTF_8)
 

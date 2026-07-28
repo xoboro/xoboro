@@ -1,0 +1,310 @@
+{
+  "version": "1.25.0",
+  "cases": [
+    {
+      "name": "OPDS v1 root catalog",
+      "path": "/opds/v1.2/catalog",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 OpenSearch description",
+      "path": "/opds/v1.2/search",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/OpenSearchDescription/Url/@template"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 series catalog",
+      "path": "/opds/v1.2/series?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 title search",
+      "path": "/opds/v1.2/series?search=Series&page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 publisher filter",
+      "path": "/opds/v1.2/series?publisher=Synthetic%20Publisher&page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 previous page",
+      "path": "/opds/v1.2/series?page=1&size=1",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 on deck",
+      "path": "/opds/v1.2/ondeck?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 keep reading",
+      "path": "/opds/v1.2/keep-reading?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 latest books",
+      "path": "/opds/v1.2/books/latest?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 latest series",
+      "path": "/opds/v1.2/series/latest?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 libraries",
+      "path": "/opds/v1.2/libraries",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 collections",
+      "path": "/opds/v1.2/collections?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 library detail",
+      "path": "/opds/v1.2/libraries/{LIBRARY_ID}?page=0&size=20",
+      "pathVariables": [
+        "LIBRARY_ID"
+      ],
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/id",
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 collection detail",
+      "path": "/opds/v1.2/collections/{COLLECTION_ID}?page=0&size=20",
+      "pathVariables": [
+        "COLLECTION_ID"
+      ],
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/id",
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 read lists",
+      "path": "/opds/v1.2/readlists?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 read list detail",
+      "path": "/opds/v1.2/readlists/{READ_LIST_ID}?page=0&size=20",
+      "pathVariables": [
+        "READ_LIST_ID"
+      ],
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/id",
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 series detail",
+      "path": "/opds/v1.2/series/{SERIES_ID}?page=0&size=20",
+      "pathVariables": [
+        "SERIES_ID"
+      ],
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/id",
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 publishers",
+      "path": "/opds/v1.2/publishers?page=0&size=20",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 missing series",
+      "path": "/opds/v1.2/series/missing-synthetic",
+      "comparison": {
+        "bodyMode": "NONE",
+        "compareContentType": false
+      }
+    },
+    {
+      "name": "OPDS v1 missing collection",
+      "path": "/opds/v1.2/collections/missing-synthetic",
+      "comparison": {
+        "bodyMode": "NONE",
+        "compareContentType": false
+      }
+    },
+    {
+      "name": "OPDS v1 missing read list",
+      "path": "/opds/v1.2/readlists/missing-synthetic",
+      "comparison": {
+        "bodyMode": "NONE",
+        "compareContentType": false
+      }
+    },
+    {
+      "name": "OPDS v1 negative page normalization",
+      "path": "/opds/v1.2/series?page=-1&size=1",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v1 zero size normalization",
+      "path": "/opds/v1.2/series?page=0&size=0",
+      "comparison": {
+        "bodyMode": "XML",
+        "ignoreXmlPaths": [
+          "/feed/updated",
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
+        ]
+      }
+    }
+  ]
+}
