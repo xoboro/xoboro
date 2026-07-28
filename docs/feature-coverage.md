@@ -18,7 +18,7 @@ Statuses:
 | Xoboro-native HTTP API | MISSING | Define versioned resources, commands, errors, pagination, authentication, and OpenAPI; expose existing application services without Komga DTOs |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
-| Authentication hardening | PARTIAL | Persist/revoke sessions safely, apply cookie CSRF protection and login throttling, and complete authorization review; new passwords use Argon2id and imported BCrypt upgrades after verified login |
+| Authentication hardening | PARTIAL | Apply cookie CSRF protection and login throttling, then complete authorization review; digest-only sessions are restart-safe and new passwords use Argon2id with verified BCrypt upgrades |
 | Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
 
 ## Server foundation

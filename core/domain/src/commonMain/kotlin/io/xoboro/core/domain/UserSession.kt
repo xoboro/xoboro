@@ -24,7 +24,11 @@ interface UserSessionRepository {
 
   fun insertIfAbsent(session: UserSession): Boolean
 
-  fun update(session: UserSession)
+  fun touchIfActive(
+    tokenDigest: String,
+    accessedAtMillis: Long,
+    expiresAtMillis: Long,
+  ): Boolean
 
   fun deleteByTokenDigest(tokenDigest: String): Boolean
 

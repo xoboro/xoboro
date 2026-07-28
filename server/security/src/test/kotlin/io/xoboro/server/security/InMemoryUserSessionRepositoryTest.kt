@@ -20,8 +20,11 @@ class InMemoryUserSessionRepositoryTest {
     assertFalse(repository.insertIfAbsent(first))
     repository.insertIfAbsent(second)
     repository.insertIfAbsent(third)
-    repository.update(first.copy(lastAccessedAtMillis = 10, expiresAtMillis = 110))
+    assertTrue(repository.touchIfActive("digest-1", 10, 110))
     assertEquals(110, repository.findByTokenDigestOrNull("digest-1")?.expiresAtMillis)
+    assertTrue(repository.touchIfActive("digest-1", 5, 105))
+    assertEquals(110, repository.findByTokenDigestOrNull("digest-1")?.expiresAtMillis)
+    assertFalse(repository.touchIfActive("digest-1", 110, 210))
 
     assertEquals(1, repository.deleteExpired(150))
     assertNull(repository.findByTokenDigestOrNull("digest-1"))

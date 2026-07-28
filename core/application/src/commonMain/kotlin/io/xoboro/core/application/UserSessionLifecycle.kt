@@ -47,22 +47,19 @@ class UserSessionLifecycle(
     val digest = tokenEncoder.encode(plainToken)
     val session = sessions.findByTokenDigestOrNull(digest) ?: return null
     val now = now()
-    if (session.expiresAtMillis <= now) {
-      sessions.deleteByTokenDigest(digest)
-      return null
-    }
     val user = users.findByIdOrNull(session.userId)
     if (user == null) {
       sessions.deleteByTokenDigest(digest)
       return null
     }
-    sessions.update(
-      session.copy(
-        lastAccessedAtMillis = now,
+    val touched =
+      sessions.touchIfActive(
+        tokenDigest = digest,
+        accessedAtMillis = now,
         expiresAtMillis = now + inactivityTimeoutMillis,
-      ),
-    )
-    return user
+      )
+    if (!touched) sessions.deleteExpired(now)
+    return user.takeIf { touched }
   }
 
   fun invalidate(plainToken: String): Boolean =

@@ -126,6 +126,38 @@ class XoboroRuntimeTest {
   }
 
   @Test
+  fun `persists authenticated sessions across real runtime restarts`() {
+    val databasePath = tempDirectory.resolve("session-runtime.sqlite")
+    val config =
+      ServerConfig(
+        port = 25_600,
+        databasePath = databasePath,
+        workerCount = 1,
+        taskPollMillis = 10,
+        taskFailurePollMillis = 10,
+        taskLeaseMillis = 1_000,
+        shutdownTimeoutMillis = 2_000,
+      )
+
+    val plainToken =
+      XoboroRuntime.open(config).use { runtime ->
+        val user =
+          runtime.userLifecycle.claimInitialAdministrator(
+            email = "admin@example.invalid",
+            rawPassword = "synthetic-password",
+          )
+        runtime.userSessionLifecycle.create(user).plainToken
+      }
+
+    XoboroRuntime.open(config).use { runtime ->
+      assertEquals(
+        "admin@example.invalid",
+        runtime.userSessionLifecycle.authenticate(plainToken)?.email,
+      )
+    }
+  }
+
+  @Test
   fun `applies persisted startup settings and live worker resizing`() {
     val databasePath = tempDirectory.resolve("settings-runtime.sqlite")
     XoboroDatabase.open(DatabaseConfig(databasePath)).use { database ->
