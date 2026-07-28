@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AdaptivePasswordHasherTest {
@@ -24,6 +25,7 @@ class AdaptivePasswordHasherTest {
     assertNotEquals(first, second)
     assertTrue(hasher.matches("synthetic-password", first))
     assertTrue(hasher.matches("synthetic-password", second))
+    assertNull(hasher.verify("synthetic-password", first).replacementHash)
   }
 
   @Test
