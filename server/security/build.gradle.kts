@@ -15,8 +15,7 @@ kotlin {
 dependencies {
   implementation(project(":core:application"))
   implementation(project(":core:domain"))
-  implementation(libs.spring.security.crypto)
-  implementation(libs.commons.logging)
+  implementation(libs.password4j)
 
   testImplementation(kotlin("test-junit5"))
 }

@@ -3,16 +3,15 @@ kotlin = "2.4.10"
 ktor = "3.5.1"
 logback = "1.6.0"
 logstash-logback-encoder = "9.0"
-flyway = "12.11.0"
+flyway = "13.0.0"
 hikari = "7.1.0"
-jooq = "3.19.36"
+jooq = "3.21.6"
 sqlite = "3.53.2.1"
-tika = "2.9.1"
+tika = "3.3.2"
 natural-comparator = "1.1"
 kotlinx-serialization = "1.11.0"
 kotlinx-coroutines = "1.11.0"
-spring-security = "7.0.4"
-commons-logging = "1.4.0"
+password4j = "1.8.4"
 tsid-creator = "5.2.6"
 cryptohash = "1.0.2"
 jsoup = "1.21.1"
@@ -45,8 +44,7 @@ tika-core = { module = "org.apache.tika:tika-core", version.ref = "tika" }
 natural-comparator = { module = "net.grey-panther:natural-comparator", version.ref = "natural-comparator" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
-spring-security-crypto = { module = "org.springframework.security:spring-security-crypto", version.ref = "spring-security" }
-commons-logging = { module = "commons-logging:commons-logging", version.ref = "commons-logging" }
+password4j = { module = "com.password4j:password4j", version.ref = "password4j" }
 tsid-creator = { module = "com.github.f4b6a3:tsid-creator", version.ref = "tsid-creator" }
 cryptohash = { module = "com.appmattus.crypto:cryptohash", version.ref = "cryptohash" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
