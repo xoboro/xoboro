@@ -10,10 +10,10 @@ model for comics, novels, books, video, and audio.
 ## Relationship to Komga
 
 Xoboro is derived from and inspired by
-[Komga](https://github.com/gotson/komga). The first compatibility baseline is
-Komga 1.25.0, and the project aims to reproduce 99.9% of its backend behavior,
-API surface, media handling, metadata behavior, and supported protocols before
-adding Xoboro-specific capabilities.
+[Komga](https://github.com/gotson/komga). Komga 1.25.0 is the initial feature
+reference: Xoboro aims to provide 99.9% of its useful server, library, reader,
+metadata, administration, and interoperability capabilities without copying
+its API shape, persistence model, implementation defects, or bottlenecks.
 
 Komga is Copyright (c) 2019 Gauthier Roebroeck and is distributed under the
 MIT License. Its license is preserved in
@@ -25,8 +25,9 @@ the Komga project or its maintainers.
 
 ## Delivery order
 
-1. Complete the UI-free Xoboro backend with Komga 1.25.0 compatibility,
-   migration tooling, protocol support, and automated verification.
+1. Complete the UI-free Xoboro backend with Komga feature coverage, native
+   APIs, migration tooling, standards-based protocol support, and automated
+   verification.
 2. Port the simple-komga reader experience and build a new administrator UI
    from a documented design system.
 3. Profile and remove bottlenecks in scanning, analysis, task scheduling,
@@ -50,12 +51,13 @@ server/
   sources/local/     Local filesystem source adapter
   tasks/             Leased durable worker runtime and task routing
 compatibility/
-  komga-api/         Komga REST compatibility adapters and wire DTOs
-docs/                Architecture, parity, testing, and design records
+  komga-api/         Transitional Komga-shaped HTTP adapters and protocol code
+docs/                Architecture, feature coverage, testing, and design records
 third-party/         Third-party license notices
 ```
 
-UI modules are intentionally absent during the backend compatibility phase.
+UI modules are intentionally absent during the backend feature-completion
+phase.
 
 ## Build and test
 
@@ -213,12 +215,14 @@ Komga server settings and Komga-specific synchronization snapshots are not
 copied; Xoboro server settings retain their deployment defaults and each sync
 adapter establishes new Xoboro snapshots after cutover.
 
-## Compatibility status
+## Feature status
 
-The auditable compatibility ledger is maintained in
-[`docs/komga-parity.md`](docs/komga-parity.md). A feature is not considered
-compatible until behavior, authorization, persistence, error handling, and
-automated tests have all been verified.
+The auditable release ledger is maintained in
+[`docs/feature-coverage.md`](docs/feature-coverage.md). A feature is not
+considered ready until its behavior, authorization, persistence, failure
+handling, and automated tests have been verified. The former wire-compatibility
+ledger remains in [`docs/komga-parity.md`](docs/komga-parity.md) as historical
+implementation evidence, not as a product requirement.
 
 ## Test data policy
 
