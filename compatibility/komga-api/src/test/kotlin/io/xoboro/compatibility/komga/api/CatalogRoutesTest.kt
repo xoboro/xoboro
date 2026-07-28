@@ -31,6 +31,7 @@ import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.SequentialReadProgressLifecycle
+import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
@@ -47,6 +48,7 @@ import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.core.domain.UserRole
 import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
@@ -71,6 +73,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.io.TempDir
 
@@ -112,6 +115,98 @@ class CatalogRoutesTest {
         ),
       )
     assertTrue(wire.contains("\"releaseDate\":null"))
+  }
+
+  @Test
+  fun `honors deprecated book and series filters`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("deprecated-filters.sqlite"))).use {
+        database ->
+      seedCatalog(database)
+      val users =
+        UserLifecycle(
+          users = JooqUserRepository(database),
+          passwordHasher = BCryptPasswordHasher(),
+          userIdFactory = { "filter-admin" },
+          currentTimeMillis = { 10 },
+        )
+      val catalog = JooqCatalogReadRepository(database)
+      val progress =
+        ReadProgressLifecycle(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          media = JooqBookMediaRepository(database),
+          progresses = JooqReadProgressRepository(database),
+          currentTimeMillis = { 20 },
+        )
+      val collections = JooqSeriesCollectionRepository(database)
+      val organizations =
+        OrganizationLifecycle(
+          collections = collections,
+          readLists = JooqReadListRepository(database),
+          series = JooqSeriesRepository(database),
+          books = JooqBookRepository(database),
+          collectionIdFactory = { "filter-collection" },
+          readListIdFactory = { "filter-read-list" },
+          currentTimeMillis = { 30 },
+        )
+      testApplication {
+        application {
+          install(ServerContentNegotiation) {
+            json(KOMGA_JSON)
+          }
+          installKomgaBasicAuthentication(users)
+          routing {
+            komgaClaimRoutes(users)
+            komgaCatalogRoutes(catalog)
+            komgaReadProgressRoutes(catalog, progress)
+            komgaOrganizationRoutes(
+              collections,
+              JooqReadListRepository(database),
+              organizations,
+              catalog,
+            )
+          }
+        }
+        val client =
+          createClient {
+            install(ContentNegotiation) {
+              json(KOMGA_JSON)
+            }
+          }
+        assertEquals(
+          HttpStatusCode.OK,
+          client.post("/api/v1/claim") {
+            header("X-Komga-Email", ADMIN_EMAIL)
+            header("X-Komga-Password", ADMIN_PASSWORD)
+          }.status,
+        )
+        val collection =
+          client
+            .post("/api/v1/collections") {
+              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+              setBody(
+                CollectionCreationDto(
+                  name = "Filter collection",
+                  ordered = false,
+                  seriesIds = listOf("series-1"),
+                ),
+              )
+            }.body<KomgaCollectionDto>()
+        verifyDeprecatedCollectionFilter(client, collection.id)
+        assertEquals(
+          HttpStatusCode.NoContent,
+          client.patch("/api/v1/books/book-1/read-progress") {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(ReadProgressUpdateDto(completed = true))
+          }.status,
+        )
+        verifyDeprecatedBookAndSeriesFilters(client)
+        verifyDeprecatedFilterMismatches(client)
+        verifyStructuredBookAndSeriesFilters(client)
+      }
+    }
   }
 
   @Test
@@ -839,6 +934,154 @@ class CatalogRoutesTest {
     }
   }
 
+  private suspend fun verifyDeprecatedCollectionFilter(
+    client: HttpClient,
+    collectionId: String,
+  ) {
+    assertEquals(
+      listOf("series-1"),
+      client
+        .get("/api/v1/series?collection_id=$collectionId") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaSeriesDto>>().content.map(KomgaSeriesDto::id),
+    )
+  }
+
+  private suspend fun verifyDeprecatedBookAndSeriesFilters(client: HttpClient) {
+    assertEquals(
+      listOf("book-1"),
+      client
+        .get(
+          "/api/v1/books" +
+            "?media_status=READY&read_status=READ&tag=sample&released_after=2024-12-31",
+        ) {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaBookDto>>().content.map(KomgaBookDto::id),
+    )
+    assertEquals(
+      listOf("book-2"),
+      client
+        .get("/api/v1/books?media_status=READY&tag=sample&released_after=2025-12-31") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaBookDto>>().content.map(KomgaBookDto::id),
+    )
+    assertEquals(
+      listOf("series-1"),
+      client
+        .get(
+          "/api/v1/series" +
+            "?status=ONGOING&read_status=IN_PROGRESS&age_rating=13" +
+            "&release_year=2025&complete=true&sharing_label=sample-access" +
+            "&publisher=Synthetic%20Publisher&language=en&genre=Adventure" +
+            "&tag=sample&author=Synthetic%20Author,writer",
+        ) {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaSeriesDto>>().content.map(KomgaSeriesDto::id),
+    )
+  }
+
+  private suspend fun verifyDeprecatedFilterMismatches(client: HttpClient) {
+    listOf(
+      "/api/v1/books?media_status=ERROR",
+      "/api/v1/books?read_status=IN_PROGRESS",
+      "/api/v1/books?tag=missing",
+      "/api/v1/books?released_after=2026-12-31",
+      "/api/v1/series?collection_id=missing",
+      "/api/v1/series?status=ENDED",
+      "/api/v1/series?read_status=READ",
+      "/api/v1/series?publisher=Other",
+      "/api/v1/series?language=fr",
+      "/api/v1/series?genre=Drama",
+      "/api/v1/series?tag=missing",
+      "/api/v1/series?age_rating=18",
+      "/api/v1/series?release_year=2024",
+      "/api/v1/series?sharing_label=missing",
+      "/api/v1/series?complete=false",
+      "/api/v1/series?author=Other,writer",
+    ).forEach { path ->
+      assertEquals(
+        0,
+        client
+          .get(path) {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.body<KomgaPageDto<JsonObject>>().totalElements,
+        path,
+      )
+    }
+  }
+
+  private suspend fun verifyStructuredBookAndSeriesFilters(client: HttpClient) {
+    val books =
+      client
+        .post("/api/v1/books/list?sort=metadata.numberSort,desc") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            Json.parseToJsonElement(
+              """
+              {
+                "condition": {
+                  "allOf": [
+                    {"tag": {"operator": "is", "value": "sample"}},
+                    {"numberSort": {"operator": "greaterThan", "value": 1}},
+                    {"title": {"operator": "contains", "value": "chapter"}},
+                    {"mediaStatus": {"operator": "is", "value": "READY"}},
+                    {"mediaProfile": {"operator": "is", "value": "DIVINA"}},
+                    {
+                      "author": {
+                        "operator": "is",
+                        "value": {"name": "Synthetic Author", "role": "writer"}
+                      }
+                    }
+                  ]
+                }
+              }
+              """.trimIndent(),
+            ),
+          )
+        }.body<KomgaPageDto<KomgaBookDto>>()
+    assertEquals(listOf("book-2"), books.content.map(KomgaBookDto::id))
+
+    val series =
+      client
+        .post("/api/v1/series/list?sort=metadata.titleSort,asc") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            Json.parseToJsonElement(
+              """
+              {
+                "condition": {
+                  "allOf": [
+                    {"publisher": {"operator": "is", "value": "synthetic publisher"}},
+                    {"language": {"operator": "is", "value": "en"}},
+                    {"genre": {"operator": "is", "value": "Adventure"}},
+                    {"tag": {"operator": "is", "value": "sample"}},
+                    {"ageRating": {"operator": "greaterThan", "value": 10}},
+                    {"complete": {"operator": "isTrue"}},
+                    {"seriesStatus": {"operator": "is", "value": "ONGOING"}},
+                    {
+                      "releaseDate": {
+                        "operator": "after",
+                        "dateTime": "2024-12-31T00:00:00Z"
+                      }
+                    },
+                    {
+                      "author": {
+                        "operator": "is",
+                        "value": {"name": "Synthetic Author", "role": "writer"}
+                      }
+                    }
+                  ]
+                }
+              }
+              """.trimIndent(),
+            ),
+          )
+        }.body<KomgaPageDto<KomgaSeriesDto>>()
+    assertEquals(listOf("series-1"), series.content.map(KomgaSeriesDto::id))
+  }
+
   private fun seedCatalog(database: XoboroDatabase) {
     val libraryId = LibraryId("library-1")
     val seriesId = SeriesId("series-1")
@@ -886,14 +1129,32 @@ class CatalogRoutesTest {
       seriesMetadata.findBySeriesIdOrNull(seriesId)!!.copy(
         title = "Synthetic catalog",
         titleSort = "Synthetic catalog",
+        publisher = "Synthetic Publisher",
+        ageRating = 13,
+        language = "en",
+        genres = setOf("Adventure"),
+        tags = setOf("sample"),
+        totalBookCount = 2,
+        sharingLabels = setOf("sample-access"),
         readingDirection = ReadingDirection.RIGHT_TO_LEFT,
         updatedAtMillis = 2,
       ),
     )
+    val bookMetadata = JooqBookMetadataRepository(database)
     repeat(2) { index ->
+      val bookId = BookId("book-${index + 1}")
+      bookMetadata.upsert(
+        requireNotNull(bookMetadata.findByBookIdOrNull(bookId)).copy(
+          summary = "Synthetic summary ${index + 1}",
+          releaseDate = if (index == 0) "2025-01-02" else "2026-02-03",
+          authors = listOf(Author("Synthetic Author", "writer")),
+          tags = setOf("sample"),
+          updatedAtMillis = 2,
+        ),
+      )
       JooqBookMediaRepository(database).upsert(
         BookMedia(
-          bookId = BookId("book-${index + 1}"),
+          bookId = bookId,
           status = MediaStatus.READY,
           mediaType = "application/zip",
           profile = MediaProfile.DIVINA,
