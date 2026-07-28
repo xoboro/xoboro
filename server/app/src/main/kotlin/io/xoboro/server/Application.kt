@@ -76,6 +76,12 @@ import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SyncPointRepository
+import io.xoboro.server.api.configureXoboroNativeAuthentication
+import io.xoboro.server.api.configureXoboroNativeRateLimits
+import io.xoboro.server.api.CrossSiteRequestRejectedException
+import io.xoboro.server.api.XOBORO_API_PREFIX
+import io.xoboro.server.api.XoboroApiError
+import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.KomgaDatabaseImporter
@@ -91,6 +97,7 @@ import io.ktor.server.plugins.calllogging.CallLogging
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.ContentTransformationException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.ratelimit.RateLimit
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.header
@@ -303,6 +310,7 @@ fun Application.xoboroModule(
   installKomgaShallowEtag()
   installKomgaSecurityHeaders()
   installKomgaCors(corsAllowedOrigins)
+  val nativeSessions = userSessionLifecycle
   userLifecycle?.let {
     installKomgaBasicAuthentication(
       users = it,
@@ -310,11 +318,22 @@ fun Application.xoboroModule(
       authenticationActivities = authenticationActivityLifecycle,
       sessions = userSessionLifecycle,
       rememberMe = rememberMeTokenService,
+      additionalConfiguration = {
+        nativeSessions?.let(::configureXoboroNativeAuthentication)
+      },
     )
   }
   install(StatusPages) {
     status(HttpStatusCode.Forbidden, HttpStatusCode.NotFound) { call, status ->
-      if (
+      if (call.request.path().isXoboroNativeApiPath()) {
+        call.respond(
+          status,
+          XoboroApiError(
+            code = if (status == HttpStatusCode.NotFound) "not_found" else "forbidden",
+            message = status.description,
+          ),
+        )
+      } else if (
         call.request.header(io.ktor.http.HttpHeaders.Origin) == null &&
         call.request.path().isSpringErrorSurface()
       ) {
@@ -324,8 +343,29 @@ fun Application.xoboroModule(
         )
       }
     }
+    status(HttpStatusCode.Unauthorized, HttpStatusCode.TooManyRequests) { call, status ->
+      if (call.request.path().isXoboroNativeApiPath()) {
+        call.respond(
+          status,
+          XoboroApiError(
+            code =
+              if (status == HttpStatusCode.TooManyRequests) {
+                "rate_limit_exceeded"
+              } else {
+                "authentication_required"
+              },
+            message = status.description,
+          ),
+        )
+      }
+    }
     exception<BadRequestException> { call, cause ->
-      if (call.request.path().isSpringErrorSurface()) {
+      if (call.request.path().isXoboroNativeApiPath()) {
+        call.respond(
+          HttpStatusCode.BadRequest,
+          XoboroApiError("invalid_request", "Malformed request"),
+        )
+      } else if (call.request.path().isSpringErrorSurface()) {
         call.respondError(
           HttpStatusCode.BadRequest,
           cause.message ?: HttpStatusCode.BadRequest.description,
@@ -335,7 +375,12 @@ fun Application.xoboroModule(
       }
     }
     exception<ContentTransformationException> { call, cause ->
-      if (call.request.path().isSpringErrorSurface()) {
+      if (call.request.path().isXoboroNativeApiPath()) {
+        call.respond(
+          HttpStatusCode.BadRequest,
+          XoboroApiError("invalid_request", "Malformed JSON request"),
+        )
+      } else if (call.request.path().isSpringErrorSurface()) {
         call.respondError(
           HttpStatusCode.BadRequest,
           cause.message ?: HttpStatusCode.BadRequest.description,
@@ -343,6 +388,16 @@ fun Application.xoboroModule(
       } else {
         throw cause
       }
+    }
+    exception<CrossSiteRequestRejectedException> { call, cause ->
+      call.respond(
+        status = HttpStatusCode.Forbidden,
+        message =
+          XoboroApiError(
+            code = CrossSiteRequestRejectedException.CODE,
+            message = requireNotNull(cause.message),
+          ),
+      )
     }
     exception<Throwable> { call, cause ->
       call.application.environment.log.error("Unhandled request failure", cause)
@@ -361,6 +416,11 @@ fun Application.xoboroModule(
   }
   install(SSE)
   installTrustedProxyHeaders(trustedProxyHosts)
+  if (userLifecycle != null && nativeSessions != null) {
+    install(RateLimit) {
+      configureXoboroNativeRateLimits()
+    }
+  }
   operationalMetrics?.let(::installOperationalMetrics)
 
   routing {
@@ -386,6 +446,9 @@ fun Application.xoboroModule(
         )
       }
       userLifecycle?.let {
+        nativeSessions?.let { sessions ->
+          xoboroNativeAuthenticationRoutes(it, sessions)
+        }
         komgaFileSystemRoutes()
         komgaClaimRoutes(it)
         komgaAuthenticatedUserRoutes(
@@ -560,6 +623,14 @@ fun Application.xoboroModule(
     }
   }
 }
+
+private fun String.isXoboroNativeApiPath(): Boolean =
+  indexOf(XOBORO_API_PREFIX).let { prefixIndex ->
+    prefixIndex >= 0 &&
+      getOrNull(prefixIndex + XOBORO_API_PREFIX.length).let { boundary ->
+        boundary == null || boundary == '/'
+      }
+  }
 
 private fun String.isSpringErrorSurface(): Boolean =
   contains("/api/") || contains("/opds/")

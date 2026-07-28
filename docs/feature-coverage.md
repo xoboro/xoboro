@@ -15,10 +15,10 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | MISSING | Define versioned resources, commands, errors, pagination, authentication, and OpenAPI; expose existing application services without Komga DTOs |
+| Xoboro-native HTTP API | PARTIAL | Setup/session authentication and the error boundary are implemented; add catalog, administration, media, pagination, events, and OpenAPI without Komga DTOs |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
-| Authentication hardening | PARTIAL | Apply cookie CSRF protection and login throttling, then complete authorization review; digest-only sessions are restart-safe and new passwords use Argon2id with verified BCrypt upgrades |
+| Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
 | Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
 
 ## Server foundation
@@ -78,7 +78,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Initial administrator and multi-user management | PARTIAL | Native setup/user API and automated initial-user option; adaptive password storage is implemented |
+| Initial administrator and multi-user management | PARTIAL | Native setup is implemented; add native user management and an automated initial-user option |
 | Roles, library grants, age ratings, and sharing-label restrictions | PARTIAL | Audit enforcement across every native and protocol interface |
 | API keys | PARTIAL | Native management API, scoped keys, expiration, and protocol-specific transport review |
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |

@@ -44,6 +44,7 @@ core/
   application/       Portable use cases and external-service ports
   domain/            Platform-neutral domain model
 server/
+  api/               Versioned first-party HTTP API for web and native clients
   app/               Ktor application entry point
   media/             Media analysis and source materialization ports
   persistence/       SQLite migrations and jOOQ persistence adapters
@@ -80,6 +81,10 @@ mise exec -- ./gradlew :server:app:run
 
 The initial health endpoint is available at `http://localhost:25600/health`.
 Readiness is available at `http://localhost:25600/ready`.
+
+The first-party API is rooted at `/api/xoboro/v1`. Its setup and session
+contract, including cookie and bearer security requirements, is documented in
+[`docs/api/native-v1.md`](docs/api/native-v1.md).
 
 ### Docker Compose
 
