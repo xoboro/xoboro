@@ -175,17 +175,23 @@ jobs:
             reference_status="$(
               curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
                 "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
-                jq --raw-output \
-                  'if (.content | length) == 3 and
-                    all(.content[]; .media.status == "READY")
+              jq --raw-output \
+                'if (.content | length) == 3 and
+                    all(.content[]; .media.status == "READY") and
+                    any(.content[];
+                      .oneshot == true and
+                      .seriesTitle == "Synthetic Standalone")
                   then "READY" else "" end'
             )"
             candidate_status="$(
               curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
                 "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
-                jq --raw-output \
-                  'if (.content | length) == 3 and
-                    all(.content[]; .media.status == "READY")
+              jq --raw-output \
+                'if (.content | length) == 3 and
+                    all(.content[]; .media.status == "READY") and
+                    any(.content[];
+                      .oneshot == true and
+                      .seriesTitle == "Synthetic Standalone")
                   then "READY" else "" end'
             )"
             if [ "${reference_status}" = "READY" ] &&

@@ -8,6 +8,7 @@ import io.ktor.client.request.basicAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.patch
 import io.ktor.client.request.put
@@ -629,6 +630,7 @@ class CatalogRoutesTest {
             setBody(CollectionUpdateDto(seriesIds = listOf("series-1", "series-2")))
           }.status,
         )
+        verifyCollectionMemberFilters(client, collection.id)
         users.updateUser(
           requireNotNull(users.findByEmailIgnoreCaseOrNull(RESTRICTED_EMAIL)).copy(
             sharesAllLibraries = false,
@@ -658,6 +660,7 @@ class CatalogRoutesTest {
               )
             }.body<KomgaReadListDto>()
         assertEquals(listOf("book-2", "book-1"), readList.bookIds)
+        verifyReadListMemberFilters(client, readList.id)
         val initialReadListProgress =
           client
             .get("/api/v1/readlists/${readList.id}/read-progress/tachiyomi") {
@@ -1124,6 +1127,78 @@ class CatalogRoutesTest {
           )
         }.body<KomgaPageDto<KomgaSeriesDto>>()
     assertEquals(listOf("series-1"), series.content.map(KomgaSeriesDto::id))
+  }
+
+  private suspend fun verifyCollectionMemberFilters(
+    client: HttpClient,
+    collectionId: String,
+  ) {
+    val ordered =
+      client
+        .get("/api/v1/collections/$collectionId/series?page=0&size=1") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaSeriesDto>>()
+    assertEquals(2, ordered.totalElements)
+    assertEquals(listOf("series-1"), ordered.content.map(KomgaSeriesDto::id))
+
+    val filtered =
+      client
+        .get("/api/v1/collections/$collectionId/series") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          parameter("publisher", "Synthetic Publisher")
+          parameter("genre", "Adventure")
+          parameter("tag", "sample")
+          parameter("language", "en")
+          parameter("age_rating", "13")
+          parameter("release_year", "2025")
+          parameter("author", "Synthetic Author,writer")
+        }.body<KomgaPageDto<KomgaSeriesDto>>()
+    assertEquals(1, filtered.totalElements)
+    assertEquals(listOf("series-1"), filtered.content.map(KomgaSeriesDto::id))
+    assertEquals(
+      0,
+      client
+        .get("/api/v1/collections/$collectionId/series?publisher=missing") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaSeriesDto>>()
+        .totalElements,
+    )
+  }
+
+  private suspend fun verifyReadListMemberFilters(
+    client: HttpClient,
+    readListId: String,
+  ) {
+    val orderedResponse =
+      client.get("/api/v1/readlists/$readListId/books?page=0&size=1") {
+        basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+      }
+    val orderedWire = orderedResponse.bodyAsText()
+    val ordered =
+      KOMGA_JSON.decodeFromString<KomgaPageDto<KomgaBookDto>>(orderedWire)
+    assertEquals(2, ordered.totalElements)
+    assertEquals(listOf("book-2"), ordered.content.map(KomgaBookDto::id))
+    assertTrue("\"readProgress\":null" in orderedWire)
+
+    val filtered =
+      client
+        .get("/api/v1/readlists/$readListId/books") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          parameter("tag", "sample")
+          parameter("media_status", "READY")
+          parameter("author", "Synthetic Author,writer")
+          parameter("deleted", "false")
+        }.body<KomgaPageDto<KomgaBookDto>>()
+    assertEquals(2, filtered.totalElements)
+    assertEquals(listOf("book-2", "book-1"), filtered.content.map(KomgaBookDto::id))
+    assertEquals(
+      0,
+      client
+        .get("/api/v1/readlists/$readListId/books?tag=missing") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaBookDto>>()
+        .totalElements,
+    )
   }
 
   private fun seedCatalog(database: XoboroDatabase) {
