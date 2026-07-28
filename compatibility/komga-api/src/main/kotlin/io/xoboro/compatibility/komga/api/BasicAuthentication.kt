@@ -11,6 +11,8 @@ import io.ktor.util.AttributeKey
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.AuthenticationFailedCause
 import io.ktor.server.auth.UserPasswordCredential
+import io.ktor.server.auth.apikey.apiKey
+import io.ktor.server.auth.basicAuthenticationCredentials
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.path
@@ -27,7 +29,6 @@ import io.xoboro.core.domain.ApiKey
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
 import java.nio.charset.StandardCharsets
-import java.util.Base64
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -79,44 +80,32 @@ fun Application.installKomgaBasicAuthentication(
         }
       }
     }
-    provider(KOMGA_API_KEY_AUTHENTICATION) {
-      authenticate { context ->
-        val rawToken = context.call.request.header(KOMGA_API_KEY_HEADER)
-        when {
-          rawToken == null ->
-            context.error(KOMGA_API_KEY_AUTHENTICATION, AuthenticationFailedCause.NoCredentials)
-          else -> {
-            val principal = apiKeys?.authenticate(rawToken)
-            if (principal == null) {
-              authenticationActivities?.recordFailure(
-                source = AUTHENTICATION_SOURCE_API_KEY,
-                details = context.call.authenticationRequestDetails(),
-                error = BAD_CREDENTIALS_ERROR,
-                apiKeyFingerprint = apiKeys?.fingerprint(rawToken),
-              )
-              context.error(
-                KOMGA_API_KEY_AUTHENTICATION,
-                AuthenticationFailedCause.InvalidCredentials,
-              )
-            } else {
-              authenticationActivities?.recordSuccess(
-                user = principal.user,
-                source = AUTHENTICATION_SOURCE_API_KEY,
-                details = context.call.authenticationRequestDetails(),
-                apiKey = principal.apiKey,
-              )
-              sessions?.let { context.call.issueSession(principal.user, it) }
-              context.call.issueRememberMeIfRequested(
-                principal.user,
-                rememberMe,
-              )
-              context.principal(
-                KOMGA_API_KEY_AUTHENTICATION,
-                KomgaPrincipal(principal.user, principal.apiKey),
-              )
-            }
-          }
+    apiKey(KOMGA_API_KEY_AUTHENTICATION) {
+      headerName = KOMGA_API_KEY_HEADER
+      validate { rawToken ->
+        val principal = apiKeys?.authenticate(rawToken)
+        if (principal == null) {
+          authenticationActivities?.recordFailure(
+            source = AUTHENTICATION_SOURCE_API_KEY,
+            details = authenticationRequestDetails(),
+            error = BAD_CREDENTIALS_ERROR,
+            apiKeyFingerprint = apiKeys?.fingerprint(rawToken),
+          )
+          null
+        } else {
+          authenticationActivities?.recordSuccess(
+            user = principal.user,
+            source = AUTHENTICATION_SOURCE_API_KEY,
+            details = authenticationRequestDetails(),
+            apiKey = principal.apiKey,
+          )
+          sessions?.let { issueSession(principal.user, it) }
+          issueRememberMeIfRequested(principal.user, rememberMe)
+          KomgaPrincipal(principal.user, principal.apiKey)
         }
+      }
+      challenge { call ->
+        call.respondKomgaAuthenticationChallenge()
       }
     }
     provider(KOMGA_SESSION_AUTHENTICATION) {
@@ -195,21 +184,8 @@ fun Application.installKomgaBasicAuthentication(
   }
 }
 
-private fun ApplicationCall.basicCredentialsOrNull(): UserPasswordCredential? {
-  val authorization = request.header(HttpHeaders.Authorization) ?: return null
-  val parts = authorization.split(' ', limit = 2)
-  if (parts.size != 2 || !parts[0].equals("Basic", ignoreCase = true)) return null
-  val decoded =
-    runCatching {
-      String(Base64.getDecoder().decode(parts[1]), StandardCharsets.UTF_8)
-    }.getOrNull() ?: return null
-  val separator = decoded.indexOf(':')
-  if (separator < 0) return null
-  return UserPasswordCredential(
-    name = decoded.substring(0, separator),
-    password = decoded.substring(separator + 1),
-  )
-}
+private fun ApplicationCall.basicCredentialsOrNull(): UserPasswordCredential? =
+  request.basicAuthenticationCredentials(StandardCharsets.UTF_8)
 
 private suspend fun ApplicationCall.respondKomgaAuthenticationChallenge() {
   response.header(HttpHeaders.WWWAuthenticate, """Basic realm="$KOMGA_BASIC_REALM"""")

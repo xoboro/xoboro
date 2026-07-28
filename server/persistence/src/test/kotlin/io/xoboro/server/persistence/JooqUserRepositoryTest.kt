@@ -105,6 +105,36 @@ class JooqUserRepositoryTest {
   }
 
   @Test
+  fun `replaces a password hash only when the expected hash still matches`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("password-hash.sqlite"))).use { database ->
+      insertLibrary(database)
+      val repository = JooqUserRepository(database)
+      repository.insert(userFixture())
+
+      assertFalse(
+        repository.replacePasswordHash(
+          id = USER_ID,
+          expectedHash = "stale-hash",
+          replacementHash = "modern-hash",
+          updatedAtMillis = 2,
+        ),
+      )
+      assertTrue(
+        repository.replacePasswordHash(
+          id = USER_ID,
+          expectedHash = "\$2a\$10\$synthetic",
+          replacementHash = "modern-hash",
+          updatedAtMillis = 2,
+        ),
+      )
+
+      val updated = requireNotNull(repository.findByIdOrNull(USER_ID))
+      assertEquals("modern-hash", updated.passwordHash)
+      assertEquals(2, updated.updatedAtMillis)
+    }
+  }
+
+  @Test
   fun `allows exactly one concurrent initial claim`() {
     XoboroDatabase.open(
       DatabaseConfig(

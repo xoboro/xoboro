@@ -7,7 +7,7 @@
 
 Every non-public Komga API eventually needs a shared authentication boundary. Basic
 authentication is the first supported mechanism because it is stateless, is used by
-existing API clients, and can verify the BCrypt identities already stored by Xoboro.
+existing API clients, and can verify BCrypt identities imported from Komga.
 
 Komga 1.25.0 challenges protected REST requests with the `Realm` Basic realm, treats
 email lookup case-insensitively, and exposes the authenticated principal at
@@ -15,7 +15,9 @@ email lookup case-insensitively, and exposes the authenticated principal at
 
 ## Decision
 
-- Configure a named Ktor Basic provider in the Komga compatibility module.
+- Use Ktor's Basic credential parser inside a named compatibility provider. The custom
+  provider remains only because OPDS requires a protocol-specific challenge document
+  that Ktor's default Basic challenge cannot express.
 - Authenticate through the portable `UserLifecycle`; the HTTP adapter never reads
   password hashes or queries persistence directly.
 - Use the `Realm` challenge value expected by Komga clients.

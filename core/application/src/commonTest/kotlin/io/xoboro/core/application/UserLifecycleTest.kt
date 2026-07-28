@@ -71,6 +71,51 @@ class UserLifecycleTest {
   }
 
   @Test
+  fun `authentication upgrades a verified legacy password hash`() {
+    val repository = InMemoryUserRepository()
+    repository.insert(
+      User(
+        id = UserId("user-1"),
+        email = "reader@example.invalid",
+        passwordHash = "legacy:synthetic-password",
+        roles = setOf(UserRole.PAGE_STREAMING),
+        createdAtMillis = 10,
+      ),
+    )
+    val lifecycle =
+      lifecycle(
+        repository = repository,
+        passwordHasher =
+          object : PasswordHasher {
+            override fun hash(rawPassword: String): String = "modern:$rawPassword"
+
+            override fun matches(
+              rawPassword: String,
+              passwordHash: String,
+            ): Boolean =
+              passwordHash == "legacy:$rawPassword" || passwordHash == "modern:$rawPassword"
+
+            override fun verify(
+              rawPassword: String,
+              passwordHash: String,
+            ): PasswordVerification =
+              PasswordVerification(
+                verified = passwordHash == "legacy:$rawPassword",
+                replacementHash =
+                  if (passwordHash == "legacy:$rawPassword") "modern:$rawPassword" else null,
+              )
+          },
+      )
+
+    val authenticated =
+      requireNotNull(lifecycle.authenticate("reader@example.invalid", "synthetic-password"))
+
+    assertEquals("modern:synthetic-password", authenticated.passwordHash)
+    assertEquals(100, authenticated.updatedAtMillis)
+    assertEquals("modern:synthetic-password", repository.findByIdOrNull(authenticated.id)?.passwordHash)
+  }
+
+  @Test
   fun `updates user state password and deletion through the lifecycle`() {
     val repository = InMemoryUserRepository()
     val lifecycle = lifecycle(repository)
@@ -125,18 +170,19 @@ class UserLifecycleTest {
     repository: InMemoryUserRepository,
     invalidateUserSessions: (UserId) -> Unit = {},
     eventPublisher: (UserEvent) -> Unit = {},
+    passwordHasher: PasswordHasher =
+      object : PasswordHasher {
+        override fun hash(rawPassword: String): String = "hashed:$rawPassword"
+
+        override fun matches(
+          rawPassword: String,
+          passwordHash: String,
+        ): Boolean = passwordHash == "hashed:$rawPassword"
+      },
   ): UserLifecycle =
     UserLifecycle(
       users = repository,
-      passwordHasher =
-        object : PasswordHasher {
-          override fun hash(rawPassword: String): String = "hashed:$rawPassword"
-
-          override fun matches(
-            rawPassword: String,
-            passwordHash: String,
-          ): Boolean = passwordHash == "hashed:$rawPassword"
-        },
+      passwordHasher = passwordHasher,
       userIdFactory = { "user-${repository.count() + 1}" },
       currentTimeMillis = { 100 },
       invalidateUserSessions = invalidateUserSessions,

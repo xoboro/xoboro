@@ -1,6 +1,6 @@
 # ADR 0013: User security foundation
 
-- Status: accepted
+- Status: superseded by ADR 0083
 - Date: 2026-07-27
 
 ## Context
@@ -38,5 +38,5 @@ for the claim and login APIs. The public claim endpoint, Basic authentication, b
 sessions, API keys, user administration endpoints, authorization middleware, and
 authentication activity remain separate compatibility increments.
 
-The Spring Security crypto module is used only as a focused hashing dependency. Xoboro
-does not adopt Spring's HTTP or dependency-injection runtime.
+ADR 0083 replaces the password-hashing decision after the Komga import boundary was
+separated from Xoboro's internal security defaults.

@@ -24,7 +24,7 @@ import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import io.xoboro.server.security.Sha512TokenEncoder
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
@@ -48,7 +48,7 @@ class AuthenticationActivityRoutesTest {
       val userLifecycle =
         UserLifecycle(
           users = users,
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-${userIds.getAndIncrement()}" },
           currentTimeMillis = clock::getAndIncrement,
         )
