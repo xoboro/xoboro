@@ -88,13 +88,146 @@
     },
     {
       "name": "OPDS v2 title search",
-      "path": "/opds/v2/search?query=Synthetic",
+      "path": "/opds/v2/search?query=Series",
       "comparison": {
         "bodyMode": "JSON",
         "ignoreJsonPaths": [
           "/metadata/modified",
           "/links/*/href",
           "/groups/*/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 keep reading",
+      "path": "/opds/v2/libraries/keep-reading?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 on deck",
+      "path": "/opds/v2/libraries/on-deck?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 latest books",
+      "path": "/opds/v2/libraries/books/latest?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/publications/*/metadata/modified",
+          "/publications/*/metadata/belongsTo/series/*/links/*/href",
+          "/publications/*/links/*/href",
+          "/publications/*/links/*/properties/authenticate/href",
+          "/publications/*/images/*/href",
+          "/publications/*/images/*/properties/authenticate/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 latest series",
+      "path": "/opds/v2/libraries/series/latest?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 collections",
+      "path": "/opds/v2/libraries/collections?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href",
+          "/groups/*/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 collection detail",
+      "path": "/opds/v2/collections/{COLLECTION_ID}?page=0&size=20",
+      "pathVariables": [
+        "COLLECTION_ID"
+      ],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 read lists",
+      "path": "/opds/v2/libraries/readlists?page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/navigation/*/href",
+          "/groups/*/navigation/*/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 read list detail",
+      "path": "/opds/v2/readlists/{READ_LIST_ID}?page=0&size=20",
+      "pathVariables": [
+        "READ_LIST_ID"
+      ],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/publications/*/metadata/modified",
+          "/publications/*/metadata/belongsTo/series/*/links/*/href",
+          "/publications/*/links/*/href",
+          "/publications/*/links/*/properties/authenticate/href",
+          "/publications/*/images/*/href",
+          "/publications/*/images/*/properties/authenticate/href"
+        ]
+      }
+    },
+    {
+      "name": "OPDS v2 series detail and tag facet",
+      "path": "/opds/v2/series/{SERIES_ID}?tag=sample&page=0&size=20",
+      "pathVariables": [
+        "SERIES_ID"
+      ],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/metadata/modified",
+          "/links/*/href",
+          "/facets/*/links/*/href",
+          "/publications/*/metadata/modified",
+          "/publications/*/metadata/belongsTo/series/*/links/*/href",
+          "/publications/*/links/*/href",
+          "/publications/*/links/*/properties/authenticate/href",
+          "/publications/*/images/*/href",
+          "/publications/*/images/*/properties/authenticate/href"
         ]
       }
     }
