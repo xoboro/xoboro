@@ -4,6 +4,7 @@ import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.basicAuth
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -23,11 +24,19 @@ import io.xoboro.compatibility.komga.api.LibraryDto
 import io.xoboro.compatibility.komga.api.KomgaErrorResponse
 import io.xoboro.compatibility.komga.api.OAuth2ClientDto
 import io.xoboro.compatibility.komga.api.UserDto
+import io.xoboro.server.api.LoginRequest
+import io.xoboro.server.api.SessionResponse
+import io.xoboro.server.api.SessionTransport
+import io.xoboro.server.api.SetupRequest
+import io.xoboro.server.api.SetupStatusResponse
+import io.xoboro.server.api.XOBORO_API_PREFIX
+import io.xoboro.server.api.XoboroApiError
 import java.nio.file.Path
 import java.time.OffsetDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
@@ -260,6 +269,101 @@ class ApplicationTest {
           basicAuth("admin@example.invalid", "synthetic-password")
         }.body(),
       )
+    }
+
+    assertFalse(runtime.isReady())
+  }
+
+  @Test
+  fun `production module exposes restart-safe native authentication`() {
+    val runtime =
+      XoboroRuntime.open(
+        ServerConfig(
+          port = 25_600,
+          databasePath = tempDirectory.resolve("native-authentication.sqlite"),
+          workerCount = 1,
+          taskPollMillis = 10,
+          taskFailurePollMillis = 10,
+          taskLeaseMillis = 1_000,
+          shutdownTimeoutMillis = 2_000,
+        ),
+      )
+
+    testApplication {
+      application {
+        xoboroModule(runtime)
+      }
+      val client =
+        createClient {
+          install(ContentNegotiation) {
+            json()
+          }
+        }
+
+      assertEquals(
+        SetupStatusResponse(claimed = false),
+        client.get("$XOBORO_API_PREFIX/setup").body(),
+      )
+      val setup =
+        client.post("$XOBORO_API_PREFIX/setup") {
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            SetupRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+      assertEquals(HttpStatusCode.Created, setup.status)
+      val accessToken = requireNotNull(setup.body<SessionResponse>().accessToken)
+      assertEquals(
+        "admin@example.invalid",
+        client
+          .get("$XOBORO_API_PREFIX/session") {
+            bearerAuth(accessToken)
+          }.body<SessionResponse>()
+          .user.email,
+      )
+
+      val malformed =
+        client.post("$XOBORO_API_PREFIX/session") {
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody("""{"email":""}""")
+        }
+      assertEquals(HttpStatusCode.BadRequest, malformed.status)
+      assertEquals("invalid_request", malformed.body<XoboroApiError>().code)
+
+      repeat(9) {
+        assertEquals(
+          HttpStatusCode.Unauthorized,
+          client
+            .post("$XOBORO_API_PREFIX/session") {
+              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+              setBody(
+                LoginRequest(
+                  email = "missing@example.invalid",
+                  password = "wrong-password",
+                  transport = SessionTransport.BEARER,
+                ),
+              )
+            }.status,
+        )
+      }
+      val limited =
+        client.post("$XOBORO_API_PREFIX/session") {
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            LoginRequest(
+              email = "missing@example.invalid",
+              password = "wrong-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+      assertEquals(HttpStatusCode.TooManyRequests, limited.status)
+      assertEquals("rate_limit_exceeded", limited.body<XoboroApiError>().code)
+      assertNotNull(limited.headers[HttpHeaders.RetryAfter])
     }
 
     assertFalse(runtime.isReady())

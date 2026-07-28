@@ -9,6 +9,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
 import io.ktor.util.AttributeKey
 import io.ktor.server.auth.Authentication
+import io.ktor.server.auth.AuthenticationConfig
 import io.ktor.server.auth.AuthenticationFailedCause
 import io.ktor.server.auth.UserPasswordCredential
 import io.ktor.server.auth.apikey.apiKey
@@ -38,6 +39,7 @@ fun Application.installKomgaBasicAuthentication(
   authenticationActivities: AuthenticationActivityLifecycle? = null,
   sessions: UserSessionLifecycle? = null,
   rememberMe: RememberMeTokenService? = null,
+  additionalConfiguration: AuthenticationConfig.() -> Unit = {},
 ) {
   install(Authentication) {
     provider(KOMGA_BASIC_AUTHENTICATION) {
@@ -181,6 +183,7 @@ fun Application.installKomgaBasicAuthentication(
         }
       }
     }
+    additionalConfiguration()
   }
 }
 
