@@ -47,5 +47,6 @@ Generated identifiers, origins, and timestamps are ignored only at their
 specific XML paths. All remaining elements, text, attributes, namespaces, and
 ordering are compared structurally.
 
-Komga's unauthorized response body and exact `WWW-Authenticate` formatting
-remain part of the cross-cutting security/error response block.
+The cross-cutting security/error response block in ADR 0075 subsequently
+completed the unauthorized response body and exact `WWW-Authenticate`
+formatting.

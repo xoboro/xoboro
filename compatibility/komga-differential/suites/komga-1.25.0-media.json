@@ -142,6 +142,30 @@
       "comparison": {
         "bodyMode": "NONE"
       }
+    },
+    {
+      "name": "missing REST book",
+      "path": "/api/v1/books/missing-synthetic",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
+      }
+    },
+    {
+      "name": "missing WebPub manifest",
+      "path": "/api/v1/books/missing-synthetic/manifest",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
+      }
+    },
+    {
+      "name": "missing OPDS v2 manifest",
+      "path": "/opds/v2/books/missing-synthetic/manifest",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
+      }
     }
   ]
 }

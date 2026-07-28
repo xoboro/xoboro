@@ -258,24 +258,24 @@
       "name": "OPDS v1 missing series",
       "path": "/opds/v1.2/series/missing-synthetic",
       "comparison": {
-        "bodyMode": "NONE",
-        "compareContentType": false
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
       }
     },
     {
       "name": "OPDS v1 missing collection",
       "path": "/opds/v1.2/collections/missing-synthetic",
       "comparison": {
-        "bodyMode": "NONE",
-        "compareContentType": false
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
       }
     },
     {
       "name": "OPDS v1 missing read list",
       "path": "/opds/v1.2/readlists/missing-synthetic",
       "comparison": {
-        "bodyMode": "NONE",
-        "compareContentType": false
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp"]
       }
     },
     {

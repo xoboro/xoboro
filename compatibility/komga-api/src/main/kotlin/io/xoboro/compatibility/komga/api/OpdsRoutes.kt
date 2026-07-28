@@ -70,22 +70,7 @@ fun Route.komgaOpdsRoutes(
 ) {
   get("/opds/v2/auth") {
     call.respondOpds(
-      OpdsAuthenticationDocumentDto(
-        authentication =
-          listOf(
-            OpdsAuthenticationFlowDto(
-              labels = OpdsAuthenticationLabelsDto("Email", "Password"),
-            ),
-          ),
-        title = "Komga",
-        id = call.opdsUrl("/opds/v2/auth"),
-        description = "Enter your email and password to authenticate.",
-        links =
-          listOf(
-            WPLinkDto(rel = "help", href = "https://komga.org"),
-            WPLinkDto(rel = "logo", href = call.opdsUrl("/android-chrome-512x512.png")),
-          ),
-      ),
+      call.opdsAuthenticationDocument(),
       OPDS_AUTH_CONTENT_TYPE,
     )
   }
@@ -966,7 +951,7 @@ data class OpdsAuthenticationDocumentDto(
 
 @Serializable
 data class OpdsAuthenticationFlowDto(
-  val type: String = "http://opds-spec.org/auth/basic",
+  val type: String,
   val labels: OpdsAuthenticationLabelsDto? = null,
   val links: List<WPLinkDto> = emptyList(),
 )
@@ -1850,7 +1835,7 @@ private suspend fun ApplicationCall.visibleLibrary(
 private fun ApplicationCall.opdsUser(): User =
   requireNotNull(principal<KomgaPrincipal>()).user
 
-private fun ApplicationCall.opdsUrl(path: String): String {
+internal fun ApplicationCall.opdsUrl(path: String): String {
   val origin = request.origin
   val port =
     if (
@@ -1865,6 +1850,25 @@ private fun ApplicationCall.opdsUrl(path: String): String {
   val normalized = if (path.startsWith("/")) path else "/$path"
   return "${origin.scheme}://${origin.serverHost}$port$context$normalized"
 }
+
+internal fun ApplicationCall.opdsAuthenticationDocument(): OpdsAuthenticationDocumentDto =
+  OpdsAuthenticationDocumentDto(
+    authentication =
+      listOf(
+        OpdsAuthenticationFlowDto(
+          type = OPDS_BASIC_AUTH_TYPE,
+          labels = OpdsAuthenticationLabelsDto("Email", "Password"),
+        ),
+      ),
+    title = "Komga",
+    id = opdsUrl("/opds/v2/auth"),
+    description = "Enter your email and password to authenticate.",
+    links =
+      listOf(
+        WPLinkDto(rel = "help", href = "https://komga.org"),
+        WPLinkDto(rel = "logo", href = opdsUrl("/android-chrome-512x512.png")),
+      ),
+  )
 
 private fun String.xml(): String =
   replace("&", "&amp;")
@@ -1897,7 +1901,8 @@ private const val ATOM_NAVIGATION_MEDIA_TYPE =
 private const val ATOM_ACQUISITION_MEDIA_TYPE =
   "application/atom+xml;profile=opds-catalog;kind=acquisition"
 private const val OPDS_V2_MEDIA_TYPE = "application/opds+json"
-private const val OPDS_AUTH_MEDIA_TYPE = "application/opds-authentication+json"
+internal const val OPDS_AUTH_MEDIA_TYPE = "application/opds-authentication+json"
+internal const val OPDS_BASIC_AUTH_TYPE = "http://opds-spec.org/auth/basic"
 private const val OPDS_SUBSECTION_REL = "subsection"
 private const val OPDS_ACQUISITION_REL = "http://opds-spec.org/acquisition"
 private const val OPDS_PSE_STREAM_REL = "http://vaemendis.net/opds-pse/stream"

@@ -29,6 +29,7 @@ import io.xoboro.compatibility.komga.api.komgaSyncPointRoutes
 import io.xoboro.compatibility.komga.api.komgaTachiyomiProgressRoutes
 import io.xoboro.compatibility.komga.api.komgaComicRackRoutes
 import io.xoboro.compatibility.komga.api.komgaServerResourceRoutes
+import io.xoboro.compatibility.komga.api.respondError
 import io.xoboro.compatibility.komga.api.installKomgaBasicAuthentication
 import io.xoboro.compatibility.komga.api.installKomgaCors
 import io.xoboro.compatibility.komga.api.installKomgaSecurityHeaders
@@ -87,9 +88,12 @@ import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.ContentTransformationException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.httpMethod
+import io.ktor.server.request.header
 import io.ktor.server.request.path
 import io.ktor.server.sse.SSE
 import io.ktor.server.response.respond
@@ -309,12 +313,50 @@ fun Application.xoboroModule(
     )
   }
   install(StatusPages) {
+    status(HttpStatusCode.Forbidden, HttpStatusCode.NotFound) { call, status ->
+      if (
+        call.request.header(io.ktor.http.HttpHeaders.Origin) == null &&
+        call.request.path().isSpringErrorSurface()
+      ) {
+        call.respondError(
+          status,
+          if (status == HttpStatusCode.NotFound) "404 NOT_FOUND" else status.description,
+        )
+      }
+    }
+    exception<BadRequestException> { call, cause ->
+      if (call.request.path().isSpringErrorSurface()) {
+        call.respondError(
+          HttpStatusCode.BadRequest,
+          cause.message ?: HttpStatusCode.BadRequest.description,
+        )
+      } else {
+        throw cause
+      }
+    }
+    exception<ContentTransformationException> { call, cause ->
+      if (call.request.path().isSpringErrorSurface()) {
+        call.respondError(
+          HttpStatusCode.BadRequest,
+          cause.message ?: HttpStatusCode.BadRequest.description,
+        )
+      } else {
+        throw cause
+      }
+    }
     exception<Throwable> { call, cause ->
       call.application.environment.log.error("Unhandled request failure", cause)
-      call.respond(
-        status = HttpStatusCode.InternalServerError,
-        message = ErrorResponse(code = "internal_error", message = "Internal server error"),
-      )
+      if (call.request.path().isSpringErrorSurface()) {
+        call.respondError(
+          HttpStatusCode.InternalServerError,
+          cause.message ?: "Internal server error",
+        )
+      } else {
+        call.respond(
+          status = HttpStatusCode.InternalServerError,
+          message = ErrorResponse(code = "internal_error", message = "Internal server error"),
+        )
+      }
     }
   }
   install(SSE)
@@ -518,6 +560,9 @@ fun Application.xoboroModule(
     }
   }
 }
+
+private fun String.isSpringErrorSurface(): Boolean =
+  contains("/api/") || contains("/opds/")
 
 private const val APPLICATION_VERSION = "0.1.0-SNAPSHOT"
 
