@@ -1,6 +1,6 @@
 # ADR 0002: Komga compatibility is an explicit boundary
 
-- Status: Accepted
+- Status: Superseded by ADR 0082
 - Date: 2026-07-27
 - Baseline: Komga 1.25.0
 
@@ -25,5 +25,6 @@ A feature is compatible only when all applicable evidence exists:
 5. Golden response comparison against Komga 1.25.0.
 6. Migration verification where historical state is involved.
 
-The source of truth is `docs/komga-parity.md`.
-
+The historical source of truth was `docs/komga-parity.md`. The active
+feature-based decision and release ledger are ADR 0082 and
+`docs/feature-coverage.md`.

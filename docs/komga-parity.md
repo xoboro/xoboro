@@ -1,6 +1,11 @@
 # Komga 1.25.0 backend parity ledger
 
-This document is the release gate for Xoboro Server 1.0.
+> [!NOTE]
+> This is a historical implementation ledger, not the Xoboro Server release
+> gate. Exact Komga REST, error, database, and defect compatibility is no
+> longer a product objective. The active feature-based release gate is
+> [`feature-coverage.md`](feature-coverage.md). Standards-based protocols and
+> the read-only migration path remain supported where useful.
 
 ## Definition
 
