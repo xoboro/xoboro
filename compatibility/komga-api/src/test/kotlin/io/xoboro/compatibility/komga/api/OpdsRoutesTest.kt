@@ -26,6 +26,7 @@ import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
+import io.xoboro.core.domain.BookMetadata
 import io.xoboro.core.domain.BookPage
 import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.Library
@@ -43,6 +44,7 @@ import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqArtworkRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
+import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
@@ -234,6 +236,63 @@ class OpdsRoutesTest {
         assertEquals(listOf("Series"), searchFeed.groups.map { it.metadata.title })
         assertEquals("Synthetic series", searchFeed.groups.single().navigation.single().title)
 
+        val collectionsFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/libraries/collections?page=0&size=1").bodyAsText(),
+          )
+        assertEquals("All libraries - Collections", collectionsFeed.metadata.title)
+        assertEquals(1, collectionsFeed.metadata.itemsPerPage)
+        assertEquals(1, collectionsFeed.metadata.currentPage)
+        assertEquals(1, collectionsFeed.metadata.numberOfItems)
+        assertEquals(
+          listOf("Recommended", "Browse", "Collections", "Read lists"),
+          collectionsFeed.navigation.mapNotNull(WPLinkDto::title),
+        )
+        assertEquals(
+          "Synthetic collection",
+          collectionsFeed.groups.single().navigation.single().title,
+        )
+
+        val collectionFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/collections/collection-1?page=0&size=1").bodyAsText(),
+          )
+        assertEquals("Synthetic collection", collectionFeed.metadata.title)
+        assertEquals("1970-01-01T00:00:00.001Z", collectionFeed.metadata.modified)
+        assertEquals(1, collectionFeed.metadata.numberOfItems)
+        assertEquals("Synthetic series", collectionFeed.navigation.single().title)
+
+        val readListsFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/libraries/readlists?page=0&size=1").bodyAsText(),
+          )
+        assertEquals("All libraries - Read Lists", readListsFeed.metadata.title)
+        assertEquals(1, readListsFeed.metadata.numberOfItems)
+        assertEquals(
+          "Synthetic read list",
+          readListsFeed.groups.single().navigation.single().title,
+        )
+
+        val readListFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/readlists/read-list-1?page=0&size=1").bodyAsText(),
+          )
+        assertEquals("Synthetic read list", readListFeed.metadata.title)
+        assertEquals("1970-01-01T00:00:00.001Z", readListFeed.metadata.modified)
+        assertEquals(1, readListFeed.metadata.numberOfItems)
+        assertEquals("Synthetic chapter", readListFeed.publications.single().metadata.title)
+
+        val seriesFeed =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/series/series-1?tag=sample&page=0&size=1").bodyAsText(),
+          )
+        assertEquals("Synthetic series", seriesFeed.metadata.title)
+        assertEquals("Synthetic series summary", seriesFeed.metadata.description)
+        assertEquals("1970-01-01T00:00:00.001Z", seriesFeed.metadata.modified)
+        assertEquals(1, seriesFeed.metadata.numberOfItems)
+        assertEquals("sample", seriesFeed.facets.single().links.single().title)
+        assertEquals("self", seriesFeed.facets.single().links.single().rel)
+
         catalogPaths.forEach { path ->
           val response = client.authenticatedGet(path)
           assertTrue(
@@ -360,6 +419,7 @@ class OpdsRoutesTest {
       SeriesMetadata(
         seriesId = SERIES_ID,
         title = "Synthetic series",
+        summary = "Synthetic series summary",
         publisher = "Synthetic publisher",
         createdAtMillis = 1,
       ),
@@ -375,6 +435,16 @@ class OpdsRoutesTest {
         mediaKind = MediaKind.COMIC_ARCHIVE,
         fileModifiedAtMillis = 1,
         number = 1,
+        createdAtMillis = 1,
+      ),
+    )
+    JooqBookMetadataRepository(database).upsert(
+      BookMetadata(
+        bookId = BOOK_ID,
+        title = "Synthetic chapter",
+        number = "1",
+        numberSort = 1F,
+        tags = setOf("sample"),
         createdAtMillis = 1,
       ),
     )

@@ -351,6 +351,7 @@ private fun Route.opdsV2Routes(
             title = "${library?.name ?: "All libraries"} - Keep Reading",
             path = call.request.path(),
             page = page,
+            modified = library.opdsModified(),
           ),
         )
       }
@@ -374,6 +375,7 @@ private fun Route.opdsV2Routes(
                 call.opdsUser().catalogAccess(),
                 call.opdsPageRequest(),
               ),
+            modified = library.opdsModified(),
           ),
         )
       }
@@ -396,6 +398,7 @@ private fun Route.opdsV2Routes(
                   listOf(CatalogSort("created", CatalogSortDirection.DESC)),
                 ),
               ),
+            modified = library.opdsModified(),
           ),
         )
       }
@@ -421,6 +424,7 @@ private fun Route.opdsV2Routes(
                   listOf(CatalogSort("lastModified", CatalogSortDirection.DESC)),
                 ),
               ),
+            modified = library.opdsModified(),
           ),
         )
       }
@@ -522,27 +526,67 @@ private fun Route.opdsV2Routes(
                 catalog.findSeriesByIdOrNull(id, user.catalogAccess())?.series?.libraryId == library.id
               }
           }
+        val page =
+          visible
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, SeriesCollection::name))
+            .toPage(call.opdsPageRequest())
         call.respondOpds(
-          call.navigationFeed(
-            "${library?.name ?: "All libraries"} - Collections",
-            visible.map { it.toV2Link(call) },
+          OpdsFeedDto(
+            metadata =
+              page.toOpdsMetadata(
+                title = "${library?.name ?: "All libraries"} - Collections",
+                modified = library.opdsModified(),
+              ),
+            links = call.standardV2Links(call.request.path(), page),
+            navigation =
+              call.libraryNavigation(
+                catalog,
+                collections,
+                readLists,
+                library,
+                user,
+              ),
+            groups =
+              listOf(
+                OpdsFeedGroupDto(
+                  metadata = OpdsFeedMetadataDto("Collections"),
+                  navigation = page.content.map { it.toV2Link(call) },
+                ),
+              ),
           ),
         )
       }
     }
   get("/opds/v2/collections/{id}") {
-    val item = collections.findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
+    val user = call.opdsUser()
+    val item =
+      collections
+        .findAll()
+        .visibleCollections(catalog, user)
+        .firstOrNull { it.id.value == call.parameters["id"] }
     if (item == null) {
       call.respond(HttpStatusCode.NotFound)
     } else {
-      val series =
+      val visible =
         item.seriesIds.mapNotNull {
-          catalog.findSeriesByIdOrNull(it, call.opdsUser().catalogAccess())
+          catalog.findSeriesByIdOrNull(it, user.catalogAccess())
         }
+      val ordered =
+        if (item.ordered) {
+          visible
+        } else {
+          visible.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.titleSort })
+        }
+      val page = ordered.toPage(call.opdsPageRequest())
       call.respondOpds(
-        call.navigationFeed(
-          item.name,
-          series.map { it.toV2Link(call) },
+        OpdsFeedDto(
+          metadata =
+            page.toOpdsMetadata(
+              title = item.name,
+              modified = Instant.ofEpochMilli(item.updatedAtMillis).toString(),
+            ),
+          links = call.standardV2Links(call.request.path(), page),
+          navigation = page.content.map { it.toV2Link(call) },
         ),
       )
     }
@@ -561,47 +605,127 @@ private fun Route.opdsV2Routes(
                 catalog.findBookByIdOrNull(id, user.catalogAccess())?.book?.libraryId == library.id
               }
           }
+        val page =
+          visible
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, ReadList::name))
+            .toPage(call.opdsPageRequest())
         call.respondOpds(
-          call.navigationFeed(
-            "${library?.name ?: "All libraries"} - Read Lists",
-            visible.map { it.toV2Link(call) },
+          OpdsFeedDto(
+            metadata =
+              page.toOpdsMetadata(
+                title = "${library?.name ?: "All libraries"} - Read Lists",
+                modified = library.opdsModified(),
+              ),
+            links = call.standardV2Links(call.request.path(), page),
+            navigation =
+              call.libraryNavigation(
+                catalog,
+                collections,
+                readLists,
+                library,
+                user,
+              ),
+            groups =
+              listOf(
+                OpdsFeedGroupDto(
+                  metadata = OpdsFeedMetadataDto("Read Lists"),
+                  navigation = page.content.map { it.toV2Link(call) },
+                ),
+              ),
           ),
         )
       }
     }
   get("/opds/v2/readlists/{id}") {
-    val item = readLists.findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
+    val user = call.opdsUser()
+    val item =
+      readLists
+        .findAll()
+        .visibleReadLists(catalog, user)
+        .firstOrNull { it.id.value == call.parameters["id"] }
     if (item == null) {
       call.respond(HttpStatusCode.NotFound)
     } else {
-      val books =
+      val visible =
         item.bookIds.mapNotNull {
-          catalog.findBookByIdOrNull(it, call.opdsUser().catalogAccess())
+          catalog.findBookByIdOrNull(it, user.catalogAccess())
+        }
+      val ordered =
+        if (item.ordered) {
+          visible
+        } else {
+          visible.sortedWith(
+            compareBy<CatalogBook> { it.metadata.releaseDate }
+              .thenBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.title },
+          )
         }
       call.respondOpds(
         call.bookFeed(
-          item.name,
-          call.request.path(),
-          books.toPage(call.opdsPageRequest()),
+          title = item.name,
+          path = call.request.path(),
+          page = ordered.toPage(call.opdsPageRequest()),
+          modified = Instant.ofEpochMilli(item.updatedAtMillis).toString(),
         ),
       )
     }
   }
   get("/opds/v2/series/{id}") {
     val id = SeriesId(requireNotNull(call.parameters["id"]))
-    val item = catalog.findSeriesByIdOrNull(id, call.opdsUser().catalogAccess())
+    val user = call.opdsUser()
+    val item = catalog.findSeriesByIdOrNull(id, user.catalogAccess())
     if (item == null) {
       call.respond(HttpStatusCode.NotFound)
     } else {
+      val selectedTag = call.request.queryParameters["tag"]
+      val tagCondition =
+        selectedTag?.let {
+          CatalogSearchCondition.Predicate(
+            CatalogSearchField.TAG,
+            CatalogSearchOperator.IS,
+            it,
+          )
+        }
+      val tagLinks =
+        facets
+          ?.findValues(
+            MetadataFacet.BOOK_TAG,
+            MetadataFacetQuery(seriesId = id),
+            user.catalogAccess(),
+          ).orEmpty()
+          .map { tag ->
+            WPLinkDto(
+              title = tag,
+              rel = if (tag == selectedTag) "self" else null,
+              href = call.opdsUrl(call.request.path()) + "?tag=${tag.urlQuery()}",
+              type = OPDS_V2_MEDIA_TYPE,
+            )
+          }
       call.respondOpds(
         call.bookFeed(
-          item.metadata.title,
-          call.request.path(),
-          catalog.findBooks(
-            BookCatalogQuery(seriesId = id),
-            call.opdsUser().catalogAccess(),
-            call.opdsPageRequest(listOf(CatalogSort("numberSort"))),
-          ),
+          title = item.metadata.title,
+          path = call.request.path(),
+          page =
+            catalog.findBooks(
+              BookCatalogQuery(
+                seriesId = id,
+                condition = tagCondition,
+              ),
+              user.catalogAccess(),
+              call.opdsPageRequest(listOf(CatalogSort("numberSort"))),
+            ),
+          modified = Instant.ofEpochMilli(item.series.updatedAtMillis).toString(),
+          description = item.metadata.summary.ifBlank { item.booksMetadata.summary },
+          facets =
+            tagLinks
+              .takeIf(List<WPLinkDto>::isNotEmpty)
+              ?.let {
+                listOf(
+                  OpdsFacetDto(
+                    metadata = OpdsFeedMetadataDto("Tag"),
+                    links = it,
+                  ),
+                )
+              }.orEmpty(),
         ),
       )
     }
@@ -967,17 +1091,22 @@ private fun ApplicationCall.bookFeed(
   title: String,
   path: String,
   page: CatalogPage<CatalogBook>,
+  modified: String = Instant.now().toString(),
+  description: String? = null,
+  facets: List<OpdsFacetDto> = emptyList(),
 ): OpdsFeedDto =
   OpdsFeedDto(
     metadata =
       OpdsFeedMetadataDto(
         title = title,
-        modified = Instant.now().toString(),
+        modified = modified,
+        description = description?.takeIf(String::isNotBlank),
         itemsPerPage = page.size,
         currentPage = page.page + 1,
         numberOfItems = page.totalElements,
       ),
     links = standardV2Links(path, page),
+    facets = facets,
     publications = page.content.mapNotNull { it.toOpdsPublication(this) },
   )
 
@@ -985,12 +1114,13 @@ private fun ApplicationCall.seriesFeed(
   title: String,
   path: String,
   page: CatalogPage<CatalogSeries>,
+  modified: String = Instant.now().toString(),
 ): OpdsFeedDto =
   OpdsFeedDto(
     metadata =
       OpdsFeedMetadataDto(
         title = title,
-        modified = Instant.now().toString(),
+        modified = modified,
         itemsPerPage = page.size,
         currentPage = page.page + 1,
         numberOfItems = page.totalElements,
@@ -999,20 +1129,9 @@ private fun ApplicationCall.seriesFeed(
     navigation = page.content.map { it.toV2Link(this) },
   )
 
-private fun ApplicationCall.navigationFeed(
-  title: String,
-  navigation: List<WPLinkDto>,
-): OpdsFeedDto =
-  OpdsFeedDto(
-    metadata =
-      OpdsFeedMetadataDto(
-        title = title,
-        modified = Instant.now().toString(),
-        numberOfItems = navigation.size.toLong(),
-      ),
-    links = standardV2Links(request.path()),
-    navigation = navigation,
-  )
+private fun Library?.opdsModified(): String =
+  this?.updatedAtMillis?.let { Instant.ofEpochMilli(it).toString() }
+    ?: Instant.now().toString()
 
 private fun ApplicationCall.standardV2Links(
   path: String,
