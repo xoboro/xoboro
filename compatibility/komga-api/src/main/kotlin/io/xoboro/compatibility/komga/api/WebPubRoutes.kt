@@ -394,11 +394,6 @@ internal suspend fun ApplicationCall.updateProgression(
       locatorJson = locatorJson,
     )
     respond(HttpStatusCode.NoContent)
-  } catch (failure: IllegalStateException) {
-    respond(
-      HttpStatusCode.Conflict,
-      mapOf("error" to (failure.message ?: "Stale progression")),
-    )
   } catch (failure: IllegalArgumentException) {
     respond(
       HttpStatusCode.BadRequest,
