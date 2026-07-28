@@ -332,6 +332,25 @@
       }
     },
     {
+      "name": "synthetic collection series filters",
+      "path": "/api/v1/collections/{COLLECTION_ID}/series?publisher=Synthetic%20Publisher&language=en&genre=Adventure&tag=sample&release_year=2025&complete=true&status=ONGOING&author=Synthetic%20Author%2Cwriter&page=0&size=20",
+      "pathVariables": ["COLLECTION_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
       "name": "synthetic book read lists",
       "path": "/api/v1/books/{BOOK_ID}/readlists",
       "pathVariables": ["BOOK_ID"],
@@ -342,6 +361,24 @@
           "/*/bookIds",
           "/*/createdDate",
           "/*/lastModifiedDate"
+        ]
+      }
+    },
+    {
+      "name": "synthetic read list book filters",
+      "path": "/api/v1/readlists/{READ_LIST_ID}/books?tag=sample&media_status=READY&deleted=false&author=Synthetic%20Author%2Cwriter&page=0&size=20",
+      "pathVariables": ["READ_LIST_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/seriesId",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified"
         ]
       }
     },
