@@ -13,12 +13,18 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
+import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSearchCondition
+import io.xoboro.core.application.CatalogSearchField
+import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSeries
+import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.OrganizationLifecycle
+import io.xoboro.core.application.SeriesCatalogQuery
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.LibraryId
@@ -32,6 +38,28 @@ import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
 import java.time.Instant
 import kotlinx.serialization.Serializable
+
+private val COLLECTION_MEMBER_FILTERS =
+  setOf(
+    LegacySeriesFilter.AGE_RATING,
+    LegacySeriesFilter.AUTHOR,
+    LegacySeriesFilter.COMPLETE,
+    LegacySeriesFilter.GENRE,
+    LegacySeriesFilter.LANGUAGE,
+    LegacySeriesFilter.PUBLISHER,
+    LegacySeriesFilter.READ_STATUS,
+    LegacySeriesFilter.RELEASE_YEAR,
+    LegacySeriesFilter.SERIES_STATUS,
+    LegacySeriesFilter.TAG,
+  )
+
+private val READ_LIST_MEMBER_FILTERS =
+  setOf(
+    LegacyBookFilter.AUTHOR,
+    LegacyBookFilter.MEDIA_STATUS,
+    LegacyBookFilter.READ_STATUS,
+    LegacyBookFilter.TAG,
+  )
 
 fun Route.komgaOrganizationRoutes(
   collections: SeriesCollectionRepository,
@@ -109,26 +137,44 @@ fun Route.komgaOrganizationRoutes(
       }
       get("/{id}/series") {
         val principal = call.organizationPrincipal()
-        val visible =
-          collections
-            .findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
-            ?.visibleTo(principal.user, catalog, call.queryLibraryIds())
-        if (visible == null) {
+        val collectionId = CollectionId(requireNotNull(call.parameters["id"]))
+        val collection = collections.findByIdOrNull(collectionId)
+        if (
+          collection == null ||
+          !collection.isVisibleTo(principal.user, catalog)
+        ) {
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        val members =
-          if (visible.collection.ordered) {
-            visible.series
+        val sort =
+          if (collection.ordered) {
+            CatalogSort("collection.number")
           } else {
-            visible.series.sortedWith(
-              compareBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.titleSort },
-            )
+            CatalogSort("metadata.titleSort")
           }
-        call.respond(
-          members
-            .paginate(call.catalogPageRequest())
-            .toSeriesPageDto(principal.user),
+        val page =
+          catalog.findSeries(
+            query =
+              SeriesCatalogQuery(
+                libraryIds = call.queryLibraryIds(),
+                deleted = call.organizationQueryBoolean("deleted"),
+                condition =
+                  call.legacySeriesCondition(
+                    initial =
+                      listOf(
+                        membershipCondition(
+                          CatalogSearchField.COLLECTION_ID,
+                          collectionId.value,
+                        ),
+                      ),
+                    filters = COLLECTION_MEMBER_FILTERS,
+                  ),
+              ),
+            access = principal.user.catalogAccess(),
+            page = call.catalogPageRequest().copy(sorts = listOf(sort)),
+          )
+        call.respondCatalog(
+          page.toSeriesPageDto(principal.user),
         )
       }
     }
@@ -212,24 +258,43 @@ fun Route.komgaOrganizationRoutes(
       }
       get("/{id}/books") {
         val principal = call.organizationPrincipal()
-        val visible =
-          readLists
-            .findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
-            ?.visibleTo(principal.user, catalog, call.queryLibraryIds())
-        if (visible == null) {
+        val readListId = ReadListId(requireNotNull(call.parameters["id"]))
+        val readList = readLists.findByIdOrNull(readListId)
+        if (
+          readList == null ||
+          !readList.isVisibleTo(principal.user, catalog)
+        ) {
           call.respond(HttpStatusCode.NotFound)
           return@get
         }
-        val members =
-          if (visible.readList.ordered) {
-            visible.books
+        val sort =
+          if (readList.ordered) {
+            CatalogSort("readList.number")
           } else {
-            visible.books.sortedWith(
-              compareBy<CatalogBook> { it.metadata.releaseDate.orEmpty() }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.metadata.title },
-            )
+            CatalogSort("metadata.releaseDate")
           }
-        call.respond(members.paginate(call.catalogPageRequest()).toBookPageDto(principal.user))
+        val page =
+          catalog.findBooks(
+            query =
+              BookCatalogQuery(
+                libraryIds = call.queryLibraryIds(),
+                deleted = call.organizationQueryBoolean("deleted"),
+                condition =
+                  call.legacyBookCondition(
+                    initial =
+                      listOf(
+                        membershipCondition(
+                          CatalogSearchField.READ_LIST_ID,
+                          readListId.value,
+                        ),
+                      ),
+                    filters = READ_LIST_MEMBER_FILTERS,
+                  ),
+              ),
+            access = principal.user.catalogAccess(),
+            page = call.catalogPageRequest().copy(sorts = listOf(sort)),
+          )
+        call.respondCatalog(page.toBookPageDto(principal.user))
       }
       get("/{id}/books/{bookId}/previous") {
         call.respondReadListSibling(readLists, catalog, previous = true)
@@ -359,6 +424,46 @@ private fun ReadList.visibleTo(
   }
 }
 
+private fun SeriesCollection.isVisibleTo(
+  user: User,
+  catalog: CatalogReadRepository,
+): Boolean {
+  if (user.isAdmin) return true
+  return catalog
+    .findSeries(
+      query =
+        SeriesCatalogQuery(
+          deleted = null,
+          condition = membershipCondition(CatalogSearchField.COLLECTION_ID, id.value),
+        ),
+      access = user.catalogAccess(),
+      page = CatalogPageRequest(size = 1),
+    ).totalElements > 0
+}
+
+private fun ReadList.isVisibleTo(
+  user: User,
+  catalog: CatalogReadRepository,
+): Boolean {
+  if (user.isAdmin) return true
+  return catalog
+    .findBooks(
+      query =
+        BookCatalogQuery(
+          deleted = null,
+          condition = membershipCondition(CatalogSearchField.READ_LIST_ID, id.value),
+        ),
+      access = user.catalogAccess(),
+      page = CatalogPageRequest(size = 1),
+    ).totalElements > 0
+}
+
+private fun membershipCondition(
+  field: CatalogSearchField,
+  value: String,
+): CatalogSearchCondition.Predicate =
+  CatalogSearchCondition.Predicate(field, CatalogSearchOperator.IS, value)
+
 private fun SeriesCollection.toDto(filtered: Boolean): KomgaCollectionDto =
   KomgaCollectionDto(
     id = id.value,
@@ -437,6 +542,9 @@ private suspend fun ApplicationCall.requireAdministrator(): Boolean {
 
 private fun ApplicationCall.queryLibraryIds(): Set<LibraryId> =
   request.queryParameters.getAll("library_id").orEmpty().map(::LibraryId).toSet()
+
+private fun ApplicationCall.organizationQueryBoolean(name: String): Boolean? =
+  request.queryParameters[name]?.toBooleanStrictOrNull()
 
 private suspend fun ApplicationCall.respondBadOrganizationRequest(failure: IllegalArgumentException) {
   respond(
