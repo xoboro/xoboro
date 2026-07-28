@@ -4,8 +4,9 @@ The native API is the supported boundary for Xoboro web and mobile clients. It
 is rooted at `/api/xoboro/v1`, uses JSON request and response bodies, and does
 not reproduce Komga DTOs or endpoint shapes.
 
-This document covers the authentication slice. Catalog, administration, media,
-and OpenAPI contracts will be added as their native routes are released.
+This document covers authentication and read-only catalog discovery.
+Administration mutations, media delivery, and OpenAPI contracts will be added
+as their native routes are released.
 
 ## Errors
 
@@ -116,3 +117,68 @@ the current user and omits the access token.
 
 The server immediately revokes the presented session. Cookie responses also
 expire `XOBORO-SESSION`. Successful logout returns `204 No Content`.
+
+## Pagination and sorting
+
+Catalog collections return:
+
+```json
+{
+  "items": [],
+  "page": 0,
+  "size": 20,
+  "totalItems": 0,
+  "totalPages": 0,
+  "hasPrevious": false,
+  "hasNext": false
+}
+```
+
+`page` is zero-based and `size` must be between 1 and 200. Repeat `sort` to
+apply multiple stable sorts. Each value uses `field[,asc|desc]`; unknown fields
+and invalid values return `400 invalid_query` instead of being silently
+coerced.
+
+Series sorts are `title`, `createdAt`, `updatedAt`, `sourceModifiedAt`,
+`lastReadAt`, and `mediaItemCount`. Media-item sorts are `title`,
+`seriesTitle`, `number`, `createdAt`, `updatedAt`, `sourceModifiedAt`,
+`fileSize`, and `lastReadAt`.
+
+## Libraries
+
+`GET /api/xoboro/v1/libraries` returns libraries visible to the current user,
+ordered by name. `GET /api/xoboro/v1/libraries/{libraryId}` returns one visible
+library. A missing or unauthorized identifier returns `404` so library grants
+cannot be enumerated.
+
+Only administrators receive the source provider and location. Reader accounts
+receive `source: null`, preventing local paths and future remote-source
+identifiers from leaking through catalog discovery.
+
+## Series
+
+`GET /api/xoboro/v1/series` returns visible, non-deleted series. It accepts:
+
+- repeated `libraryId`, `publisher`, `language`, `genre`, and `tag` filters;
+- `query` for full-text search;
+- `oneShot=true|false`;
+- pagination and series sorts described above.
+
+`GET /api/xoboro/v1/series/{seriesId}` returns one visible series.
+`GET /api/xoboro/v1/series/{seriesId}/media-items` returns its visible
+non-deleted items, ordered by number unless an explicit sort is provided.
+
+## Media items
+
+`GET /api/xoboro/v1/media-items` returns visible non-deleted items and accepts
+repeated `libraryId`, optional `seriesId`, `query`, `onDeck`, `keepReading`,
+pagination, and media-item sorts.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}` returns one item. Append
+`/previous` or `/next` for sequential navigation within the authorized
+catalog.
+
+The response uses the common Xoboro media hierarchy. Existing storage is
+classified as `COMIC` for comic archives, `NOVEL` for EPUB, and `BOOK` for
+PDF. The same contract can later add `VIDEO` and `AUDIO` without introducing
+a second catalog API.
