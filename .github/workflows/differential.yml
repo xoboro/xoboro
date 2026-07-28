@@ -108,7 +108,10 @@ jobs:
         run: |
           catalog_root="${RUNNER_TEMP}/catalog"
           archive_root="${RUNNER_TEMP}/archive"
-          mkdir -p "${catalog_root}/Synthetic Series" "${archive_root}"
+          mkdir -p \
+            "${catalog_root}/Synthetic Series" \
+            "${catalog_root}/oneshots" \
+            "${archive_root}"
           printf '%s' \
             'iVBORw0KGgoAAAANSUhEUgAAABgAAAAgAQMAAAAykCp7AAAAA1BMVEUTfItA+kyhAAAADElEQVQI12NgGFgAAACAAAElMfVGAAAAAElFTkSuQmCC' \
             | base64 --decode >"${archive_root}/0001.png"
@@ -119,6 +122,22 @@ jobs:
           (
             cd "${archive_root}"
             zip --quiet "${catalog_root}/Synthetic Series/001.cbz" \
+              0001.png 0002.png ComicInfo.xml
+          )
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter Two</Title><Series>Synthetic Series</Series><Number>2</Number><Summary>Second synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>sample</Tags></ComicInfo>' \
+            >"${archive_root}/ComicInfo.xml"
+          (
+            cd "${archive_root}"
+            zip --quiet "${catalog_root}/Synthetic Series/002.cbz" \
+              0001.png 0002.png ComicInfo.xml
+          )
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Standalone</Title><Series>Synthetic Standalone</Series><Number>1</Number><Summary>Synthetic standalone summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>standalone</Tags></ComicInfo>' \
+            >"${archive_root}/ComicInfo.xml"
+          (
+            cd "${archive_root}"
+            zip --quiet "${catalog_root}/oneshots/standalone.cbz" \
               0001.png 0002.png ComicInfo.xml
           )
 
@@ -156,12 +175,18 @@ jobs:
             reference_status="$(
               curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
                 "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
-                jq --raw-output '.content[0].media.status // ""'
+                jq --raw-output \
+                  'if (.content | length) == 3 and
+                    all(.content[]; .media.status == "READY")
+                  then "READY" else "" end'
             )"
             candidate_status="$(
               curl --silent --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
                 "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
-                jq --raw-output '.content[0].media.status // ""'
+                jq --raw-output \
+                  'if (.content | length) == 3 and
+                    all(.content[]; .media.status == "READY")
+                  then "READY" else "" end'
             )"
             if [ "${reference_status}" = "READY" ] &&
               [ "${candidate_status}" = "READY" ]; then
@@ -178,25 +203,71 @@ jobs:
             curl --fail --silent --show-error \
               --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
               "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
-              jq --exit-status --raw-output '.content[0].id'
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false and .metadata.number == "1") | .id'
           )"
           candidate_book_id="$(
             curl --fail --silent --show-error \
               --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
               "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
-              jq --exit-status --raw-output '.content[0].id'
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false and .metadata.number == "1") | .id'
           )"
           reference_series_id="$(
             curl --fail --silent --show-error \
               --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
               "http://127.0.0.1:25610/api/v1/series?page=0&size=20" |
-              jq --exit-status --raw-output '.content[0].id'
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false) | .id'
           )"
           candidate_series_id="$(
             curl --fail --silent --show-error \
               --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
               "http://127.0.0.1:25611/api/v1/series?page=0&size=20" |
-              jq --exit-status --raw-output '.content[0].id'
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false) | .id'
+          )"
+          reference_next_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false and .metadata.number == "2") | .id'
+          )"
+          candidate_next_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == false and .metadata.number == "2") | .id'
+          )"
+          reference_oneshot_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == true) | .id'
+          )"
+          candidate_oneshot_book_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == true) | .id'
+          )"
+          reference_oneshot_series_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/series?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == true) | .id'
+          )"
+          candidate_oneshot_series_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/series?page=0&size=20" |
+              jq --exit-status --raw-output \
+                '.content[] | select(.oneshot == true) | .id'
           )"
           reference_library_id="$(
             curl --fail --silent --show-error \
@@ -265,6 +336,18 @@ jobs:
           printf 'KOMGA_REFERENCE_SERIES_ID=%s\n' "${reference_series_id}" \
             >>"${GITHUB_ENV}"
           printf 'XOBORO_CANDIDATE_SERIES_ID=%s\n' "${candidate_series_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'KOMGA_REFERENCE_NEXT_BOOK_ID=%s\n' "${reference_next_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_NEXT_BOOK_ID=%s\n' "${candidate_next_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'KOMGA_REFERENCE_ONESHOT_BOOK_ID=%s\n' "${reference_oneshot_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_ONESHOT_BOOK_ID=%s\n' "${candidate_oneshot_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'KOMGA_REFERENCE_ONESHOT_SERIES_ID=%s\n' "${reference_oneshot_series_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_ONESHOT_SERIES_ID=%s\n' "${candidate_oneshot_series_id}" \
             >>"${GITHUB_ENV}"
           printf 'KOMGA_REFERENCE_LIBRARY_ID=%s\n' "${reference_library_id}" \
             >>"${GITHUB_ENV}"

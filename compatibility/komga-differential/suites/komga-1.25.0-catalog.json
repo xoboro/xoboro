@@ -16,6 +16,7 @@
       "path": "/api/v1/series?page=0&size=20",
       "comparison": {
         "bodyMode": "JSON",
+        "unorderedJsonPaths": ["/content"],
         "ignoreJsonPaths": [
           "/content/*/id",
           "/content/*/libraryId",
@@ -34,6 +35,7 @@
       "path": "/api/v1/books?page=0&size=20",
       "comparison": {
         "bodyMode": "JSON",
+        "unorderedJsonPaths": ["/content"],
         "ignoreJsonPaths": [
           "/content/*/id",
           "/content/*/seriesId",
@@ -111,12 +113,103 @@
       }
     },
     {
-      "name": "synthetic next boundary",
+      "name": "synthetic next book",
       "path": "/api/v1/books/{BOOK_ID}/next",
       "pathVariables": ["BOOK_ID"],
       "comparison": {
         "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/seriesId",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic previous book",
+      "path": "/api/v1/books/{NEXT_BOOK_ID}/previous",
+      "pathVariables": ["NEXT_BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/seriesId",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic next boundary",
+      "path": "/api/v1/books/{NEXT_BOOK_ID}/next",
+      "pathVariables": ["NEXT_BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
         "ignoreJsonPaths": ["/timestamp", "/path"]
+      }
+    },
+    {
+      "name": "synthetic one-shot book detail",
+      "path": "/api/v1/books/{ONESHOT_BOOK_ID}",
+      "pathVariables": ["ONESHOT_BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/seriesId",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic one-shot series detail",
+      "path": "/api/v1/series/{ONESHOT_SERIES_ID}",
+      "pathVariables": ["ONESHOT_SERIES_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified",
+          "/booksMetadata/created",
+          "/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic one-shot filter",
+      "path": "/api/v1/series?oneshot=true&page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
       }
     },
     {
@@ -159,6 +252,7 @@
       "path": "/opds/v2/catalog",
       "comparison": {
         "bodyMode": "JSON",
+        "unorderedJsonPaths": ["/groups/*/publications"],
         "ignoreJsonPaths": [
           "/metadata/modified",
           "/links/*/href",
@@ -226,6 +320,7 @@
       "path": "/opds/v2/libraries/books/latest?page=0&size=20",
       "comparison": {
         "bodyMode": "JSON",
+        "unorderedJsonPaths": ["/publications"],
         "ignoreJsonPaths": [
           "/metadata/modified",
           "/links/*/href",
