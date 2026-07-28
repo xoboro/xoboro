@@ -4,9 +4,10 @@ The native API is the supported boundary for Xoboro web and mobile clients. It
 is rooted at `/api/xoboro/v1`, uses JSON request and response bodies, and does
 not reproduce Komga DTOs or endpoint shapes.
 
-This document covers authentication, catalog discovery, and read progress
-mutation. Administration mutations, media delivery, and OpenAPI contracts will
-be added as their native routes are released.
+This document covers authentication, catalog discovery, page and resource
+discovery, page delivery, and read progress mutation. Administration mutations,
+resource byte delivery, original file download, artwork, and OpenAPI contracts
+remain pending.
 
 ## Errors
 
@@ -183,6 +184,57 @@ The response uses the common Xoboro media hierarchy. Existing storage is
 classified as `COMIC` for comic archives, `NOVEL` for EPUB, and `BOOK` for
 PDF. The same contract can later add `VIDEO` and `AUDIO` without introducing
 a second catalog API.
+
+## Media delivery
+
+All media-delivery routes require authentication and the `PAGE_STREAMING`
+role. Page numbers are one-based. There is no `zero_based` query parameter on
+the native surface.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}/pages` returns the indexed page
+manifest as a JSON list. Each entry contains its one-based `number`,
+`mediaType`, optional `width` and `height`, and optional raw `sizeBytes`.
+Internal archive-entry file names are not exposed.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}/pages/{pageNumber}` returns the
+page bytes. It accepts:
+
+- `format=jpeg|png|source`, case-insensitively. `source` works for every media
+  kind and returns the stored or embedded page bytes without re-encoding.
+- `maxDimension=<positive integer>`, capped at 4096. It can be used without an
+  explicit format, or with `jpeg` or `png`.
+
+`format=source` cannot be combined with `maxDimension`. The endpoint does not
+perform `Accept`-header format negotiation and deliberately has no
+`contentNegotiation` query parameter.
+
+Successful page responses include a strong content-derived `ETag`,
+`Last-Modified` from the indexed media update timestamp, and
+`Cache-Control: max-age=0, must-revalidate, private`. Clients can revalidate
+with `If-None-Match` or `If-Modified-Since`; a match returns `304 Not Modified`.
+The page is opened and buffered before its ETag can be evaluated, including
+requests that ultimately return 304.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}/resources` returns indexed EPUB
+page and asset entries as a JSON list; general container files are excluded.
+Each `path` is the full container-relative archive path and must be used
+verbatim. Indexed paths have already been resolved relative to the EPUB OPF
+directory, so a client that parses the OPF itself and sends its raw hrefs will
+receive 404 responses. Manifest order is stable stored order (the OPF manifest
+order), not reading or spine order.
+
+Delivery failures use these native error codes:
+
+- `403 page_streaming_forbidden` when the user lacks the required role.
+- `404 media_item_not_found` for missing or unauthorized media items.
+- `404 page_not_found` for a page outside the indexed media range or unavailable
+  from the content provider.
+- `409 media_not_ready` when indexed media is not ready for page delivery.
+- `409 page_not_decodable` when an existing page cannot be decoded.
+
+Invalid page numbers, formats, and dimensions return `400 invalid_query`.
+Resource byte delivery and original file download remain pending follow-up
+work.
 
 ## Read progress
 
