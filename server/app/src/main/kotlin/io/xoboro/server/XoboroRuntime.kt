@@ -94,12 +94,12 @@ import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqSeriesCollectionRepository
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
+import io.xoboro.server.persistence.JooqUserSessionRepository
 import io.xoboro.server.persistence.JooqHistoricalEventRepository
 import io.xoboro.server.persistence.JooqSyncPointRepository
 import io.xoboro.server.persistence.JooqReadListImportMatcher
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.AdaptivePasswordHasher
-import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
@@ -356,7 +356,7 @@ class XoboroRuntime private constructor(
         val queue = JooqDurableTaskQueue(database)
         val userRepository = JooqUserRepository(database)
         val tokenEncoder = Sha512TokenEncoder()
-        val sessionRepository = InMemoryUserSessionRepository()
+        val sessionRepository = JooqUserSessionRepository(database)
         val settings = JooqServerSettingRepository(database)
         val effectiveServerPort = settings.find("SERVER_PORT")?.toInt() ?: config.port
         val effectiveServerContextPath =
@@ -401,6 +401,7 @@ class XoboroRuntime private constructor(
             currentTimeMillis = System::currentTimeMillis,
             inactivityTimeoutMillis = DEFAULT_SESSION_TIMEOUT_MILLIS,
           )
+        userSessionLifecycle.deleteExpired()
         val createdOAuthHttpClient =
           HttpClient(CIO) {
             expectSuccess = true

@@ -14,8 +14,24 @@ class InMemoryUserSessionRepository : UserSessionRepository {
   override fun insertIfAbsent(session: UserSession): Boolean =
     sessions.putIfAbsent(session.tokenDigest, session) == null
 
-  override fun update(session: UserSession) {
-    sessions.computeIfPresent(session.tokenDigest) { _, _ -> session }
+  override fun touchIfActive(
+    tokenDigest: String,
+    accessedAtMillis: Long,
+    expiresAtMillis: Long,
+  ): Boolean {
+    var touched = false
+    sessions.computeIfPresent(tokenDigest) { _, current ->
+      if (current.expiresAtMillis <= accessedAtMillis) {
+        current
+      } else {
+        touched = true
+        current.copy(
+          lastAccessedAtMillis = maxOf(current.lastAccessedAtMillis, accessedAtMillis),
+          expiresAtMillis = maxOf(current.expiresAtMillis, expiresAtMillis),
+        )
+      }
+    }
+    return touched
   }
 
   override fun deleteByTokenDigest(tokenDigest: String): Boolean =

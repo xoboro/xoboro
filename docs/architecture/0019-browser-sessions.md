@@ -1,6 +1,6 @@
 # ADR 0019: Komga browser sessions
 
-- Status: accepted
+- Status: superseded by ADR 0084
 - Date: 2026-07-27
 
 ## Context
@@ -36,3 +36,6 @@ or API keys. Raw session credentials are not retained by the server.
 
 Remember-me remains a separate signed, long-lived credential. OAuth login will
 reuse the same session issuance boundary when implemented.
+
+ADR 0084 replaces restart-expiring in-memory storage after Xoboro moved from
+wire-level compatibility to a feature-led security model.

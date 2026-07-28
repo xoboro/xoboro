@@ -1,0 +1,94 @@
+package io.xoboro.server.persistence
+
+import io.xoboro.core.domain.UserId
+import io.xoboro.core.domain.UserSession
+import io.xoboro.core.domain.UserSessionRepository
+import org.jooq.Record
+
+class JooqUserSessionRepository(
+  private val database: XoboroDatabase,
+) : UserSessionRepository {
+  override fun findByTokenDigestOrNull(tokenDigest: String): UserSession? =
+    database.dsl
+      .fetch("$SELECT_SESSION WHERE token_digest = ?", tokenDigest)
+      .map { it.toUserSession() }
+      .singleOrNull()
+
+  override fun insertIfAbsent(session: UserSession): Boolean =
+    database.dsl.execute(
+      """
+      INSERT INTO user_session (
+        token_digest, user_id, created_at_ms, last_accessed_at_ms, expires_at_ms
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(token_digest) DO NOTHING
+      """.trimIndent(),
+      session.tokenDigest,
+      session.userId.value,
+      session.createdAtMillis,
+      session.lastAccessedAtMillis,
+      session.expiresAtMillis,
+    ) == 1
+
+  override fun touchIfActive(
+    tokenDigest: String,
+    accessedAtMillis: Long,
+    expiresAtMillis: Long,
+  ): Boolean =
+    database.dsl.execute(
+      """
+      UPDATE user_session SET
+        last_accessed_at_ms = max(last_accessed_at_ms, ?),
+        expires_at_ms = max(expires_at_ms, ?)
+      WHERE token_digest = ? AND expires_at_ms > ?
+      """.trimIndent(),
+      accessedAtMillis,
+      expiresAtMillis,
+      tokenDigest,
+      accessedAtMillis,
+    ) == 1
+
+  override fun deleteByTokenDigest(tokenDigest: String): Boolean =
+    database.dsl.execute(
+      "DELETE FROM user_session WHERE token_digest = ?",
+      tokenDigest,
+    ) == 1
+
+  override fun deleteByUserId(userId: UserId): Int =
+    database.dsl.execute(
+      "DELETE FROM user_session WHERE user_id = ?",
+      userId.value,
+    )
+
+  override fun deleteExpired(nowMillis: Long): Int =
+    database.dsl.execute(
+      "DELETE FROM user_session WHERE expires_at_ms <= ?",
+      nowMillis,
+    )
+
+  private fun Record.toUserSession(): UserSession =
+    UserSession(
+      tokenDigest = requiredString("token_digest"),
+      userId = UserId(requiredString("user_id")),
+      createdAtMillis = requiredLongText("created_at_ms_64"),
+      lastAccessedAtMillis = requiredLongText("last_accessed_at_ms_64"),
+      expiresAtMillis = requiredLongText("expires_at_ms_64"),
+    )
+
+  private fun Record.requiredString(field: String): String =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+
+  private fun Record.requiredLongText(field: String): Long =
+    requireNotNull(get(field, String::class.java)) { "Database field '$field' must not be null" }
+      .toLong()
+
+  private companion object {
+    const val SELECT_SESSION =
+      """
+      SELECT user_session.*,
+        CAST(created_at_ms AS TEXT) AS created_at_ms_64,
+        CAST(last_accessed_at_ms AS TEXT) AS last_accessed_at_ms_64,
+        CAST(expires_at_ms AS TEXT) AS expires_at_ms_64
+      FROM user_session
+      """
+  }
+}
