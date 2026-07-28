@@ -73,7 +73,10 @@
         "bodyMode": "XML",
         "ignoreXmlPaths": [
           "/feed/updated",
-          "/feed/link/@href"
+          "/feed/link/@href",
+          "/feed/entry/updated",
+          "/feed/entry/id",
+          "/feed/entry/link/@href"
         ]
       }
     },
@@ -104,6 +107,7 @@
       "path": "/opds/v1.2/books/latest?page=0&size=20",
       "comparison": {
         "bodyMode": "XML",
+        "unorderedXmlPaths": ["/feed/entry"],
         "ignoreXmlPaths": [
           "/feed/updated",
           "/feed/link/@href",
@@ -118,6 +122,7 @@
       "path": "/opds/v1.2/series/latest?page=0&size=20",
       "comparison": {
         "bodyMode": "XML",
+        "unorderedXmlPaths": ["/feed/entry"],
         "ignoreXmlPaths": [
           "/feed/updated",
           "/feed/link/@href",

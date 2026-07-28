@@ -148,7 +148,11 @@ class DifferentialRunner(
   private fun normalizeXml(
     case: DifferentialCase,
     body: ByteArray,
-  ): String = XmlNormalizer(case.comparison.ignoreXmlPaths).normalize(body)
+  ): String =
+    XmlNormalizer(
+      ignorePaths = case.comparison.ignoreXmlPaths,
+      unorderedPaths = case.comparison.unorderedXmlPaths,
+    ).normalize(body)
 
   private fun ByteArray.toText(): String = toString(StandardCharsets.UTF_8)
 

@@ -68,10 +68,11 @@ data class ComparisonPolicy(
   val ignoreJsonPaths: Set<String> = emptySet(),
   val unorderedJsonPaths: Set<String> = emptySet(),
   val ignoreXmlPaths: Set<String> = emptySet(),
+  val unorderedXmlPaths: Set<String> = emptySet(),
 ) {
   init {
     (ignoreJsonPaths + unorderedJsonPaths).forEach(JsonPathPattern::validate)
-    ignoreXmlPaths.forEach(XmlPathPattern::validate)
+    (ignoreXmlPaths + unorderedXmlPaths).forEach(XmlPathPattern::validate)
   }
 }
 

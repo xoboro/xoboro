@@ -242,6 +242,11 @@ class OpdsRoutesTest {
           catalogPublication.links.single { it.rel == "http://opds-spec.org/acquisition" }.href.orEmpty(),
           "/opds/v2/books/book-1/file",
         )
+        val zeroSizeLatest =
+          JSON.decodeFromString<OpdsFeedDto>(
+            client.authenticatedGet("/opds/v2/libraries/books/latest?size=0").bodyAsText(),
+          )
+        assertEquals(20, zeroSizeLatest.metadata.itemsPerPage)
 
         val browseFeed =
           JSON.decodeFromString<OpdsFeedDto>(
