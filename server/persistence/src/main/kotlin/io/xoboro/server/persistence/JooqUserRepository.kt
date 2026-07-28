@@ -105,6 +105,24 @@ class JooqUserRepository(
     }
   }
 
+  override fun replacePasswordHash(
+    id: UserId,
+    expectedHash: String,
+    replacementHash: String,
+    updatedAtMillis: Long,
+  ): Boolean =
+    database.dsl.execute(
+      """
+      UPDATE user_account
+      SET password_hash = ?, updated_at_ms = ?
+      WHERE id = ? AND password_hash = ?
+      """.trimIndent(),
+      replacementHash,
+      updatedAtMillis,
+      id.value,
+      expectedHash,
+    ) == 1
+
   override fun delete(id: UserId) {
     database.dsl.execute("DELETE FROM user_account WHERE id = ?", id.value)
   }

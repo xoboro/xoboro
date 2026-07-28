@@ -24,7 +24,7 @@ import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import io.xoboro.server.security.Sha512TokenEncoder
 import java.nio.file.Path
 import kotlin.test.Test
@@ -46,7 +46,7 @@ class ApiKeyRoutesTest {
       val userLifecycle =
         UserLifecycle(
           users = users,
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-1" },
           currentTimeMillis = { 1_000 },
         )

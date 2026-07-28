@@ -98,7 +98,7 @@ import io.xoboro.server.persistence.JooqHistoricalEventRepository
 import io.xoboro.server.persistence.JooqSyncPointRepository
 import io.xoboro.server.persistence.JooqReadListImportMatcher
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
@@ -377,7 +377,7 @@ class XoboroRuntime private constructor(
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
-            passwordHasher = BCryptPasswordHasher(),
+            passwordHasher = AdaptivePasswordHasher(),
             userIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
             invalidateUserSessions = { sessionRepository.deleteByUserId(it) },

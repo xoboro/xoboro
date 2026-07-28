@@ -16,6 +16,25 @@ interface PasswordHasher {
     rawPassword: String,
     passwordHash: String,
   ): Boolean
+
+  fun verify(
+    rawPassword: String,
+    passwordHash: String,
+  ): PasswordVerification =
+    PasswordVerification(
+      verified = matches(rawPassword, passwordHash),
+    )
+}
+
+data class PasswordVerification(
+  val verified: Boolean,
+  val replacementHash: String? = null,
+) {
+  init {
+    require(verified || replacementHash == null) {
+      "An unverified password cannot provide a replacement hash"
+    }
+  }
 }
 
 sealed interface UserEvent {
@@ -142,7 +161,15 @@ class UserLifecycle(
   ): User? {
     if (email.isBlank() || rawPassword.isBlank()) return null
     val user = users.findByEmailIgnoreCaseOrNull(email) ?: return null
-    return user.takeIf { passwordHasher.matches(rawPassword, user.passwordHash) }
+    val verification = passwordHasher.verify(rawPassword, user.passwordHash)
+    if (!verification.verified) return null
+    val replacementHash = verification.replacementHash ?: return user
+    val updated = user.copy(passwordHash = replacementHash, updatedAtMillis = now())
+    if (users.replacePasswordHash(user.id, user.passwordHash, replacementHash, updated.updatedAtMillis)) {
+      return updated
+    }
+    val current = users.findByIdOrNull(user.id) ?: return null
+    return current.takeIf { passwordHasher.matches(rawPassword, current.passwordHash) }
   }
 
   private fun now(): Long =

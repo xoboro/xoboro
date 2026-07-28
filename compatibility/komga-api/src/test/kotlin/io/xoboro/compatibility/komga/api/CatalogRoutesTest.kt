@@ -69,7 +69,7 @@ import io.xoboro.server.persistence.JooqReadListRepository
 import io.xoboro.server.persistence.JooqSeriesCollectionRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import java.nio.file.Files
 import java.io.ByteArrayInputStream
@@ -140,7 +140,7 @@ class CatalogRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "filter-admin" },
           currentTimeMillis = { 10 },
         )
@@ -239,7 +239,7 @@ class CatalogRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "user-${++userSequence}" },
           currentTimeMillis = { 10 },
         )

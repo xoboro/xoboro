@@ -28,7 +28,7 @@ import io.xoboro.core.domain.UnknownPageHash
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,7 +45,7 @@ class PageHashCacheRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = { "admin-1" },
           currentTimeMillis = { 10 },
         )

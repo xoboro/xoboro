@@ -22,7 +22,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqServerSettingRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
@@ -48,7 +48,7 @@ class ServerSettingsRoutesTest {
       val userLifecycle =
         UserLifecycle(
           users = users,
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = userIds::next,
           currentTimeMillis = AtomicLong(1_000)::get,
         )

@@ -17,6 +17,7 @@ dependencies {
   implementation(project(":core:application"))
   implementation(project(":core:domain"))
   implementation(libs.ktor.server.auth)
+  implementation(libs.ktor.server.auth.api.key)
   implementation(libs.ktor.server.core)
   implementation(libs.ktor.server.sse)
   implementation(libs.ktor.serialization.kotlinx.json)

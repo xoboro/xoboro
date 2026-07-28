@@ -158,6 +158,18 @@ interface UserRepository {
 
   fun update(user: User)
 
+  fun replacePasswordHash(
+    id: UserId,
+    expectedHash: String,
+    replacementHash: String,
+    updatedAtMillis: Long,
+  ): Boolean {
+    val user = findByIdOrNull(id) ?: return false
+    if (user.passwordHash != expectedHash) return false
+    update(user.copy(passwordHash = replacementHash, updatedAtMillis = updatedAtMillis))
+    return true
+  }
+
   fun delete(id: UserId)
 }
 

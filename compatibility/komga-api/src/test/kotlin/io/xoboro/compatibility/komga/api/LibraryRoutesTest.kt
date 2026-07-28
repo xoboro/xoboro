@@ -37,7 +37,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
-import io.xoboro.server.security.BCryptPasswordHasher
+import io.xoboro.server.security.AdaptivePasswordHasher
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -324,7 +324,7 @@ class LibraryRoutesTest {
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
-          passwordHasher = BCryptPasswordHasher(),
+          passwordHasher = AdaptivePasswordHasher(),
           userIdFactory = userIds::next,
           currentTimeMillis = { 1_000 },
         )
