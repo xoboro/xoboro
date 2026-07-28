@@ -7,7 +7,7 @@ import kotlin.test.assertTrue
 class KomgaProtocolContractInventoryTest {
   @Test
   fun `pins every non-OpenAPI protocol operation`() {
-    assertEquals(18, OPDS_V1.size)
+    assertEquals(19, OPDS_V1.size)
     assertEquals(30, OPDS_V2.size)
     assertEquals(15, KOBO.size)
     assertEquals(4, KOREADER.size)
@@ -15,9 +15,9 @@ class KomgaProtocolContractInventoryTest {
     assertEquals(2, OAUTH_BROWSER.size)
 
     val all = OPDS_V1 + OPDS_V2 + KOBO + KOREADER + SSE + OAUTH_BROWSER
-    assertEquals(70, all.size)
-    assertEquals(70, all.toSet().size)
-    assertEquals(70, PARTIALLY_IMPLEMENTED.size)
+    assertEquals(71, all.size)
+    assertEquals(71, all.toSet().size)
+    assertEquals(71, PARTIALLY_IMPLEMENTED.size)
     assertTrue(PARTIALLY_IMPLEMENTED.all(all::contains))
     assertTrue(all.none { endpoint -> endpoint.path.any { it in '\uAC00'..'\uD7A3' } })
   }
@@ -58,6 +58,7 @@ class KomgaProtocolContractInventoryTest {
         get("/opds/v1.2/books/{bookId}/thumbnail"),
         get("/opds/v1.2/books/{bookId}/thumbnail/small"),
         get("/opds/v1.2/books/{bookId}/pages/{pageNumber}"),
+        get("/opds/v1.2/books/{bookId}/file/{tail...}"),
       )
 
     val OPDS_V2 =

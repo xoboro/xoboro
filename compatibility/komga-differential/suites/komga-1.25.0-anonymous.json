@@ -108,6 +108,14 @@
           "/servers"
         ]
       }
+    },
+    {
+      "name": "OPDS v1 authentication required",
+      "path": "/opds/v1.2/catalog",
+      "comparison": {
+        "bodyMode": "NONE",
+        "compareContentType": false
+      }
     }
   ]
 }

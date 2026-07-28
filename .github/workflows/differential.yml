@@ -114,7 +114,7 @@ jobs:
             | base64 --decode >"${archive_root}/0001.png"
           cp "${archive_root}/0001.png" "${archive_root}/0002.png"
           printf '%s' \
-            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter</Title><Series>Synthetic Series</Series><Number>1</Number><Summary>Synthetic chapter summary</Summary><Tags>sample</Tags></ComicInfo>' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter</Title><Series>Synthetic Series</Series><Number>1</Number><Summary>Synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>sample</Tags></ComicInfo>' \
             >"${archive_root}/ComicInfo.xml"
           (
             cd "${archive_root}"
@@ -198,6 +198,18 @@ jobs:
               "http://127.0.0.1:25611/api/v1/series?page=0&size=20" |
               jq --exit-status --raw-output '.content[0].id'
           )"
+          reference_library_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/libraries" |
+              jq --exit-status --raw-output '.[0].id'
+          )"
+          candidate_library_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/libraries" |
+              jq --exit-status --raw-output '.[0].id'
+          )"
 
           for target in \
             "25610:${reference_series_id}:${reference_book_id}:KOMGA_REFERENCE" \
@@ -254,6 +266,10 @@ jobs:
             >>"${GITHUB_ENV}"
           printf 'XOBORO_CANDIDATE_SERIES_ID=%s\n' "${candidate_series_id}" \
             >>"${GITHUB_ENV}"
+          printf 'KOMGA_REFERENCE_LIBRARY_ID=%s\n' "${reference_library_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_LIBRARY_ID=%s\n' "${candidate_library_id}" \
+            >>"${GITHUB_ENV}"
 
       - name: Compare authenticated synthetic catalog and media
         env:
@@ -271,6 +287,10 @@ jobs:
           --reference http://127.0.0.1:25610 \
           --candidate http://127.0.0.1:25611 \
           --suite compatibility/komga-differential/suites/komga-1.25.0-catalog.json"
+          ./gradlew :compatibility:komga-differential:run --args="\
+          --reference http://127.0.0.1:25610 \
+          --candidate http://127.0.0.1:25611 \
+          --suite compatibility/komga-differential/suites/komga-1.25.0-opds-v1.json"
           ./gradlew :compatibility:komga-differential:run --args="\
           --reference http://127.0.0.1:25610 \
           --candidate http://127.0.0.1:25611 \

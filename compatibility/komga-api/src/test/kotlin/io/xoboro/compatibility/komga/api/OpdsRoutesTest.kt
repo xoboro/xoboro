@@ -57,7 +57,10 @@ import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.security.BCryptPasswordHasher
+import java.io.ByteArrayInputStream
 import java.nio.file.Path
+import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -160,6 +163,40 @@ class OpdsRoutesTest {
             .startsWith("application/atom+xml"),
         )
         assertContains(atom.bodyAsText(), "<feed")
+        val catalogXml = atom.bodyAsText()
+        assertXml(catalogXml)
+        assertContains(catalogXml, "<uri>https://github.com/gotson/komga</uri>")
+        assertContains(catalogXml, "rel=\"search\"")
+        assertContains(catalogXml, "type=\"application/opds+json\" rel=\"alternate\"")
+
+        val openSearch = client.authenticatedGet("/opds/v1.2/search")
+        assertEquals("application/atom+xml", openSearch.headers[HttpHeaders.ContentType])
+        assertXml(openSearch.bodyAsText())
+        assertContains(openSearch.bodyAsText(), "<InputEncoding>UTF-8</InputEncoding>")
+        assertContains(openSearch.bodyAsText(), "<OutputEncoding>UTF-8</OutputEncoding>")
+
+        val latestBooks = client.authenticatedGet("/opds/v1.2/books/latest")
+        val latestBooksXml = latestBooks.bodyAsText()
+        assertXml(latestBooksXml)
+        assertContains(latestBooksXml, "<title>Synthetic series 1: Synthetic chapter</title>")
+        assertContains(latestBooksXml, "<content>cbz - 0 B</content>")
+        assertContains(
+          latestBooksXml,
+          "rel=\"http://opds-spec.org/acquisition\" " +
+            "href=\"http://localhost/opds/v1.2/books/book-1/file/chapter.cbz\"",
+        )
+        assertContains(latestBooksXml, "pse:count=\"2\"")
+        assertContains(latestBooksXml, "rel=\"http://vaemendis.net/opds-pse/stream\"")
+
+        val seriesBooks = client.authenticatedGet("/opds/v1.2/series/series-1")
+        assertXml(seriesBooks.bodyAsText())
+        assertContains(seriesBooks.bodyAsText(), "<title>Synthetic chapter</title>")
+        assertTrue("Synthetic series 1: Synthetic chapter" !in seriesBooks.bodyAsText())
+
+        val previousPage = client.authenticatedGet("/opds/v1.2/series?page=1&size=1")
+        assertXml(previousPage.bodyAsText())
+        assertContains(previousPage.bodyAsText(), "rel=\"previous\"")
+        assertContains(previousPage.bodyAsText(), "/opds/v1.2/series?page=0")
 
         val v2 = client.authenticatedGet("/opds/v2/catalog")
         assertEquals(HttpStatusCode.OK, v2.status)
@@ -189,6 +226,7 @@ class OpdsRoutesTest {
             .publications
             .single()
         assertEquals(null, catalogPublication.metadata.conformsTo)
+        assertTrue(catalogPublication.metadata.publisher.isEmpty())
         assertTrue(catalogPublication.readingOrder.isEmpty())
         assertTrue(catalogPublication.resources.isEmpty())
         assertEquals(
@@ -385,6 +423,12 @@ class OpdsRoutesTest {
         assertEquals(HttpStatusCode.OK, acquisition.status)
         assertEquals("application/zip", acquisition.headers[HttpHeaders.ContentType])
         assertEquals(SyntheticContent.ARCHIVE_BYTES.toList(), acquisition.body<ByteArray>().toList())
+
+        val v1Acquisition =
+          client.authenticatedGet("/opds/v1.2/books/book-1/file/chapter.cbz")
+        assertEquals(HttpStatusCode.OK, v1Acquisition.status)
+        assertEquals("application/zip", v1Acquisition.headers[HttpHeaders.ContentType])
+        assertEquals(SyntheticContent.ARCHIVE_BYTES.toList(), v1Acquisition.body<ByteArray>().toList())
       }
     }
   }
@@ -393,6 +437,19 @@ class OpdsRoutesTest {
     get(path) {
       basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
     }
+
+  private fun assertXml(value: String) {
+    val factory =
+      DocumentBuilderFactory.newInstance().apply {
+        isNamespaceAware = true
+        isXIncludeAware = false
+        setExpandEntityReferences(false)
+        setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+      }
+    factory.newDocumentBuilder().parse(ByteArrayInputStream(value.encodeToByteArray()))
+  }
 
   private fun seed(database: XoboroDatabase) {
     JooqLibraryRepository(database).insert(
