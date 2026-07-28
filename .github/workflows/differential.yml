@@ -113,9 +113,13 @@ jobs:
             'iVBORw0KGgoAAAANSUhEUgAAABgAAAAgAQMAAAAykCp7AAAAA1BMVEUTfItA+kyhAAAADElEQVQI12NgGFgAAACAAAElMfVGAAAAAElFTkSuQmCC' \
             | base64 --decode >"${archive_root}/0001.png"
           cp "${archive_root}/0001.png" "${archive_root}/0002.png"
+          printf '%s' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter</Title><Series>Synthetic Series</Series><Number>1</Number><Summary>Synthetic chapter summary</Summary><Tags>sample</Tags></ComicInfo>' \
+            >"${archive_root}/ComicInfo.xml"
           (
             cd "${archive_root}"
-            zip --quiet "${catalog_root}/Synthetic Series/001.cbz" 0001.png 0002.png
+            zip --quiet "${catalog_root}/Synthetic Series/001.cbz" \
+              0001.png 0002.png ComicInfo.xml
           )
 
           for port in 25610 25611; do
@@ -182,9 +186,73 @@ jobs:
               "http://127.0.0.1:25611/api/v1/books?page=0&size=20" |
               jq --exit-status --raw-output '.content[0].id'
           )"
+          reference_series_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25610/api/v1/series?page=0&size=20" |
+              jq --exit-status --raw-output '.content[0].id'
+          )"
+          candidate_series_id="$(
+            curl --fail --silent --show-error \
+              --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+              "http://127.0.0.1:25611/api/v1/series?page=0&size=20" |
+              jq --exit-status --raw-output '.content[0].id'
+          )"
+
+          for target in \
+            "25610:${reference_series_id}:${reference_book_id}:KOMGA_REFERENCE" \
+            "25611:${candidate_series_id}:${candidate_book_id}:XOBORO_CANDIDATE"; do
+            port="${target%%:*}"
+            remainder="${target#*:}"
+            series_id="${remainder%%:*}"
+            remainder="${remainder#*:}"
+            book_id="${remainder%%:*}"
+            variable_prefix="${remainder#*:}"
+
+            collection_id="$(
+              jq --null-input --compact-output \
+                --arg series_id "${series_id}" \
+                '{
+                  name: "Fixture Collection",
+                  ordered: true,
+                  seriesIds: [$series_id]
+                }' |
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --request POST "http://127.0.0.1:${port}/api/v1/collections" \
+                  --header "Content-Type: application/json" \
+                  --data-binary @- |
+                jq --exit-status --raw-output '.id'
+            )"
+            read_list_id="$(
+              jq --null-input --compact-output \
+                --arg book_id "${book_id}" \
+                '{
+                  name: "Fixture Read List",
+                  summary: "Fixture list summary",
+                  ordered: true,
+                  bookIds: [$book_id]
+                }' |
+                curl --fail --silent --show-error \
+                  --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                  --request POST "http://127.0.0.1:${port}/api/v1/readlists" \
+                  --header "Content-Type: application/json" \
+                  --data-binary @- |
+                jq --exit-status --raw-output '.id'
+            )"
+            printf '%s_COLLECTION_ID=%s\n' "${variable_prefix}" "${collection_id}" \
+              >>"${GITHUB_ENV}"
+            printf '%s_READ_LIST_ID=%s\n' "${variable_prefix}" "${read_list_id}" \
+              >>"${GITHUB_ENV}"
+          done
+
           printf 'KOMGA_REFERENCE_BOOK_ID=%s\n' "${reference_book_id}" \
             >>"${GITHUB_ENV}"
           printf 'XOBORO_CANDIDATE_BOOK_ID=%s\n' "${candidate_book_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'KOMGA_REFERENCE_SERIES_ID=%s\n' "${reference_series_id}" \
+            >>"${GITHUB_ENV}"
+          printf 'XOBORO_CANDIDATE_SERIES_ID=%s\n' "${candidate_series_id}" \
             >>"${GITHUB_ENV}"
 
       - name: Compare authenticated synthetic catalog and media
@@ -216,7 +284,7 @@ jobs:
           for endpoint in \
             opds/v2/catalog \
             "opds/v2/libraries/browse?page=0&size=20" \
-            "opds/v2/search?query=Synthetic"; do
+            "opds/v2/search?query=Series"; do
             for port in 25610 25611; do
               url="http://127.0.0.1:${port}/${endpoint}"
               etag="$(
