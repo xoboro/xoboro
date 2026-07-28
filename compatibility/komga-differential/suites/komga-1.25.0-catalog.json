@@ -49,6 +49,86 @@
       }
     },
     {
+      "name": "deprecated synthetic book filters",
+      "path": "/api/v1/books?media_status=READY&tag=sample&released_after=2025-12-31&page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/seriesId",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "deprecated synthetic series metadata filters",
+      "path": "/api/v1/series?status=ONGOING&publisher=Synthetic%20Publisher&language=en&genre=Adventure&tag=sample&age_rating=13&release_year=2025&complete=true&author=Synthetic%20Author,writer&page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "structured synthetic book filters",
+      "method": "POST",
+      "path": "/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,desc",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"condition\":{\"allOf\":[{\"tag\":{\"operator\":\"is\",\"value\":\"sample\"}},{\"numberSort\":{\"operator\":\"greaterThan\",\"value\":1}},{\"title\":{\"operator\":\"contains\",\"value\":\"Two\"}},{\"mediaStatus\":{\"operator\":\"is\",\"value\":\"READY\"}},{\"mediaProfile\":{\"operator\":\"is\",\"value\":\"DIVINA\"}},{\"author\":{\"operator\":\"is\",\"value\":{\"name\":\"Synthetic Author\",\"role\":\"writer\"}}}]}}",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/seriesId",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "structured synthetic series filters",
+      "method": "POST",
+      "path": "/api/v1/series/list?page=0&size=20&sort=metadata.titleSort,asc",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"condition\":{\"allOf\":[{\"publisher\":{\"operator\":\"is\",\"value\":\"synthetic publisher\"}},{\"language\":{\"operator\":\"is\",\"value\":\"en\"}},{\"genre\":{\"operator\":\"is\",\"value\":\"Adventure\"}},{\"tag\":{\"operator\":\"is\",\"value\":\"sample\"}},{\"ageRating\":{\"operator\":\"greaterThan\",\"value\":10}},{\"complete\":{\"operator\":\"isTrue\"}},{\"seriesStatus\":{\"operator\":\"is\",\"value\":\"ONGOING\"}},{\"releaseDate\":{\"operator\":\"after\",\"dateTime\":\"2024-12-31T00:00:00Z\"}},{\"releaseDate\":{\"operator\":\"before\",\"dateTime\":\"2026-01-01T00:00:00Z\"}},{\"author\":{\"operator\":\"is\",\"value\":{\"name\":\"Synthetic Author\",\"role\":\"writer\"}}}]}}",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
       "name": "synthetic book detail",
       "path": "/api/v1/books/{BOOK_ID}",
       "pathVariables": ["BOOK_ID"],

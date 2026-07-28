@@ -117,7 +117,7 @@ jobs:
             | base64 --decode >"${archive_root}/0001.png"
           cp "${archive_root}/0001.png" "${archive_root}/0002.png"
           printf '%s' \
-            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter</Title><Series>Synthetic Series</Series><Number>1</Number><Summary>Synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>sample</Tags></ComicInfo>' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter</Title><Series>Synthetic Series</Series><Number>1</Number><Count>2</Count><Year>2025</Year><Month>1</Month><Day>2</Day><Summary>Synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Genre>Adventure, Synthetic</Genre><LanguageISO>en</LanguageISO><AgeRating>Teen</AgeRating><Tags>sample</Tags></ComicInfo>' \
             >"${archive_root}/ComicInfo.xml"
           (
             cd "${archive_root}"
@@ -125,7 +125,7 @@ jobs:
               0001.png 0002.png ComicInfo.xml
           )
           printf '%s' \
-            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter Two</Title><Series>Synthetic Series</Series><Number>2</Number><Summary>Second synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>sample</Tags></ComicInfo>' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Chapter Two</Title><Series>Synthetic Series</Series><Number>2</Number><Count>2</Count><Year>2026</Year><Month>2</Month><Day>3</Day><Summary>Second synthetic chapter summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Genre>Adventure, Synthetic</Genre><LanguageISO>en</LanguageISO><AgeRating>Teen</AgeRating><Tags>sample</Tags></ComicInfo>' \
             >"${archive_root}/ComicInfo.xml"
           (
             cd "${archive_root}"
@@ -133,7 +133,7 @@ jobs:
               0001.png 0002.png ComicInfo.xml
           )
           printf '%s' \
-            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Standalone</Title><Series>Synthetic Standalone</Series><Number>1</Number><Summary>Synthetic standalone summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Tags>standalone</Tags></ComicInfo>' \
+            '<?xml version="1.0" encoding="UTF-8"?><ComicInfo><Title>Synthetic Standalone</Title><Series>Synthetic Standalone</Series><Number>1</Number><Count>1</Count><Year>2024</Year><Month>3</Month><Day>4</Day><Summary>Synthetic standalone summary</Summary><Writer>Synthetic Author</Writer><Publisher>Synthetic Publisher</Publisher><Genre>Standalone</Genre><LanguageISO>en</LanguageISO><AgeRating>Teen</AgeRating><Tags>standalone</Tags></ComicInfo>' \
             >"${archive_root}/ComicInfo.xml"
           (
             cd "${archive_root}"

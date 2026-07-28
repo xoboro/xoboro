@@ -19,6 +19,9 @@ import io.xoboro.core.application.CatalogGroupCount
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSearchCondition
+import io.xoboro.core.application.CatalogSearchField
+import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
@@ -35,6 +38,7 @@ import io.xoboro.core.domain.WebLink
 import java.net.URI
 import java.nio.file.Path
 import java.time.Instant
+import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.ceil
 import kotlinx.serialization.Serializable
@@ -61,6 +65,7 @@ fun Route.komgaCatalogRoutes(catalog: CatalogReadRepository) {
             libraryIds = call.queryLibraryIds(),
             fullTextSearch = call.request.queryParameters["search"],
             deleted = false,
+            condition = call.deprecatedBookCondition(),
           )
         call.respondCatalog(
           catalog
@@ -565,11 +570,144 @@ private fun ApplicationCall.deprecatedSeriesQuery(): SeriesCatalogQuery =
     fullTextSearch = request.queryParameters["search"],
     deleted = queryBoolean("deleted") ?: false,
     oneshot = queryBoolean("oneshot"),
-    publishers = request.queryParameters.getAll("publisher").orEmpty().toSet(),
-    languages = request.queryParameters.getAll("language").orEmpty().toSet(),
-    genres = request.queryParameters.getAll("genre").orEmpty().toSet(),
-    tags = request.queryParameters.getAll("tag").orEmpty().toSet(),
+    condition = deprecatedSeriesCondition(),
   )
+
+private fun ApplicationCall.deprecatedBookCondition(): CatalogSearchCondition? =
+  buildList {
+    addAnyValueConditions(
+      request.queryParameters.getAll("media_status"),
+      CatalogSearchField.MEDIA_STATUS,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("read_status"),
+      CatalogSearchField.READ_STATUS,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("tag"),
+      CatalogSearchField.TAG,
+    )
+    request.queryParameters["released_after"]?.let { rawDate ->
+      val releaseDate = LocalDate.parse(rawDate)
+      add(
+        CatalogSearchCondition.Predicate(
+          field = CatalogSearchField.RELEASE_DATE,
+          operator = CatalogSearchOperator.AFTER,
+          value = "${releaseDate}T00:00:00Z",
+        ),
+      )
+    }
+  }.allOfOrNull()
+
+private fun ApplicationCall.deprecatedSeriesCondition(): CatalogSearchCondition? =
+  buildList {
+    addAnyValueConditions(
+      request.queryParameters.getAll("collection_id"),
+      CatalogSearchField.COLLECTION_ID,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("status"),
+      CatalogSearchField.SERIES_STATUS,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("read_status"),
+      CatalogSearchField.READ_STATUS,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("sharing_label"),
+      CatalogSearchField.SHARING_LABEL,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("publisher"),
+      CatalogSearchField.PUBLISHER,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("language"),
+      CatalogSearchField.LANGUAGE,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("genre"),
+      CatalogSearchField.GENRE,
+    )
+    addAnyValueConditions(
+      request.queryParameters.getAll("tag"),
+      CatalogSearchField.TAG,
+    )
+    request.queryParameters.getAll("age_rating")?.let { ratings ->
+      val predicates =
+        ratings.map { value ->
+          value.toIntOrNull()?.let {
+            CatalogSearchCondition.Predicate(
+              CatalogSearchField.AGE_RATING,
+              CatalogSearchOperator.IS,
+              it.toString(),
+            )
+          } ?: CatalogSearchCondition.Predicate(
+            CatalogSearchField.AGE_RATING,
+            CatalogSearchOperator.IS_NULL,
+          )
+        }
+      if (predicates.isNotEmpty()) add(CatalogSearchCondition.AnyOf(predicates))
+    }
+    request.queryParameters.getAll("release_year")?.let { years ->
+      val predicates =
+        years.mapNotNull(String::toIntOrNull).map { year ->
+          CatalogSearchCondition.AllOf(
+            listOf(
+              CatalogSearchCondition.Predicate(
+                CatalogSearchField.RELEASE_DATE,
+                CatalogSearchOperator.AFTER,
+                "${year - 1}-12-31T12:00:00Z",
+              ),
+              CatalogSearchCondition.Predicate(
+                CatalogSearchField.RELEASE_DATE,
+                CatalogSearchOperator.BEFORE,
+                "${year + 1}-01-01T12:00:00Z",
+              ),
+            ),
+          )
+        }
+      if (predicates.isNotEmpty()) add(CatalogSearchCondition.AnyOf(predicates))
+    }
+    request.queryParameters.getAll("author")
+      ?.mapNotNull { raw ->
+        raw.takeIf { ',' in it }?.let {
+          CatalogSearchCondition.Predicate(
+            field = CatalogSearchField.AUTHOR,
+            operator = CatalogSearchOperator.IS,
+            attributes =
+              mapOf(
+                "name" to it.substringBeforeLast(','),
+                "role" to it.substringAfterLast(','),
+              ),
+          )
+        }
+      }?.takeIf(List<CatalogSearchCondition>::isNotEmpty)
+      ?.let { add(CatalogSearchCondition.AnyOf(it)) }
+    queryBoolean("complete")?.let {
+      add(
+        CatalogSearchCondition.Predicate(
+          CatalogSearchField.COMPLETE,
+          if (it) CatalogSearchOperator.IS_TRUE else CatalogSearchOperator.IS_FALSE,
+        ),
+      )
+    }
+  }.allOfOrNull()
+
+private fun MutableList<CatalogSearchCondition>.addAnyValueConditions(
+  values: List<String>?,
+  field: CatalogSearchField,
+) {
+  values
+    ?.map {
+      CatalogSearchCondition.Predicate(field, CatalogSearchOperator.IS, it)
+    }?.takeIf(List<CatalogSearchCondition>::isNotEmpty)
+    ?.let { add(CatalogSearchCondition.AnyOf(it)) }
+}
+
+private fun List<CatalogSearchCondition>.allOfOrNull(): CatalogSearchCondition? =
+  takeIf(List<CatalogSearchCondition>::isNotEmpty)
+    ?.let(CatalogSearchCondition::AllOf)
 
 private fun ApplicationCall.queryLibraryIds(): Set<LibraryId> =
   request.queryParameters.getAll("library_id").orEmpty().map(::LibraryId).toSet()
