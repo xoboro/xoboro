@@ -45,6 +45,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Build Xoboro candidate
+        run: ./gradlew :server:app:installDist
+
       - name: Start reference Komga
         run: |
           docker run --detach --name komga-reference \
@@ -58,7 +61,7 @@ jobs:
           XOBORO_PORT=25611 \
           XOBORO_DATABASE_PATH="${RUNNER_TEMP}/xoboro.sqlite" \
           KOMGA_CORS_ALLOWEDORIGINS=https://reader.example.invalid \
-          ./gradlew :server:app:run >"${RUNNER_TEMP}/xoboro.log" 2>&1 &
+          server/app/build/install/app/bin/app >"${RUNNER_TEMP}/xoboro.log" 2>&1 &
           echo "$!" >"${RUNNER_TEMP}/xoboro.pid"
 
       - name: Wait for both servers
