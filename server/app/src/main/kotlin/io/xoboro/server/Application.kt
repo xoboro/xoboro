@@ -81,7 +81,9 @@ import io.xoboro.server.api.configureXoboroNativeRateLimits
 import io.xoboro.server.api.CrossSiteRequestRejectedException
 import io.xoboro.server.api.XOBORO_API_PREFIX
 import io.xoboro.server.api.XoboroApiError
+import io.xoboro.server.api.XoboroInvalidQueryException
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
+import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.KomgaDatabaseImporter
@@ -396,6 +398,16 @@ fun Application.xoboroModule(
           XoboroApiError(
             code = CrossSiteRequestRejectedException.CODE,
             message = requireNotNull(cause.message),
+        ),
+      )
+    }
+    exception<XoboroInvalidQueryException> { call, cause ->
+      call.respond(
+        status = HttpStatusCode.BadRequest,
+        message =
+          XoboroApiError(
+            code = "invalid_query",
+            message = requireNotNull(cause.message),
           ),
       )
     }
@@ -448,6 +460,12 @@ fun Application.xoboroModule(
       userLifecycle?.let {
         nativeSessions?.let { sessions ->
           xoboroNativeAuthenticationRoutes(it, sessions)
+          if (libraryAdministrationLifecycle != null && catalogReadRepository != null) {
+            xoboroNativeCatalogRoutes(
+              libraries = libraryAdministrationLifecycle,
+              catalog = catalogReadRepository,
+            )
+          }
         }
         komgaFileSystemRoutes()
         komgaClaimRoutes(it)
