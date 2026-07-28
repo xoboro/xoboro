@@ -465,9 +465,7 @@ private fun CatalogBook.toDivinaManifest(apiBaseUrl: String): WPPublicationDto {
         inker = authorGroups["inker"].orEmpty(),
         contributor =
           metadata.authors.filterNot { it.role.lowercase() in knownRoles }.map(Author::name),
-        publisher =
-          seriesMetadata.publisher.takeIf(String::isNotBlank)?.let(::listOf)
-            .orEmpty(),
+        publisher = emptyList(),
         subject = metadata.tags.toList(),
         readingProgression = this@toDivinaManifest.readingProgression(),
         description = metadata.summary.takeIf(String::isNotBlank),

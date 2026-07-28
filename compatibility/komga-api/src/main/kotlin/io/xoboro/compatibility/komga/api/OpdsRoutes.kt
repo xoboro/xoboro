@@ -111,32 +111,43 @@ private fun Route.opdsV1Routes(
   content: BookContentAccess,
 ) {
   get("/opds/v1.2/catalog") {
+    val now = System.currentTimeMillis()
     val entries =
       listOf(
-        AtomEntry("keepReading", "Keep Reading", "Continue reading your in progress books", "/opds/v1.2/keep-reading"),
-        AtomEntry("ondeck", "On Deck", "Browse what to read next", "/opds/v1.2/ondeck"),
-        AtomEntry("allSeries", "All series", "Browse by series", "/opds/v1.2/series"),
-        AtomEntry("latestSeries", "Latest series", "Browse latest series", "/opds/v1.2/series/latest"),
-        AtomEntry("latestBooks", "Latest books", "Browse latest books", "/opds/v1.2/books/latest"),
-        AtomEntry("allLibraries", "All libraries", "Browse by library", "/opds/v1.2/libraries"),
-        AtomEntry("allCollections", "All collections", "Browse by collection", "/opds/v1.2/collections"),
-        AtomEntry("allReadLists", "All read lists", "Browse by read lists", "/opds/v1.2/readlists"),
-        AtomEntry("allPublishers", "All publishers", "Browse by publishers", "/opds/v1.2/publishers"),
+        navigationAtom("keepReading", "Keep Reading", now, "Continue reading your in progress books", "/opds/v1.2/keep-reading"),
+        navigationAtom("ondeck", "On Deck", now, "Browse what to read next", "/opds/v1.2/ondeck"),
+        navigationAtom("allSeries", "All series", now, "Browse by series", "/opds/v1.2/series"),
+        navigationAtom("latestSeries", "Latest series", now, "Browse latest series", "/opds/v1.2/series/latest"),
+        navigationAtom("latestBooks", "Latest books", now, "Browse latest books", "/opds/v1.2/books/latest"),
+        navigationAtom("allLibraries", "All libraries", now, "Browse by library", "/opds/v1.2/libraries"),
+        navigationAtom("allCollections", "All collections", now, "Browse by collection", "/opds/v1.2/collections"),
+        navigationAtom("allReadLists", "All read lists", now, "Browse by read lists", "/opds/v1.2/readlists"),
+        navigationAtom("allPublishers", "All publishers", now, "Browse by publishers", "/opds/v1.2/publishers"),
       )
-    call.respondAtom("root", "Komga OPDS catalog", entries)
+    call.respondAtom(
+      id = "root",
+      title = "Komga OPDS catalog",
+      entries = entries,
+      updatedAtMillis = now,
+      extraFeedLinks =
+        listOf(
+          AtomLink("application/opensearchdescription+xml", "search", "/opds/v1.2/search"),
+          AtomLink(OPDS_V2_MEDIA_TYPE, "alternate", "/opds/v2/catalog"),
+        ),
+    )
   }
   get("/opds/v1.2/search") {
     val template = call.opdsUrl("/opds/v1.2/series") + "?search={searchTerms}"
     call.respondText(
-      """
-      <?xml version="1.0" encoding="UTF-8"?>
-      <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
-        <ShortName>Search</ShortName>
-        <Description>Search for series</Description>
-        <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition" template="${template.xml()}"/>
-      </OpenSearchDescription>
-      """.trimIndent(),
-      OPENSEARCH_CONTENT_TYPE,
+      buildString {
+        append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        append("<OpenSearchDescription xmlns=\"http://a9.com/-/spec/opensearch/1.1/\">")
+        append("<ShortName>Search</ShortName><Description>Search for series</Description>")
+        append("<InputEncoding>UTF-8</InputEncoding><OutputEncoding>UTF-8</OutputEncoding>")
+        append("<Url template=\"${template.xml()}\" type=\"$ATOM_ACQUISITION_MEDIA_TYPE\"/>")
+        append("</OpenSearchDescription>")
+      },
+      ATOM_CONTENT_TYPE,
     )
   }
   get("/opds/v1.2/ondeck") {
@@ -161,9 +172,11 @@ private fun Route.opdsV1Routes(
   get("/opds/v1.2/series") {
     val search = call.request.queryParameters["search"]
     val publishers = call.request.queryParameters.getAll("publisher").orEmpty().toSet()
+    val defaultSorts =
+      if (search.isNullOrBlank()) listOf(CatalogSort("titleSort")) else emptyList()
     call.respondAtomSeries(
       id = "allSeries",
-      title = search?.let { "Series search for: $it" } ?: "All series",
+      title = search?.takeIf(String::isNotBlank)?.let { "Series search for: $it" } ?: "All series",
       page =
         catalog.findSeries(
           SeriesCatalogQuery(
@@ -171,8 +184,13 @@ private fun Route.opdsV1Routes(
             publishers = publishers,
           ),
           call.opdsUser().catalogAccess(),
-          call.opdsPageRequest(listOf(CatalogSort("titleSort"))),
+          call.opdsPageRequest(defaultSorts),
         ),
+      selfQuery =
+        buildList {
+          search?.let { add("search" to it) }
+          publishers.forEach { add("publisher" to it) }
+        },
     )
   }
   get("/opds/v1.2/series/latest") {
@@ -207,29 +225,45 @@ private fun Route.opdsV1Routes(
       "allLibraries",
       "All libraries",
       libraries.visibleTo(user).map { library ->
-        AtomEntry(
-          library.id.value,
-          library.name,
-          "Browse ${library.name}",
-          "/opds/v1.2/libraries/${library.id.value}",
+        navigationAtom(
+          id = library.id.value,
+          title = library.name,
+          updatedAtMillis = library.updatedAtMillis,
+          href = "/opds/v1.2/libraries/${library.id.value}",
         )
       },
     )
   }
   get("/opds/v1.2/collections") {
     val user = call.opdsUser()
+    val request = call.opdsPageRequest()
+    val page =
+      collections
+        .findAll()
+        .visibleCollections(catalog, user)
+        .sortedBy(SeriesCollection::name)
+        .toPage(request)
     call.respondAtom(
       "allCollections",
       "All collections",
-      collections.findAll().visibleCollections(catalog, user).map { it.toAtomEntry() },
+      page.content.map { it.toAtomEntry() },
+      page = page,
     )
   }
   get("/opds/v1.2/readlists") {
     val user = call.opdsUser()
+    val request = call.opdsPageRequest()
+    val page =
+      readLists
+        .findAll()
+        .visibleReadLists(catalog, user)
+        .sortedBy(ReadList::name)
+        .toPage(request)
     call.respondAtom(
       "allReadLists",
       "All read lists",
-      readLists.findAll().visibleReadLists(catalog, user).map { it.toAtomEntry() },
+      page.content.map { it.toAtomEntry() },
+      page = page,
     )
   }
   get("/opds/v1.2/publishers") {
@@ -246,17 +280,20 @@ private fun Route.opdsV1Routes(
         .filter(String::isNotBlank)
         .distinct()
         .sorted()
+    val request = call.opdsPageRequest()
+    val page = publishers.toPage(request)
     call.respondAtom(
       "allPublishers",
       "All publishers",
-      publishers.map { publisher ->
-        AtomEntry(
-          publisher,
-          publisher,
-          "Browse $publisher",
-          "/opds/v1.2/series?publisher=${publisher.urlQuery()}",
+      page.content.map { publisher ->
+        navigationAtom(
+          id = "publisher:${publisher.urlQuery()}",
+          title = publisher,
+          updatedAtMillis = System.currentTimeMillis(),
+          href = "/opds/v1.2/series?publisher=${publisher.urlQuery()}",
         )
       },
+      page = page,
     )
   }
   get("/opds/v1.2/series/{id}") {
@@ -273,11 +310,22 @@ private fun Route.opdsV1Routes(
           call.opdsUser().catalogAccess(),
           call.opdsPageRequest(listOf(CatalogSort("numberSort"))),
         ),
+        updatedAtMillis = series.series.updatedAtMillis,
+        prependSeriesTitle = false,
       )
     }
   }
   get("/opds/v1.2/libraries/{id}") {
-    val library = call.visibleLibrary(libraries) ?: return@get
+    val id = LibraryId(requireNotNull(call.parameters["id"]))
+    val library = libraries.findByIdOrNull(id)
+    if (library == null) {
+      call.respond(HttpStatusCode.NotFound)
+      return@get
+    }
+    if (!call.opdsUser().canAccessLibrary(library.id)) {
+      call.respond(HttpStatusCode.Forbidden)
+      return@get
+    }
     call.respondAtomSeries(
       library.id.value,
       library.name,
@@ -286,24 +334,61 @@ private fun Route.opdsV1Routes(
         call.opdsUser().catalogAccess(),
         call.opdsPageRequest(listOf(CatalogSort("titleSort"))),
       ),
+      updatedAtMillis = library.updatedAtMillis,
     )
   }
   get("/opds/v1.2/collections/{id}") {
     val collection =
       collections.findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
-    if (collection == null) {
+    val user = call.opdsUser()
+    if (collection == null || collection !in listOf(collection).visibleCollections(catalog, user)) {
       call.respond(HttpStatusCode.NotFound)
     } else {
-      call.respondAtomSeriesItems(collection.name, collection.seriesIds, catalog, call.opdsUser())
+      val request = call.opdsPageRequest()
+      val visible =
+        collection.seriesIds
+          .mapNotNull { catalog.findSeriesByIdOrNull(it, user.catalogAccess()) }
+          .let { items ->
+            if (collection.ordered) items else items.sortedBy { it.metadata.titleSort }
+          }.toPage(request)
+      call.respondAtomSeries(
+        id = collection.id.value,
+        title = collection.name,
+        page = visible,
+        updatedAtMillis = collection.updatedAtMillis,
+      )
     }
   }
   get("/opds/v1.2/readlists/{id}") {
     val readList = readLists.findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
-    if (readList == null) {
+    val user = call.opdsUser()
+    if (readList == null || readList !in listOf(readList).visibleReadLists(catalog, user)) {
       call.respond(HttpStatusCode.NotFound)
     } else {
-      call.respondAtomBookItems(readList.name, readList.bookIds, catalog, call.opdsUser())
+      val request = call.opdsPageRequest()
+      val visible =
+        readList.bookIds
+          .mapNotNull { catalog.findBookByIdOrNull(it, user.catalogAccess()) }
+          .let { items ->
+            if (readList.ordered) {
+              items
+            } else {
+              items.sortedWith(compareBy(nullsFirst()) { it.metadata.releaseDate })
+            }
+          }.toPage(request)
+      call.respondAtomBooks(
+        id = readList.id.value,
+        title = readList.name,
+        page = visible,
+        updatedAtMillis = readList.updatedAtMillis,
+      )
     }
+  }
+  get("/opds/v1.2/books/{bookId}/file") {
+    call.streamBook(catalog, content)
+  }
+  get("/opds/v1.2/books/{bookId}/file/{tail...}") {
+    call.streamBook(catalog, content)
   }
   get("/opds/v1.2/books/{bookId}/thumbnail/small") {
     call.respondOpdsThumbnail(catalog, artwork, content, maximumDimension = 300)
@@ -895,13 +980,25 @@ data class OpdsAuthenticationLabelsDto(
 private data class AtomEntry(
   val id: String,
   val title: String,
-  val content: String,
-  val href: String,
-  val acquisition: Boolean = false,
-  val thumbnailHref: String? = null,
+  val updatedAtMillis: Long,
+  val content: String = "",
   val authors: List<String> = emptyList(),
+  val links: List<AtomLink>,
 )
 
+private data class AtomLink(
+  val type: String,
+  val rel: String,
+  val href: String,
+  val attributes: List<AtomAttribute> = emptyList(),
+)
+
+private data class AtomAttribute(
+  val namespacePrefix: String,
+  val namespace: String,
+  val name: String,
+  val value: String,
+)
 private suspend fun ApplicationCall.respondRecommended(
   catalog: CatalogReadRepository,
   libraries: LibraryRepository,
@@ -1307,51 +1404,57 @@ private suspend fun ApplicationCall.respondAtom(
   id: String,
   title: String,
   entries: List<AtomEntry>,
+  updatedAtMillis: Long = System.currentTimeMillis(),
+  page: CatalogPage<*>? = null,
+  selfQuery: List<Pair<String, String>> = emptyList(),
+  extraFeedLinks: List<AtomLink> = emptyList(),
 ) {
-  val links =
-    """
-    <link rel="self" href="${opdsUrl(request.path()).xml()}" type="$ATOM_NAVIGATION_MEDIA_TYPE"/>
-    <link rel="start" href="${opdsUrl("/opds/v1.2/catalog").xml()}" type="$ATOM_NAVIGATION_MEDIA_TYPE"/>
-    """.trimIndent()
-  val body =
-    entries.joinToString(separator = "\n") { entry ->
-      val href =
-        if (entry.href.startsWith("http://") || entry.href.startsWith("https://")) {
-          entry.href
-        } else {
-          opdsUrl(entry.href)
-        }
-      buildString {
-        append("<entry><title>${entry.title.xml()}</title>")
-        append("<id>${entry.id.xml()}</id><updated>${Instant.now()}</updated>")
-        append("<content type=\"text\">${entry.content.xml()}</content>")
-        entry.authors.forEach { append("<author><name>${it.xml()}</name></author>") }
-        append(
-          "<link rel=\"${if (entry.acquisition) OPDS_ACQUISITION_REL else OPDS_SUBSECTION_REL}\" " +
-            "href=\"${href.xml()}\" type=\"" +
-            "${if (entry.acquisition) "application/octet-stream" else ATOM_NAVIGATION_MEDIA_TYPE}\"/>",
-        )
-        entry.thumbnailHref?.let {
-          append(
-            "<link rel=\"http://opds-spec.org/image/thumbnail\" " +
-              "href=\"${opdsUrl(it).xml()}\" type=\"image/jpeg\"/>",
+  val selfPath = request.path() + selfQuery.toAtomQuery()
+  val feedLinks =
+    buildList {
+      add(AtomLink(ATOM_NAVIGATION_MEDIA_TYPE, "self", selfPath))
+      add(AtomLink(ATOM_NAVIGATION_MEDIA_TYPE, "start", "/opds/v1.2/catalog"))
+      addAll(extraFeedLinks)
+      page?.let {
+        if (it.page > 0) {
+          add(
+            AtomLink(
+              ATOM_NAVIGATION_MEDIA_TYPE,
+              "previous",
+              selfPath.appendAtomPage(it.page - 1),
+            ),
           )
         }
-        append("</entry>")
+        if ((it.page.toLong() + 1) * it.size < it.totalElements) {
+          add(
+            AtomLink(
+              ATOM_NAVIGATION_MEDIA_TYPE,
+              "next",
+              selfPath.appendAtomPage(it.page + 1),
+            ),
+          )
+        }
       }
     }
   respondText(
-    """
-    <?xml version="1.0" encoding="UTF-8"?>
-    <feed xmlns="http://www.w3.org/2005/Atom">
-      <id>${id.xml()}</id>
-      <title>${title.xml()}</title>
-      <updated>${Instant.now()}</updated>
-      <author><name>Komga</name><uri>https://komga.org</uri></author>
-      $links
-      $body
-    </feed>
-    """.trimIndent(),
+    buildString {
+      append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+      append("<feed xmlns=\"http://www.w3.org/2005/Atom\">")
+      append("<id>${id.xml()}</id><title>${title.xml()}</title>")
+      append("<updated>${updatedAtMillis.toAtomTime()}</updated>")
+      append("<author><name>Komga</name><uri>https://github.com/gotson/komga</uri></author>")
+      feedLinks.forEach { append(it.toAtomXml(this@respondAtom)) }
+      entries.forEach { entry ->
+        append("<entry><title>${entry.title.xml()}</title>")
+        append("<updated>${entry.updatedAtMillis.toAtomTime()}</updated>")
+        append("<id>${entry.id.xml()}</id>")
+        append("<content>${entry.content.replace("\n", "<br/>").xml()}</content>")
+        entry.authors.forEach { append("<author><name>${it.xml()}</name></author>") }
+        entry.links.forEach { append(it.toAtomXml(this@respondAtom)) }
+        append("</entry>")
+      }
+      append("</feed>")
+    },
     ATOM_CONTENT_TYPE,
   )
 }
@@ -1360,21 +1463,15 @@ private suspend fun ApplicationCall.respondAtomBooks(
   id: String,
   title: String,
   page: CatalogPage<CatalogBook>,
+  updatedAtMillis: Long = System.currentTimeMillis(),
+  prependSeriesTitle: Boolean = true,
 ) {
   respondAtom(
     id,
     title,
-    page.content.map { item ->
-      AtomEntry(
-        id = item.book.id.value,
-        title = "${item.seriesTitle} - ${item.metadata.title}",
-        content = item.metadata.summary,
-        href = "/api/v1/books/${item.book.id.value}/file",
-        acquisition = true,
-        thumbnailHref = "/opds/v1.2/books/${item.book.id.value}/thumbnail/small",
-        authors = item.metadata.authors.map { it.name },
-      )
-    },
+    page.content.map { it.toAtomBookEntry(prependSeriesTitle) },
+    updatedAtMillis = updatedAtMillis,
+    page = page,
   )
 }
 
@@ -1382,40 +1479,180 @@ private suspend fun ApplicationCall.respondAtomSeries(
   id: String,
   title: String,
   page: CatalogPage<CatalogSeries>,
+  updatedAtMillis: Long = System.currentTimeMillis(),
+  selfQuery: List<Pair<String, String>> = emptyList(),
 ) {
   respondAtom(
     id,
     title,
     page.content.map { item ->
-      AtomEntry(
+      navigationAtom(
         id = item.series.id.value,
         title = item.metadata.title,
-        content = item.metadata.summary,
+        updatedAtMillis = item.series.updatedAtMillis,
         href = "/opds/v1.2/series/${item.series.id.value}",
       )
     },
+    updatedAtMillis = updatedAtMillis,
+    page = page,
+    selfQuery = selfQuery,
   )
 }
 
-private suspend fun ApplicationCall.respondAtomSeriesItems(
+private fun navigationAtom(
+  id: String,
   title: String,
-  ids: List<SeriesId>,
-  catalog: CatalogReadRepository,
-  user: User,
-) {
-  val visible = ids.mapNotNull { catalog.findSeriesByIdOrNull(it, user.catalogAccess()) }
-  respondAtomSeries(title, title, visible.toPage(opdsPageRequest()))
+  updatedAtMillis: Long,
+  content: String = "",
+  href: String,
+): AtomEntry =
+  AtomEntry(
+    id = id,
+    title = title,
+    updatedAtMillis = updatedAtMillis,
+    content = content,
+    links =
+      listOf(
+        AtomLink(
+          type = ATOM_NAVIGATION_MEDIA_TYPE,
+          rel = OPDS_SUBSECTION_REL,
+          href = href,
+        ),
+      ),
+  )
+
+private fun CatalogBook.toAtomBookEntry(prependSeriesTitle: Boolean): AtomEntry {
+  val id = book.id.value
+  val analyzedMedia = media
+  val mediaTypes =
+    when (analyzedMedia?.profile) {
+      MediaProfile.DIVINA -> analyzedMedia.pages.map { it.mediaType }.distinct()
+      MediaProfile.PDF -> listOf("image/jpeg")
+      MediaProfile.EPUB ->
+        if (analyzedMedia.epubDivinaCompatible) {
+          analyzedMedia.pages.map { it.mediaType }.distinct()
+        } else {
+          emptyList()
+        }
+      null -> emptyList()
+    }
+  val pageStream =
+    when {
+      mediaTypes.isEmpty() -> null
+      mediaTypes.size == 1 && mediaTypes.single() in OPDS_PSE_SUPPORTED_MEDIA_TYPES ->
+        AtomLink(
+          type = mediaTypes.single(),
+          rel = OPDS_PSE_STREAM_REL,
+          href = "/opds/v1.2/books/$id/pages/{pageNumber}",
+          attributes = opdsPseAttributes(),
+        )
+      else ->
+        AtomLink(
+          type = "image/jpeg",
+          rel = OPDS_PSE_STREAM_REL,
+          href = "/opds/v1.2/books/$id/pages/{pageNumber}?convert=jpeg",
+          attributes = opdsPseAttributes(),
+        )
+    }
+  val fileName = book.relativePath.substringAfterLast('/').replace(";", "")
+  val extension = fileName.substringAfterLast('.', "").lowercase()
+  val prefix = if (prependSeriesTitle) "$seriesTitle ${metadata.number}: " else ""
+  return AtomEntry(
+    id = id,
+    title = "$prefix${metadata.title}",
+    updatedAtMillis = book.updatedAtMillis,
+    content =
+      buildString {
+        append("$extension - ${book.fileSize.toAtomHumanSize()}")
+        if (metadata.summary.isNotBlank()) append("\n\n${metadata.summary}")
+      },
+    authors = metadata.authors.map { it.name },
+    links =
+      listOfNotNull(
+        AtomLink(
+          type = "image/jpeg",
+          rel = "http://opds-spec.org/image/thumbnail",
+          href = "/opds/v1.2/books/$id/thumbnail/small",
+        ),
+        AtomLink(
+          type = "image/jpeg",
+          rel = "http://opds-spec.org/image",
+          href = "/opds/v1.2/books/$id/thumbnail",
+        ),
+        AtomLink(
+          type = analyzedMedia?.mediaType ?: "application/octet-stream",
+          rel = OPDS_ACQUISITION_REL,
+          href = "/opds/v1.2/books/$id/file/${fileName.urlPathSegment()}",
+        ),
+        pageStream,
+      ),
+  )
 }
 
-private suspend fun ApplicationCall.respondAtomBookItems(
-  title: String,
-  ids: List<BookId>,
-  catalog: CatalogReadRepository,
-  user: User,
-) {
-  val visible = ids.mapNotNull { catalog.findBookByIdOrNull(it, user.catalogAccess()) }
-  respondAtomBooks(title, title, visible.toPage(opdsPageRequest()))
+private fun CatalogBook.opdsPseAttributes(): List<AtomAttribute> =
+  buildList {
+    add(AtomAttribute("pse", OPDS_PSE_NAMESPACE, "count", (media?.pageCount ?: 0).toString()))
+    readProgress?.let {
+      add(AtomAttribute("pse", OPDS_PSE_NAMESPACE, "lastRead", it.page.toString()))
+      add(
+        AtomAttribute(
+          "pse",
+          OPDS_PSE_NAMESPACE,
+          "lastReadDate",
+          java.time.format.DateTimeFormatter
+            .ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
+            .withZone(java.time.ZoneOffset.UTC)
+            .format(Instant.ofEpochMilli(it.readAtMillis)),
+        ),
+      )
+    }
+  }
+
+private fun AtomLink.toAtomXml(call: ApplicationCall): String {
+  val absoluteHref =
+    if (href.startsWith("http://") || href.startsWith("https://")) href else call.opdsUrl(href)
+  val namespaceDeclarations =
+    attributes
+      .distinctBy { it.namespacePrefix to it.namespace }
+      .joinToString(separator = "") {
+        " xmlns:${it.namespacePrefix}=\"${it.namespace.xml()}\""
+      }
+  val extraAttributes =
+    attributes.joinToString(separator = "") {
+      " ${it.namespacePrefix}:${it.name}=\"${it.value.xml()}\""
+    }
+  return "<link$namespaceDeclarations type=\"${type.xml()}\" rel=\"${rel.xml()}\" " +
+    "href=\"${absoluteHref.xml()}\"$extraAttributes/>"
 }
+
+private fun List<Pair<String, String>>.toAtomQuery(): String =
+  takeIf(List<Pair<String, String>>::isNotEmpty)
+    ?.joinToString(prefix = "?", separator = "&") { (name, value) ->
+      "${name.urlQuery()}=${value.urlQuery()}"
+    }.orEmpty()
+
+private fun String.appendAtomPage(page: Int): String =
+  this + if ('?' in this) "&page=$page" else "?page=$page"
+
+private fun Long.toAtomTime(): String = Instant.ofEpochMilli(this).toString()
+
+private fun Long.toAtomHumanSize(): String {
+  if (this < 1_024) return "$this B"
+  val units = listOf("KiB", "MiB", "GiB", "TiB")
+  var value = toDouble()
+  var unit = -1
+  while (value >= 1_024 && unit < units.lastIndex) {
+    value /= 1_024
+    unit += 1
+  }
+  val formatted =
+    if (value >= 10 || value % 1.0 == 0.0) value.toLong().toString()
+    else java.lang.String.format(java.util.Locale.ROOT, "%.1f", value)
+  return "$formatted ${units[unit]}"
+}
+
+private fun String.urlPathSegment(): String =
+  java.net.URLEncoder.encode(this, Charsets.UTF_8).replace("+", "%20")
 
 private suspend fun ApplicationCall.respondOpdsThumbnail(
   catalog: CatalogReadRepository,
@@ -1583,18 +1820,18 @@ private fun List<ReadList>.visibleReadLists(
   }
 
 private fun SeriesCollection.toAtomEntry(): AtomEntry =
-  AtomEntry(
+  navigationAtom(
     id = id.value,
     title = name,
-    content = "Browse $name",
+    updatedAtMillis = updatedAtMillis,
     href = "/opds/v1.2/collections/${id.value}",
   )
 
 private fun ReadList.toAtomEntry(): AtomEntry =
-  AtomEntry(
+  navigationAtom(
     id = id.value,
     title = name,
-    content = summary,
+    updatedAtMillis = updatedAtMillis,
     href = "/opds/v1.2/readlists/${id.value}",
   )
 
@@ -1651,16 +1888,18 @@ private val OPDS_JSON =
     explicitNulls = false
     encodeDefaults = false
   }
-private val ATOM_CONTENT_TYPE =
-  ContentType.parse("application/atom+xml;profile=opds-catalog;kind=navigation")
-private val OPENSEARCH_CONTENT_TYPE =
-  ContentType.parse("application/opensearchdescription+xml")
+private val ATOM_CONTENT_TYPE = ContentType.parse("application/atom+xml")
 private val OPDS_V2_CONTENT_TYPE = ContentType.parse(OPDS_V2_MEDIA_TYPE)
 private val OPDS_AUTH_CONTENT_TYPE =
   ContentType.parse(OPDS_AUTH_MEDIA_TYPE)
 private const val ATOM_NAVIGATION_MEDIA_TYPE =
   "application/atom+xml;profile=opds-catalog;kind=navigation"
+private const val ATOM_ACQUISITION_MEDIA_TYPE =
+  "application/atom+xml;profile=opds-catalog;kind=acquisition"
 private const val OPDS_V2_MEDIA_TYPE = "application/opds+json"
 private const val OPDS_AUTH_MEDIA_TYPE = "application/opds-authentication+json"
 private const val OPDS_SUBSECTION_REL = "subsection"
 private const val OPDS_ACQUISITION_REL = "http://opds-spec.org/acquisition"
+private const val OPDS_PSE_STREAM_REL = "http://vaemendis.net/opds-pse/stream"
+private const val OPDS_PSE_NAMESPACE = "http://vaemendis.net/opds-pse/ns"
+private val OPDS_PSE_SUPPORTED_MEDIA_TYPES = setOf("image/jpeg", "image/png", "image/gif")

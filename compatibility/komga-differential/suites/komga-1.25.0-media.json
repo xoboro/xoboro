@@ -89,6 +89,18 @@
       }
     },
     {
+      "name": "synthetic OPDS v1 archive acquisition",
+      "path": "/opds/v1.2/books/{BOOK_ID}/file/001.cbz",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "BINARY",
+        "headers": [
+          "Content-Disposition",
+          "Content-Length"
+        ]
+      }
+    },
+    {
       "name": "synthetic original page",
       "path": "/api/v1/books/{BOOK_ID}/pages/1",
       "pathVariables": ["BOOK_ID"],

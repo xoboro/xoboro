@@ -14,17 +14,22 @@ Run the committed anonymous suite:
 
 The CI workflow also builds a two-page synthetic CBZ, claims both fresh
 servers, scans the same mounted library, and runs
-`komga-1.25.0-catalog.json` and `komga-1.25.0-media.json`. The catalog suite
+`komga-1.25.0-catalog.json`, `komga-1.25.0-opds-v1.json`, and
+`komga-1.25.0-media.json`. The catalog suite
 keeps generated identifiers and timestamps out of comparison while checking
 library settings, page envelopes, metadata, media analysis, natural numbering,
 source paths, and alphabetical groups. The media suite compares page
 inventory, manifests, archive and image bytes, content types, lengths, download
-names, conversion, thumbnails, and unsupported raw-page status.
+names, conversion, thumbnails, OPDS acquisition, and unsupported raw-page
+status. The OPDS v1 suite compares canonical Atom/OpenSearch XML across every
+feed category, filtering, paging, navigation, acquisition metadata, and
+missing-resource status.
 
 Each case defines a method, origin-relative path, optional headers/body, and a
 comparison policy. Status and normalized content type are compared by default.
-Additional headers are opt-in. JSON is compared structurally, text uses
-normalized line endings, and binary content uses SHA-256. `bodyMode: "NONE"`
+Additional headers are opt-in. JSON and XML are compared structurally, text
+uses normalized line endings, and binary content uses SHA-256. XML parsing
+rejects DTDs and external entities. `bodyMode: "NONE"`
 compares only status and configured headers for error bodies whose text is not
 part of the certified contract.
 
@@ -40,6 +45,15 @@ exactly one object key or array index:
 
 Every exception must be narrow and reviewed. Do not ignore all identifiers,
 timestamps, or nested payloads to make a mismatch pass.
+
+`ignoreXmlPaths` uses the same slash-separated wildcard form. Attribute
+segments start with `@`:
+
+```json
+{
+  "ignoreXmlPaths": ["/feed/updated", "/feed/link/@href"]
+}
+```
 
 For authenticated suites, keep credentials out of files and command history:
 

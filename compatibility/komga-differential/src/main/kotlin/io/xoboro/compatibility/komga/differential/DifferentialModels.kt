@@ -67,9 +67,11 @@ data class ComparisonPolicy(
   val headers: Set<String> = emptySet(),
   val ignoreJsonPaths: Set<String> = emptySet(),
   val unorderedJsonPaths: Set<String> = emptySet(),
+  val ignoreXmlPaths: Set<String> = emptySet(),
 ) {
   init {
     (ignoreJsonPaths + unorderedJsonPaths).forEach(JsonPathPattern::validate)
+    ignoreXmlPaths.forEach(XmlPathPattern::validate)
   }
 }
 
@@ -78,6 +80,7 @@ enum class BodyMode {
   AUTO,
   NONE,
   JSON,
+  XML,
   TEXT,
   BINARY,
 }
