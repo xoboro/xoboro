@@ -80,6 +80,7 @@ data class BookCatalogQuery(
 data class SeriesCatalogQuery(
   val libraryIds: Set<LibraryId> = emptySet(),
   val fullTextSearch: String? = null,
+  val regexSearch: SeriesRegexSearch? = null,
   val deleted: Boolean? = false,
   val oneshot: Boolean? = null,
   val publishers: Set<String> = emptySet(),
@@ -87,6 +88,16 @@ data class SeriesCatalogQuery(
   val genres: Set<String> = emptySet(),
   val tags: Set<String> = emptySet(),
   val condition: CatalogSearchCondition? = null,
+)
+
+enum class SeriesRegexSearchField {
+  TITLE,
+  TITLE_SORT,
+}
+
+data class SeriesRegexSearch(
+  val pattern: String,
+  val field: SeriesRegexSearchField,
 )
 
 enum class CatalogSearchField {

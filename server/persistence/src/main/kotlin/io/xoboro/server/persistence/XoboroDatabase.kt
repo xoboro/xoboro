@@ -27,12 +27,12 @@ data class DatabaseConfig(
 
 class XoboroDatabase private constructor(
   private val hikariDataSource: HikariDataSource,
+  val dataSource: DataSource,
   private val databaseFileLock: AutoCloseable,
   val path: Path,
   val migrationResult: MigrateResult,
 ) : AutoCloseable {
-  val dataSource: DataSource = hikariDataSource
-  val dsl: DSLContext = DSL.using(hikariDataSource, SQLDialect.SQLITE)
+  val dsl: DSLContext = DSL.using(dataSource, SQLDialect.SQLITE)
   val backups: DatabaseBackupManager = DatabaseBackupManager(this, path)
 
   fun <T> transaction(block: (DSLContext) -> T): T =
@@ -86,10 +86,11 @@ class XoboroDatabase private constructor(
               isAutoCommit = true
             },
           )
+        val dataSource = SqliteFunctionDataSource(hikariDataSource)
         val migrationResult =
           try {
             Flyway.configure()
-              .dataSource(hikariDataSource)
+              .dataSource(dataSource)
               .locations("classpath:db/migration")
               .load()
               .migrate()
@@ -99,6 +100,7 @@ class XoboroDatabase private constructor(
           }
         XoboroDatabase(
           hikariDataSource = hikariDataSource,
+          dataSource = dataSource,
           databaseFileLock = databaseFileLock,
           path = absolutePath,
           migrationResult = migrationResult,

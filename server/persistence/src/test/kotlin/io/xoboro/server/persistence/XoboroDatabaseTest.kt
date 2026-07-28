@@ -88,6 +88,38 @@ class XoboroDatabaseTest {
   }
 
   @Test
+  fun `registers case insensitive regular expressions on every pooled connection`() {
+    XoboroDatabase
+      .open(
+        DatabaseConfig(
+          path = tempDirectory.resolve("regexp.sqlite"),
+          maximumPoolSize = 3,
+        ),
+      ).use { database ->
+        val connections = List(3) { database.dataSource.connection }
+        try {
+          connections.forEach { connection ->
+            connection.prepareStatement("SELECT ? REGEXP ?").use { statement ->
+              statement.setString(1, "TheAlpha")
+              statement.setString(2, "^the")
+              statement.executeQuery().use { result ->
+                assertTrue(result.next())
+                assertEquals(1, result.getInt(1))
+              }
+            }
+          }
+          assertFailsWith<SQLException> {
+            connections.first().createStatement().use { statement ->
+              statement.executeQuery("SELECT 'Synthetic' REGEXP '['")
+            }
+          }
+        } finally {
+          connections.asReversed().forEach(AutoCloseable::close)
+        }
+      }
+  }
+
+  @Test
   fun `committed rows survive closing and reopening the database`() {
     val path = tempDirectory.resolve("restart.sqlite")
 

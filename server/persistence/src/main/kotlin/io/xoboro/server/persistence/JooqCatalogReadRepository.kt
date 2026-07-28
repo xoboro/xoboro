@@ -14,6 +14,7 @@ import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.SeriesRegexSearchField
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMediaRepository
 import io.xoboro.core.domain.BookMetadataRepository
@@ -466,6 +467,15 @@ class JooqCatalogReadRepository(
           """.trimIndent()
         bindings += match
       }
+    }
+    query.regexSearch?.let {
+      val column =
+        when (it.field) {
+          SeriesRegexSearchField.TITLE -> "sm.title"
+          SeriesRegexSearchField.TITLE_SORT -> "sm.title_sort"
+        }
+      parts += "$column REGEXP ?"
+      bindings += it.pattern
     }
     query.condition?.let {
       val condition = structuredSearch.series(it, access)
