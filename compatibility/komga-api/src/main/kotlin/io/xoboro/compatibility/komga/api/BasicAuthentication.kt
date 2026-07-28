@@ -1,8 +1,9 @@
 package io.xoboro.compatibility.komga.api
 
-import io.ktor.http.HttpStatusCode
-import io.ktor.http.HttpHeaders
 import io.ktor.http.Cookie
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.install
@@ -10,10 +11,12 @@ import io.ktor.util.AttributeKey
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.AuthenticationFailedCause
 import io.ktor.server.auth.UserPasswordCredential
-import io.ktor.server.auth.basic
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
+import io.ktor.server.request.path
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.AuthenticationRequestDetails
@@ -23,6 +26,10 @@ import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ApiKey
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
+import java.nio.charset.StandardCharsets
+import java.util.Base64
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 fun Application.installKomgaBasicAuthentication(
   users: UserLifecycle,
@@ -32,28 +39,44 @@ fun Application.installKomgaBasicAuthentication(
   rememberMe: RememberMeTokenService? = null,
 ) {
   install(Authentication) {
-    basic(KOMGA_BASIC_AUTHENTICATION) {
-      realm = KOMGA_BASIC_REALM
-      validate { credentials ->
-        val principal = credentials.toPrincipalOrNull(users)
-        if (principal == null) {
-          authenticationActivities?.recordFailure(
-            source = AUTHENTICATION_SOURCE_PASSWORD,
-            details = authenticationRequestDetails(),
-            error = BAD_CREDENTIALS_ERROR,
-            user = users.findByEmailIgnoreCaseOrNull(credentials.name),
-            email = credentials.name,
-          )
-        } else {
-          authenticationActivities?.recordSuccess(
-            user = principal.user,
-            source = AUTHENTICATION_SOURCE_PASSWORD,
-            details = authenticationRequestDetails(),
-          )
-          sessions?.let { issueSession(principal.user, it) }
-          issueRememberMeIfRequested(principal.user, rememberMe)
+    provider(KOMGA_BASIC_AUTHENTICATION) {
+      authenticate { context ->
+        val credentials = context.call.basicCredentialsOrNull()
+        val principal = credentials?.toPrincipalOrNull(users)
+        when {
+          principal != null -> {
+            authenticationActivities?.recordSuccess(
+              user = principal.user,
+              source = AUTHENTICATION_SOURCE_PASSWORD,
+              details = context.call.authenticationRequestDetails(),
+            )
+            sessions?.let { context.call.issueSession(principal.user, it) }
+            context.call.issueRememberMeIfRequested(principal.user, rememberMe)
+            context.principal(KOMGA_BASIC_AUTHENTICATION, principal)
+          }
+          else -> {
+            credentials?.let {
+              authenticationActivities?.recordFailure(
+                source = AUTHENTICATION_SOURCE_PASSWORD,
+                details = context.call.authenticationRequestDetails(),
+                error = BAD_CREDENTIALS_ERROR,
+                user = users.findByEmailIgnoreCaseOrNull(it.name),
+                email = it.name,
+              )
+            }
+            context.challenge(
+              KOMGA_BASIC_AUTHENTICATION,
+              if (credentials == null) {
+                AuthenticationFailedCause.NoCredentials
+              } else {
+                AuthenticationFailedCause.InvalidCredentials
+              },
+            ) { challenge, call ->
+              call.respondKomgaAuthenticationChallenge()
+              challenge.complete()
+            }
+          }
         }
-        principal
       }
     }
     provider(KOMGA_API_KEY_AUTHENTICATION) {
@@ -71,13 +94,10 @@ fun Application.installKomgaBasicAuthentication(
                 error = BAD_CREDENTIALS_ERROR,
                 apiKeyFingerprint = apiKeys?.fingerprint(rawToken),
               )
-              context.challenge(
+              context.error(
                 KOMGA_API_KEY_AUTHENTICATION,
                 AuthenticationFailedCause.InvalidCredentials,
-              ) { challenge, call ->
-                call.respond(HttpStatusCode.Unauthorized)
-                challenge.complete()
-              }
+              )
             } else {
               authenticationActivities?.recordSuccess(
                 user = principal.user,
@@ -108,13 +128,10 @@ fun Application.installKomgaBasicAuthentication(
           else -> {
             val user = sessions?.authenticate(rawToken)
             if (user == null) {
-              context.challenge(
+              context.error(
                 KOMGA_SESSION_AUTHENTICATION,
                 AuthenticationFailedCause.InvalidCredentials,
-              ) { challenge, call ->
-                call.respond(HttpStatusCode.Unauthorized)
-                challenge.complete()
-              }
+              )
             } else {
               context.principal(KOMGA_SESSION_AUTHENTICATION, KomgaPrincipal(user))
             }
@@ -134,14 +151,11 @@ fun Application.installKomgaBasicAuthentication(
           else -> {
             val user = rememberMe?.authenticate(rawToken)
             if (user == null) {
-              context.challenge(
+              context.call.expireRememberMeCookie()
+              context.error(
                 KOMGA_REMEMBER_ME_AUTHENTICATION,
                 AuthenticationFailedCause.InvalidCredentials,
-              ) { challenge, call ->
-                call.expireRememberMeCookie()
-                call.respond(HttpStatusCode.Unauthorized)
-                challenge.complete()
-              }
+              )
             } else {
               authenticationActivities?.recordSuccess(
                 user = user,
@@ -178,6 +192,40 @@ fun Application.installKomgaBasicAuthentication(
         }
       }
     }
+  }
+}
+
+private fun ApplicationCall.basicCredentialsOrNull(): UserPasswordCredential? {
+  val authorization = request.header(HttpHeaders.Authorization) ?: return null
+  val parts = authorization.split(' ', limit = 2)
+  if (parts.size != 2 || !parts[0].equals("Basic", ignoreCase = true)) return null
+  val decoded =
+    runCatching {
+      String(Base64.getDecoder().decode(parts[1]), StandardCharsets.UTF_8)
+    }.getOrNull() ?: return null
+  val separator = decoded.indexOf(':')
+  if (separator < 0) return null
+  return UserPasswordCredential(
+    name = decoded.substring(0, separator),
+    password = decoded.substring(separator + 1),
+  )
+}
+
+private suspend fun ApplicationCall.respondKomgaAuthenticationChallenge() {
+  response.header(HttpHeaders.WWWAuthenticate, """Basic realm="$KOMGA_BASIC_REALM"""")
+  if (request.path().contains("/opds/v2/")) {
+    val authenticationUrl = opdsUrl("/opds/v2/auth")
+    response.header(
+      HttpHeaders.Link,
+      """<$authenticationUrl>; rel="$OPDS_AUTH_DOCUMENT_REL"; type="$OPDS_AUTH_MEDIA_TYPE"""",
+    )
+    respondText(
+      text = KOMGA_AUTH_JSON.encodeToString(opdsAuthenticationDocument()),
+      contentType = ContentType.parse("$OPDS_AUTH_MEDIA_TYPE;charset=UTF-8"),
+      status = HttpStatusCode.Unauthorized,
+    )
+  } else {
+    respondError(HttpStatusCode.Unauthorized, HttpStatusCode.Unauthorized.description)
   }
 }
 
@@ -283,4 +331,10 @@ const val AUTHENTICATION_SOURCE_API_KEY: String = "ApiKey"
 const val AUTHENTICATION_SOURCE_PASSWORD: String = "Password"
 const val AUTHENTICATION_SOURCE_REMEMBER_ME: String = "RememberMe"
 private const val BAD_CREDENTIALS_ERROR: String = "Bad credentials"
+private const val OPDS_AUTH_DOCUMENT_REL: String = "http://opds-spec.org/auth/document"
+private val KOMGA_AUTH_JSON =
+  Json {
+    explicitNulls = false
+    encodeDefaults = false
+  }
 private val ISSUED_SESSION_TOKEN = AttributeKey<String>("xoboro-issued-session-token")

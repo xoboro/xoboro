@@ -230,6 +230,22 @@
           "/publications/*/images/*/properties/authenticate/href"
         ]
       }
+    },
+    {
+      "name": "malformed REST JSON",
+      "method": "POST",
+      "path": "/api/v2/users",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"email\":",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/timestamp",
+          "/message"
+        ]
+      }
     }
   ]
 }
