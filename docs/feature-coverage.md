@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session authentication and the error boundary are implemented; add catalog, administration, media, pagination, events, and OpenAPI without Komga DTOs |
+| Xoboro-native HTTP API | PARTIAL | Setup/session and read-only library/series/media-item discovery are implemented; add administration commands, artwork/content delivery, progress, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
@@ -36,7 +36,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Local library CRUD and root safety | READY | Native API and UI |
+| Local library CRUD and root safety | READY | Native read discovery is implemented; add native administration commands and UI |
 | Startup, scheduled, manual, deep, and incremental scans | READY | Large-library acceptance and native progress reporting |
 | Unavailable-storage deletion protection | READY | Native status and recovery workflow |
 | Add, change, move, delete, trash, and empty-trash reconciliation | READY | Native API/UI; no artificial restore API requirement |
@@ -69,7 +69,7 @@ Statuses:
 | ISBN barcode detection | READY | Native configuration and diagnostics |
 | Manual metadata, field locks, and bulk updates | READY | Native API/UI |
 | Full-text search | READY | Native query contract |
-| Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | PARTIAL | Define native filter grammar and close uncommon combination/error cases |
+| Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | PARTIAL | Native core search/filter/sort/on-deck/keep-reading queries are implemented; add facets, named discovery feeds, and uncommon combination/error cases |
 | Collections and manual ordering | PARTIAL | Native API/UI and generated artwork |
 | Read lists, ComicRack CBL import, and ordering | READY | Native API/UI |
 | Historical activity | PARTIAL | Emit all native lifecycle/security/maintenance events and add retention controls |
