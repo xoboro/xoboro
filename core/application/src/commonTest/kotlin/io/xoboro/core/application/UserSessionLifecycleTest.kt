@@ -43,8 +43,30 @@ class UserSessionLifecycleTest {
     assertNull(sessions.findByTokenDigestOrNull("hash:unique"))
 
     now = 1_100
-    assertEquals(1, lifecycle.deleteExpired())
+    assertEquals(0, lifecycle.deleteExpired())
     assertEquals(false, lifecycle.invalidate("missing"))
+  }
+
+  @Test
+  fun `does not revoke a session extended after a stale read`() {
+    val user = syntheticUser()
+    val sessions = InMemorySessionRepository()
+    sessions.insertIfAbsent(session("hash:token", user.id, expiresAtMillis = 100))
+    sessions.afterNextFind = {
+      sessions.replace(session("hash:token", user.id, expiresAtMillis = 500))
+    }
+    val lifecycle =
+      UserSessionLifecycle(
+        users = SingleUserRepository(user),
+        sessions = sessions,
+        tokenEncoder = TokenEncoder { "hash:$it" },
+        plainTokenFactory = { "unused" },
+        currentTimeMillis = { 100 },
+        inactivityTimeoutMillis = 500,
+      )
+
+    assertEquals(user, lifecycle.authenticate("token"))
+    assertEquals(600, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
   }
 
   private fun syntheticUser(): User =
@@ -101,9 +123,17 @@ class UserSessionLifecycleTest {
 
   private class InMemorySessionRepository : UserSessionRepository {
     private val sessions = mutableMapOf<String, UserSession>()
+    var afterNextFind: (() -> Unit)? = null
 
-    override fun findByTokenDigestOrNull(tokenDigest: String): UserSession? =
-      sessions[tokenDigest]
+    override fun findByTokenDigestOrNull(tokenDigest: String): UserSession? {
+      val found = sessions[tokenDigest]
+      afterNextFind?.also { afterNextFind = null }?.invoke()
+      return found
+    }
+
+    fun replace(session: UserSession) {
+      sessions[session.tokenDigest] = session
+    }
 
     override fun insertIfAbsent(session: UserSession): Boolean {
       if (session.tokenDigest in sessions) return false
@@ -111,8 +141,19 @@ class UserSessionLifecycleTest {
       return true
     }
 
-    override fun update(session: UserSession) {
-      if (session.tokenDigest in sessions) sessions[session.tokenDigest] = session
+    override fun touchIfActive(
+      tokenDigest: String,
+      accessedAtMillis: Long,
+      expiresAtMillis: Long,
+    ): Boolean {
+      val current = sessions[tokenDigest] ?: return false
+      if (current.expiresAtMillis <= accessedAtMillis) return false
+      sessions[tokenDigest] =
+        current.copy(
+          lastAccessedAtMillis = maxOf(current.lastAccessedAtMillis, accessedAtMillis),
+          expiresAtMillis = maxOf(current.expiresAtMillis, expiresAtMillis),
+        )
+      return true
     }
 
     override fun deleteByTokenDigest(tokenDigest: String): Boolean =

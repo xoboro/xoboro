@@ -58,6 +58,7 @@ class XoboroDatabaseTest {
             "user_library_sharing",
             "user_sharing_label",
             "user_api_key",
+            "user_session",
             "authentication_activity",
             "server_setting",
             "client_setting_global",
@@ -83,7 +84,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(25, database.migrationResult.migrationsExecuted)
+      assertEquals(26, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -204,7 +205,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(24, database.migrationResult.migrationsExecuted)
+      assertEquals(25, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
