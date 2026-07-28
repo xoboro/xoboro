@@ -12,13 +12,15 @@ Run the committed anonymous suite:
 --suite compatibility/komga-differential/suites/komga-1.25.0-anonymous.json"
 ```
 
-The CI workflow also builds a two-page synthetic CBZ, claims both fresh
-servers, scans the same mounted library, and runs
+The CI workflow also builds two regular two-page synthetic CBZs and one
+standalone two-page synthetic CBZ, claims both fresh servers, scans the same
+mounted library, and runs
 `komga-1.25.0-catalog.json`, `komga-1.25.0-opds-v1.json`, and
 `komga-1.25.0-media.json`. The catalog suite
 keeps generated identifiers and timestamps out of comparison while checking
 library settings, page envelopes, metadata, media analysis, natural numbering,
-source paths, and alphabetical groups. The media suite compares page
+sibling navigation, one-shot projection, source paths, and alphabetical
+groups. The media suite compares page
 inventory, manifests, archive and image bytes, content types, lengths, download
 names, conversion, thumbnails, OPDS acquisition, and unsupported raw-page
 status. The OPDS v1 suite compares canonical Atom/OpenSearch XML across every
@@ -46,12 +48,13 @@ exactly one object key or array index:
 Every exception must be narrow and reviewed. Do not ignore all identifiers,
 timestamps, or nested payloads to make a mismatch pass.
 
-`ignoreXmlPaths` uses the same slash-separated wildcard form. Attribute
-segments start with `@`:
+`ignoreXmlPaths` and `unorderedXmlPaths` use the same slash-separated wildcard
+form. Attribute segments start with `@`:
 
 ```json
 {
-  "ignoreXmlPaths": ["/feed/updated", "/feed/link/@href"]
+  "ignoreXmlPaths": ["/feed/updated", "/feed/link/@href"],
+  "unorderedXmlPaths": ["/feed/entry"]
 }
 ```
 

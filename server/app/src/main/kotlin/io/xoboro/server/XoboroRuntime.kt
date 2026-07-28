@@ -104,10 +104,11 @@ import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
 import io.xoboro.server.security.SpringCompatibleRememberMeTokenService
 import io.xoboro.server.metadata.ComicInfoMetadataProvider
+import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.metadata.EpubMetadataProvider
 import io.xoboro.server.metadata.IsbnBarcodeMetadataProvider
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
-import io.xoboro.server.metadata.ComicRackReadListParser
+import io.xoboro.server.metadata.OneShotSeriesMetadataProvider
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
@@ -616,6 +617,7 @@ class XoboroRuntime private constructor(
                 comicInfoMetadataProvider,
                 epubMetadataProvider,
                 MylarSeriesMetadataProvider(listOf(LocalSourceSidecarAccess())),
+                OneShotSeriesMetadataProvider(bookMetadata),
               ),
             currentTimeMillis = System::currentTimeMillis,
             eventPublisher = sseBridge::publish,
