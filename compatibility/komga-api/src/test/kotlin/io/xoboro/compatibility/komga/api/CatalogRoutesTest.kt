@@ -21,9 +21,14 @@ import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation as ServerContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
-import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.BookContentAccess
+import io.xoboro.core.application.CatalogAccess
+import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogPage
+import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.OrganizationLifecycle
@@ -32,6 +37,8 @@ import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.SequentialReadProgressLifecycle
+import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
@@ -237,6 +244,7 @@ class CatalogRoutesTest {
           currentTimeMillis = { 10 },
         )
       val catalog = JooqCatalogReadRepository(database)
+      val organizationCatalog = CountingCatalogReadRepository(catalog)
       val content = SyntheticBookContentAccess()
       val pageHashes = JooqPageHashRepository(database)
       val pageHashLifecycle = PageHashLifecycle(pageHashes) { 40 }
@@ -284,7 +292,7 @@ class CatalogRoutesTest {
             komgaReadProgressRoutes(catalog, progress)
             komgaTachiyomiProgressRoutes(sequentialProgress)
             komgaWebPubRoutes(catalog, progress, content)
-            komgaOrganizationRoutes(collections, readLists, organizations, catalog)
+            komgaOrganizationRoutes(collections, readLists, organizations, organizationCatalog)
             komgaArchiveRoutes(catalog, readLists, content)
           }
         }
@@ -637,13 +645,7 @@ class CatalogRoutesTest {
             sharedLibraryIds = setOf(LibraryId("library-1")),
           ),
         )
-        val filteredCollection =
-          client
-            .get("/api/v1/collections/${collection.id}") {
-              basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
-            }.body<KomgaCollectionDto>()
-        assertEquals(listOf("series-1"), filteredCollection.seriesIds)
-        assertTrue(filteredCollection.filtered)
+        verifyBatchedCollectionVisibility(client, organizationCatalog, collection.id)
 
         val readList =
           client
@@ -661,6 +663,7 @@ class CatalogRoutesTest {
             }.body<KomgaReadListDto>()
         assertEquals(listOf("book-2", "book-1"), readList.bookIds)
         verifyReadListMemberFilters(client, readList.id)
+        verifyBatchedReadListVisibility(client, organizationCatalog, readList.id)
         val initialReadListProgress =
           client
             .get("/api/v1/readlists/${readList.id}/read-progress/tachiyomi") {
@@ -700,13 +703,7 @@ class CatalogRoutesTest {
               basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
             }.body<KomgaPageDto<KomgaBookDto>>().content.map(KomgaBookDto::id),
         )
-        assertEquals(
-          "book-1",
-          client
-            .get("/api/v1/readlists/${readList.id}/books/book-2/next") {
-              basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
-            }.body<KomgaBookDto>().id,
-        )
+        verifyBatchedReadListSibling(client, organizationCatalog, readList.id)
         assertEquals(
           "book-2",
           client
@@ -1165,6 +1162,64 @@ class CatalogRoutesTest {
     )
   }
 
+  private suspend fun verifyBatchedCollectionVisibility(
+    client: HttpClient,
+    catalog: CountingCatalogReadRepository,
+    collectionId: String,
+  ) {
+    catalog.reset()
+    val detail =
+      client
+        .get("/api/v1/collections/$collectionId") {
+          basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+        }.body<KomgaCollectionDto>()
+    assertEquals(listOf("series-1"), detail.seriesIds)
+    assertTrue(detail.filtered)
+    assertEquals(1, catalog.findSeriesCalls)
+
+    catalog.reset()
+    val page =
+      client
+        .get("/api/v1/collections?search=Synthetic") {
+          basicAuth(RESTRICTED_EMAIL, RESTRICTED_PASSWORD)
+          parameter("library_id", "library-1")
+        }.body<KomgaPageDto<KomgaCollectionDto>>()
+    assertEquals(listOf(collectionId), page.content.map(KomgaCollectionDto::id))
+    assertEquals(listOf("series-1"), page.content.single().seriesIds)
+    assertEquals(1, catalog.findSeriesCalls)
+  }
+
+  private suspend fun verifyBatchedReadListVisibility(
+    client: HttpClient,
+    catalog: CountingCatalogReadRepository,
+    readListId: String,
+  ) {
+    catalog.reset()
+    val page =
+      client
+        .get("/api/v1/readlists?search=Synthetic") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaPageDto<KomgaReadListDto>>()
+    assertEquals(listOf(readListId), page.content.map(KomgaReadListDto::id))
+    assertEquals(listOf("book-2", "book-1"), page.content.single().bookIds)
+    assertEquals(1, catalog.findBooksCalls)
+  }
+
+  private suspend fun verifyBatchedReadListSibling(
+    client: HttpClient,
+    catalog: CountingCatalogReadRepository,
+    readListId: String,
+  ) {
+    catalog.reset()
+    val next =
+      client
+        .get("/api/v1/readlists/$readListId/books/book-2/next") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<KomgaBookDto>()
+    assertEquals("book-1", next.id)
+    assertEquals(1, catalog.findBooksCalls)
+  }
+
   private suspend fun verifyReadListMemberFilters(
     client: HttpClient,
     readListId: String,
@@ -1404,6 +1459,38 @@ class CatalogRoutesTest {
         }
       }
     }
+
+  private class CountingCatalogReadRepository(
+    private val delegate: CatalogReadRepository,
+  ) : CatalogReadRepository by delegate {
+    var findBooksCalls: Int = 0
+      private set
+    var findSeriesCalls: Int = 0
+      private set
+
+    override fun findBooks(
+      query: BookCatalogQuery,
+      access: CatalogAccess,
+      page: CatalogPageRequest,
+    ): CatalogPage<CatalogBook> {
+      findBooksCalls += 1
+      return delegate.findBooks(query, access, page)
+    }
+
+    override fun findSeries(
+      query: SeriesCatalogQuery,
+      access: CatalogAccess,
+      page: CatalogPageRequest,
+    ): CatalogPage<CatalogSeries> {
+      findSeriesCalls += 1
+      return delegate.findSeries(query, access, page)
+    }
+
+    fun reset() {
+      findBooksCalls = 0
+      findSeriesCalls = 0
+    }
+  }
 
   private class SyntheticBookContentAccess : BookContentAccess {
     var closedStreams: Int = 0

@@ -61,6 +61,8 @@ private val READ_LIST_MEMBER_FILTERS =
     LegacyBookFilter.TAG,
   )
 
+private const val ORGANIZATION_VISIBILITY_BATCH_SIZE = 500
+
 fun Route.komgaOrganizationRoutes(
   collections: SeriesCollectionRepository,
   readLists: ReadListRepository,
@@ -80,9 +82,12 @@ fun Route.komgaOrganizationRoutes(
         val requestedLibraries = call.queryLibraryIds()
         val search = call.request.queryParameters["search"]?.trim().orEmpty()
         val visible =
-          collections
-            .findAll()
-            .mapNotNull { it.visibleTo(principal.user, catalog, requestedLibraries) }
+          visibleCollections(
+            collections = collections.findAll(),
+            user = principal.user,
+            catalog = catalog,
+            requestedLibraries = requestedLibraries,
+          )
             .filter { search.isEmpty() || it.collection.name.contains(search, ignoreCase = true) }
         val page = visible.paginate(call.catalogPageRequest())
         call.respond(page.toPageDto(page.content.map(VisibleCollection::toDto)))
@@ -108,7 +113,9 @@ fun Route.komgaOrganizationRoutes(
         val visible =
           collections
             .findByIdOrNull(CollectionId(requireNotNull(call.parameters["id"])))
-            ?.visibleTo(principal.user, catalog)
+            ?.let {
+              visibleCollections(listOf(it), principal.user, catalog).singleOrNull()
+            }
         if (visible == null) call.respond(HttpStatusCode.NotFound) else call.respond(visible.toDto())
       }
       patch("/{id}") {
@@ -187,9 +194,11 @@ fun Route.komgaOrganizationRoutes(
         return@get
       }
       call.respond(
-        collections
-          .findAllBySeriesId(seriesId)
-          .mapNotNull { it.visibleTo(principal.user, catalog) }
+        visibleCollections(
+          collections = collections.findAllBySeriesId(seriesId),
+          user = principal.user,
+          catalog = catalog,
+        )
           .map(VisibleCollection::toDto),
       )
     }
@@ -200,9 +209,12 @@ fun Route.komgaOrganizationRoutes(
         val requestedLibraries = call.queryLibraryIds()
         val search = call.request.queryParameters["search"]?.trim().orEmpty()
         val visible =
-          readLists
-            .findAll()
-            .mapNotNull { it.visibleTo(principal.user, catalog, requestedLibraries) }
+          visibleReadLists(
+            readLists = readLists.findAll(),
+            user = principal.user,
+            catalog = catalog,
+            requestedLibraries = requestedLibraries,
+          )
             .filter { search.isEmpty() || it.readList.name.contains(search, ignoreCase = true) }
         val page = visible.paginate(call.catalogPageRequest())
         call.respond(page.toPageDto(page.content.map(VisibleReadList::toDto)))
@@ -229,7 +241,9 @@ fun Route.komgaOrganizationRoutes(
         val visible =
           readLists
             .findByIdOrNull(ReadListId(requireNotNull(call.parameters["id"])))
-            ?.visibleTo(principal.user, catalog)
+            ?.let {
+              visibleReadLists(listOf(it), principal.user, catalog).singleOrNull()
+            }
         if (visible == null) call.respond(HttpStatusCode.NotFound) else call.respond(visible.toDto())
       }
       patch("/{id}") {
@@ -312,9 +326,11 @@ fun Route.komgaOrganizationRoutes(
         return@get
       }
       call.respond(
-        readLists
-          .findAllByBookId(bookId)
-          .mapNotNull { it.visibleTo(principal.user, catalog) }
+        visibleReadLists(
+          readLists = readLists.findAllByBookId(bookId),
+          user = principal.user,
+          catalog = catalog,
+        )
           .map(VisibleReadList::toDto),
       )
     }
@@ -394,33 +410,87 @@ private data class VisibleReadList(
     )
 }
 
-private fun SeriesCollection.visibleTo(
+private fun visibleCollections(
+  collections: List<SeriesCollection>,
   user: User,
   catalog: CatalogReadRepository,
   requestedLibraries: Set<LibraryId> = emptySet(),
-): VisibleCollection? {
-  val visible =
-    seriesIds
-      .mapNotNull { catalog.findSeriesByIdOrNull(it, user.catalogAccess()) }
-      .filter { requestedLibraries.isEmpty() || it.series.libraryId in requestedLibraries }
-  return VisibleCollection(this, visible).takeIf {
-    visible.isNotEmpty() ||
-      (user.isAdmin && requestedLibraries.isEmpty() && seriesIds.isEmpty())
+): List<VisibleCollection> {
+  val visibleById =
+    collections
+      .chunked(ORGANIZATION_VISIBILITY_BATCH_SIZE)
+      .flatMap { batch ->
+        val condition =
+          organizationMembershipCondition(
+            field = CatalogSearchField.COLLECTION_ID,
+            values = batch.map { it.id.value },
+          ) ?: return@flatMap emptyList()
+        catalog
+          .findSeries(
+            query =
+              SeriesCatalogQuery(
+                libraryIds = requestedLibraries,
+                deleted = null,
+                condition = condition,
+              ),
+            access = user.catalogAccess(),
+            page = CatalogPageRequest(unpaged = true),
+          ).content
+      }.associateBy { it.series.id }
+  return collections.mapNotNull { collection ->
+    val visible = collection.seriesIds.mapNotNull(visibleById::get)
+    VisibleCollection(collection, visible).takeIf {
+      visible.isNotEmpty() ||
+        (user.isAdmin && requestedLibraries.isEmpty() && collection.seriesIds.isEmpty())
+    }
   }
 }
 
-private fun ReadList.visibleTo(
+private fun visibleReadLists(
+  readLists: List<ReadList>,
   user: User,
   catalog: CatalogReadRepository,
   requestedLibraries: Set<LibraryId> = emptySet(),
-): VisibleReadList? {
-  val visible =
-    bookIds
-      .mapNotNull { catalog.findBookByIdOrNull(it, user.catalogAccess()) }
-      .filter { requestedLibraries.isEmpty() || it.book.libraryId in requestedLibraries }
-  return VisibleReadList(this, visible).takeIf {
-    visible.isNotEmpty() ||
-      (user.isAdmin && requestedLibraries.isEmpty() && bookIds.isEmpty())
+): List<VisibleReadList> {
+  val visibleById =
+    readLists
+      .chunked(ORGANIZATION_VISIBILITY_BATCH_SIZE)
+      .flatMap { batch ->
+        val condition =
+          organizationMembershipCondition(
+            field = CatalogSearchField.READ_LIST_ID,
+            values = batch.map { it.id.value },
+          ) ?: return@flatMap emptyList()
+        catalog
+          .findBooks(
+            query =
+              BookCatalogQuery(
+                libraryIds = requestedLibraries,
+                deleted = null,
+                condition = condition,
+              ),
+            access = user.catalogAccess(),
+            page = CatalogPageRequest(unpaged = true),
+          ).content
+      }.associateBy { it.book.id }
+  return readLists.mapNotNull { readList ->
+    val visible = readList.bookIds.mapNotNull(visibleById::get)
+    VisibleReadList(readList, visible).takeIf {
+      visible.isNotEmpty() ||
+        (user.isAdmin && requestedLibraries.isEmpty() && readList.bookIds.isEmpty())
+    }
+  }
+}
+
+private fun organizationMembershipCondition(
+  field: CatalogSearchField,
+  values: List<String>,
+): CatalogSearchCondition? {
+  val predicates = values.map { membershipCondition(field, it) }
+  return when (predicates.size) {
+    0 -> null
+    1 -> predicates.single()
+    else -> CatalogSearchCondition.AnyOf(predicates)
   }
 }
 
@@ -516,7 +586,7 @@ private suspend fun ApplicationCall.respondReadListSibling(
   val visible =
     readLists
       .findByIdOrNull(ReadListId(requireNotNull(parameters["id"])))
-      ?.visibleTo(principal.user, catalog)
+      ?.let { visibleReadLists(listOf(it), principal.user, catalog).singleOrNull() }
   if (visible == null) {
     respond(HttpStatusCode.NotFound)
     return
