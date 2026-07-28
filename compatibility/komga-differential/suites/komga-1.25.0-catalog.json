@@ -47,6 +47,107 @@
       }
     },
     {
+      "name": "synthetic book detail",
+      "path": "/api/v1/books/{BOOK_ID}",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/seriesId",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic series detail",
+      "path": "/api/v1/series/{SERIES_ID}",
+      "pathVariables": ["SERIES_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/id",
+          "/libraryId",
+          "/created",
+          "/lastModified",
+          "/fileLastModified",
+          "/metadata/created",
+          "/metadata/lastModified",
+          "/booksMetadata/created",
+          "/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic series books",
+      "path": "/api/v1/series/{SERIES_ID}/books?page=0&size=20",
+      "pathVariables": ["SERIES_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/seriesId",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "synthetic previous boundary",
+      "path": "/api/v1/books/{BOOK_ID}/previous",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp", "/path"]
+      }
+    },
+    {
+      "name": "synthetic next boundary",
+      "path": "/api/v1/books/{BOOK_ID}/next",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": ["/timestamp", "/path"]
+      }
+    },
+    {
+      "name": "synthetic series collections",
+      "path": "/api/v1/series/{SERIES_ID}/collections",
+      "pathVariables": ["SERIES_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/*/id",
+          "/*/seriesIds",
+          "/*/createdDate",
+          "/*/lastModifiedDate"
+        ]
+      }
+    },
+    {
+      "name": "synthetic book read lists",
+      "path": "/api/v1/books/{BOOK_ID}/readlists",
+      "pathVariables": ["BOOK_ID"],
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/*/id",
+          "/*/bookIds",
+          "/*/createdDate",
+          "/*/lastModifiedDate"
+        ]
+      }
+    },
+    {
       "name": "synthetic alphabetical groups",
       "path": "/api/v1/series/alphabetical-groups",
       "comparison": {
