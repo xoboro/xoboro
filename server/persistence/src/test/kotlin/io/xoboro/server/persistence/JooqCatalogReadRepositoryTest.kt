@@ -9,6 +9,8 @@ import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.SeriesRegexSearch
+import io.xoboro.core.application.SeriesRegexSearchField
 import io.xoboro.core.domain.AgeRestriction
 import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
@@ -387,6 +389,59 @@ class JooqCatalogReadRepositoryTest {
 
       assertEquals(listOf("series-a"), filtered.content.map { it.series.id.value })
       assertEquals(listOf("a" to 1, "b" to 1), groups.map { it.group to it.count })
+    }
+  }
+
+  @Test
+  fun `filters and pages series by case insensitive title regular expressions`() {
+    withCatalog("regular-expression") { database ->
+      val metadata = JooqSeriesMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findBySeriesIdOrNull(SeriesId("series-a"))).copy(
+          title = "TheAlpha",
+          titleSort = "Alpha, The",
+          updatedAtMillis = 2,
+        ),
+      )
+      metadata.upsert(
+        requireNotNull(metadata.findBySeriesIdOrNull(SeriesId("series-b"))).copy(
+          title = "TheBeta",
+          titleSort = "TheBeta",
+          updatedAtMillis = 2,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+
+      val secondPage =
+        catalog.findSeries(
+          query =
+            SeriesCatalogQuery(
+              regexSearch =
+                SeriesRegexSearch(
+                  pattern = "^the",
+                  field = SeriesRegexSearchField.TITLE,
+                ),
+            ),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(page = 1, size = 1),
+        )
+      val titleSortMatch =
+        catalog.findSeries(
+          query =
+            SeriesCatalogQuery(
+              regexSearch =
+                SeriesRegexSearch(
+                  pattern = "a$",
+                  field = SeriesRegexSearchField.TITLE_SORT,
+                ),
+            ),
+          access = CatalogAccess(),
+          page = CatalogPageRequest(),
+        )
+
+      assertEquals(2, secondPage.totalElements)
+      assertEquals(listOf("series-b"), secondPage.content.map { it.series.id.value })
+      assertEquals(listOf("series-b"), titleSortMatch.content.map { it.series.id.value })
     }
   }
 

@@ -84,6 +84,31 @@
       }
     },
     {
+      "name": "deprecated synthetic series title regex",
+      "path": "/api/v1/series?search_regex=series$,title_sort&page=0&size=20",
+      "comparison": {
+        "bodyMode": "JSON",
+        "ignoreJsonPaths": [
+          "/content/*/id",
+          "/content/*/libraryId",
+          "/content/*/created",
+          "/content/*/lastModified",
+          "/content/*/fileLastModified",
+          "/content/*/metadata/created",
+          "/content/*/metadata/lastModified",
+          "/content/*/booksMetadata/created",
+          "/content/*/booksMetadata/lastModified"
+        ]
+      }
+    },
+    {
+      "name": "deprecated synthetic series regex groups",
+      "path": "/api/v1/series/alphabetical-groups?search_regex=series$,title_sort",
+      "comparison": {
+        "bodyMode": "JSON"
+      }
+    },
+    {
       "name": "structured synthetic book filters",
       "method": "POST",
       "path": "/api/v1/books/list?page=0&size=20&sort=metadata.numberSort,desc",
