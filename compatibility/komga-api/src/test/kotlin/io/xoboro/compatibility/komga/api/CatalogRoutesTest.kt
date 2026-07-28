@@ -122,6 +122,13 @@ class CatalogRoutesTest {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("deprecated-filters.sqlite"))).use {
         database ->
       seedCatalog(database)
+      val regexMetadata = JooqSeriesMetadataRepository(database)
+      regexMetadata.upsert(
+        requireNotNull(regexMetadata.findBySeriesIdOrNull(SeriesId("series-1"))).copy(
+          titleSort = "Catalog, Synthetic",
+          updatedAtMillis = 3,
+        ),
+      )
       val users =
         UserLifecycle(
           users = JooqUserRepository(database),
@@ -204,6 +211,7 @@ class CatalogRoutesTest {
         )
         verifyDeprecatedBookAndSeriesFilters(client)
         verifyDeprecatedFilterMismatches(client)
+        verifyDeprecatedRegexFilters(client)
         verifyStructuredBookAndSeriesFilters(client)
       }
     }
@@ -1008,6 +1016,42 @@ class CatalogRoutesTest {
         path,
       )
     }
+  }
+
+  private suspend fun verifyDeprecatedRegexFilters(client: HttpClient) {
+    listOf(
+      "/api/v1/series?search_regex=^synthetic,title",
+      "/api/v1/series?search_regex=synthetic$,title_sort",
+    ).forEach { path ->
+      assertEquals(
+        listOf("series-1"),
+        client
+          .get(path) {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.body<KomgaPageDto<KomgaSeriesDto>>().content.map(KomgaSeriesDto::id),
+        path,
+      )
+    }
+    listOf(
+      "/api/v1/series?search_regex=synthetic$,title",
+      "/api/v1/series?search_regex=^synthetic,title_sort",
+    ).forEach { path ->
+      assertEquals(
+        0,
+        client
+          .get(path) {
+            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+          }.body<KomgaPageDto<JsonObject>>().totalElements,
+        path,
+      )
+    }
+    assertEquals(
+      listOf(KomgaGroupCountDto("c", 1)),
+      client
+        .get("/api/v1/series/alphabetical-groups?search_regex=synthetic$,title_sort") {
+          basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+        }.body<List<KomgaGroupCountDto>>(),
+    )
   }
 
   private suspend fun verifyStructuredBookAndSeriesFilters(client: HttpClient) {

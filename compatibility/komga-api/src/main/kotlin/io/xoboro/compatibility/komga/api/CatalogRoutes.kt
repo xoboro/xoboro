@@ -26,6 +26,8 @@ import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.SeriesRegexSearch
+import io.xoboro.core.application.SeriesRegexSearchField
 import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.BookMedia
@@ -568,10 +570,25 @@ private fun ApplicationCall.deprecatedSeriesQuery(): SeriesCatalogQuery =
   SeriesCatalogQuery(
     libraryIds = queryLibraryIds(),
     fullTextSearch = request.queryParameters["search"],
+    regexSearch = request.queryParameters["search_regex"]?.toSeriesRegexSearch(),
     deleted = queryBoolean("deleted") ?: false,
     oneshot = queryBoolean("oneshot"),
     condition = deprecatedSeriesCondition(),
   )
+
+private fun String.toSeriesRegexSearch(): SeriesRegexSearch? {
+  if (isBlank() || ',' !in this) return null
+  val field =
+    when (substringAfterLast(',').lowercase()) {
+      "title" -> SeriesRegexSearchField.TITLE
+      "title_sort" -> SeriesRegexSearchField.TITLE_SORT
+      else -> return null
+    }
+  return SeriesRegexSearch(
+    pattern = substringBeforeLast(','),
+    field = field,
+  )
+}
 
 private fun ApplicationCall.deprecatedBookCondition(): CatalogSearchCondition? =
   buildList {
