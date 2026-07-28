@@ -110,11 +110,42 @@
       }
     },
     {
+      "name": "REST authentication required",
+      "path": "/api/v1/books",
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": ["WWW-Authenticate"],
+        "ignoreJsonPaths": ["/timestamp"]
+      }
+    },
+    {
+      "name": "invalid Basic credentials",
+      "path": "/api/v1/books",
+      "headers": {
+        "Authorization": "Basic aW52YWxpZEBleGFtcGxlLmludmFsaWQ6aW52YWxpZC1wYXNzd29yZA=="
+      },
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": ["WWW-Authenticate"],
+        "ignoreJsonPaths": ["/timestamp"]
+      }
+    },
+    {
       "name": "OPDS v1 authentication required",
       "path": "/opds/v1.2/catalog",
       "comparison": {
-        "bodyMode": "NONE",
-        "compareContentType": false
+        "bodyMode": "JSON",
+        "headers": ["WWW-Authenticate"],
+        "ignoreJsonPaths": ["/timestamp"]
+      }
+    },
+    {
+      "name": "OPDS v2 authentication document challenge",
+      "path": "/opds/v2/catalog",
+      "comparison": {
+        "bodyMode": "JSON",
+        "headers": ["WWW-Authenticate"],
+        "ignoreJsonPaths": ["/id", "/links/1/href"]
       }
     }
   ]

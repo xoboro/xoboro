@@ -403,16 +403,17 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondForbidden(
 }
 
 private suspend fun io.ktor.server.application.ApplicationCall.respondNotFound() {
-  respondError(HttpStatusCode.NotFound, HttpStatusCode.NotFound.description)
+  respondError(HttpStatusCode.NotFound, "404 NOT_FOUND")
 }
 
-internal suspend fun io.ktor.server.application.ApplicationCall.respondError(
+suspend fun io.ktor.server.application.ApplicationCall.respondError(
   status: HttpStatusCode,
   message: String,
 ) {
   respond(
     status,
     KomgaErrorResponse(
+      timestamp = komgaErrorTimestamp(),
       status = status.value,
       error = status.description,
       message = message,
@@ -420,6 +421,12 @@ internal suspend fun io.ktor.server.application.ApplicationCall.respondError(
     ),
   )
 }
+
+private val KOMGA_ERROR_TIME_FORMAT =
+  java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSxxx")
+
+internal fun komgaErrorTimestamp(): String =
+  java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).format(KOMGA_ERROR_TIME_FORMAT)
 
 private val WIRE_JSON = Json { ignoreUnknownKeys = true }
 private val EMAIL_PATTERN = Regex(".+@.+\\..+")

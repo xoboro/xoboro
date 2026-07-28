@@ -20,13 +20,16 @@ import io.ktor.server.testing.testApplication
 import io.xoboro.compatibility.komga.api.ClaimStatusDto
 import io.xoboro.compatibility.komga.api.LibraryCreationDto
 import io.xoboro.compatibility.komga.api.LibraryDto
+import io.xoboro.compatibility.komga.api.KomgaErrorResponse
 import io.xoboro.compatibility.komga.api.OAuth2ClientDto
 import io.xoboro.compatibility.komga.api.UserDto
 import java.nio.file.Path
+import java.time.OffsetDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
 
 class ApplicationTest {
@@ -96,6 +99,22 @@ class ApplicationTest {
         }
 
       assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+  @Test
+  fun `preserves the configured CORS rejection body`() =
+    testApplication {
+      application {
+        xoboroModule(corsAllowedOrigins = setOf("https://reader.example.invalid"))
+      }
+
+      val response =
+        client.get("/api/v1/claim") {
+          header(HttpHeaders.Origin, "https://denied.example.invalid")
+        }
+
+      assertEquals(HttpStatusCode.Forbidden, response.status)
+      assertEquals("Invalid CORS request", response.bodyAsText())
     }
 
   @Test
@@ -244,5 +263,86 @@ class ApplicationTest {
     }
 
     assertFalse(runtime.isReady())
+  }
+
+  @Test
+  fun `production module renders authenticated missing resources as Spring errors`() {
+    val runtime =
+      XoboroRuntime.open(
+        ServerConfig(
+          port = 25_600,
+          databasePath = tempDirectory.resolve("missing-resource.sqlite"),
+          workerCount = 1,
+          taskPollMillis = 10,
+          taskFailurePollMillis = 10,
+          taskLeaseMillis = 1_000,
+          shutdownTimeoutMillis = 2_000,
+        ),
+      )
+
+    testApplication {
+      application {
+        xoboroModule(runtime)
+      }
+      client.post("/api/v1/claim") {
+        header("X-Komga-Email", "admin@example.invalid")
+        header("X-Komga-Password", "synthetic-password")
+      }
+
+      val response =
+        client.get("/api/v1/books/missing-synthetic") {
+          basicAuth("admin@example.invalid", "synthetic-password")
+        }
+      val error = Json.decodeFromString<KomgaErrorResponse>(response.bodyAsText())
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("application/json", response.headers[HttpHeaders.ContentType])
+      assertTrue(OffsetDateTime.parse(error.timestamp).year >= 2026)
+      assertEquals(404, error.status)
+      assertEquals("Not Found", error.error)
+      assertEquals("404 NOT_FOUND", error.message)
+      assertEquals("/api/v1/books/missing-synthetic", error.path)
+    }
+  }
+
+  @Test
+  fun `production module maps malformed Komga JSON requests to bad request`() {
+    val runtime =
+      XoboroRuntime.open(
+        ServerConfig(
+          port = 25_600,
+          databasePath = tempDirectory.resolve("malformed-json.sqlite"),
+          workerCount = 1,
+          taskPollMillis = 10,
+          taskFailurePollMillis = 10,
+          taskLeaseMillis = 1_000,
+          shutdownTimeoutMillis = 2_000,
+        ),
+      )
+
+    testApplication {
+      application {
+        xoboroModule(runtime)
+      }
+      client.post("/api/v1/claim") {
+        header("X-Komga-Email", "admin@example.invalid")
+        header("X-Komga-Password", "synthetic-password")
+      }
+
+      val response =
+        client.post("/api/v2/users") {
+          basicAuth("admin@example.invalid", "synthetic-password")
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody("""{"email":""}""")
+        }
+      val error = Json.decodeFromString<KomgaErrorResponse>(response.bodyAsText())
+
+      assertEquals(HttpStatusCode.BadRequest, response.status)
+      assertTrue(OffsetDateTime.parse(error.timestamp).year >= 2026)
+      assertEquals(400, error.status)
+      assertEquals("Bad Request", error.error)
+      assertTrue(error.message.isNotBlank())
+      assertEquals("/api/v2/users", error.path)
+    }
   }
 }

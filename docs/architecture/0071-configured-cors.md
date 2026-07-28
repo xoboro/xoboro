@@ -39,6 +39,7 @@ Existing Komga deployments can carry their CORS environment setting into
 Xoboro without changing browser clients. The configuration remains
 fail-closed and cannot inject response headers.
 
-The anonymous live differential suite now checks six cases. Wildcard origins
+The anonymous live differential suite also covers authentication and protocol
+failures in addition to the six CORS and public-contract cases. Wildcard origins
 are rejected at startup because they cannot be combined with Komga's required
 credential policy.

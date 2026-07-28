@@ -38,15 +38,9 @@ fun Route.komgaClaimRoutes(users: UserLifecycle) {
           )
         call.respond(claimed.toDto())
       } catch (_: ServerAlreadyClaimedException) {
-        call.respond(
+        call.respondError(
           status = HttpStatusCode.BadRequest,
-          message =
-            KomgaErrorResponse(
-              status = HttpStatusCode.BadRequest.value,
-              error = HttpStatusCode.BadRequest.description,
-              message = "This server has already been claimed",
-              path = "/api/v1/claim",
-            ),
+          message = "This server has already been claimed",
         )
       }
     }
@@ -89,6 +83,7 @@ data class ViolationDto(
 
 @Serializable
 data class KomgaErrorResponse(
+  val timestamp: String,
   val status: Int,
   val error: String,
   val message: String,
