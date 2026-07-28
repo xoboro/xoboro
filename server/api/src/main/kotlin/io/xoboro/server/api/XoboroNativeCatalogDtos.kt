@@ -7,10 +7,14 @@ import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.MediaItemType
+import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.WebLink
 import io.xoboro.core.domain.classifyForLibrary
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
 
 @Serializable
 data class XoboroPageResponse<T>(
@@ -101,11 +105,23 @@ data class XoboroMediaResponse(
 )
 
 @Serializable
+data class XoboroMediaProgressRequest(
+  val page: Int,
+  val locator: JsonObject,
+  val deviceId: String,
+  val deviceName: String,
+  val modifiedAtMillis: Long,
+)
+
+@Serializable
 data class XoboroMediaProgressResponse(
   val page: Int,
   val completed: Boolean,
   val readAtMillis: Long,
   val updatedAtMillis: Long,
+  val deviceId: String? = null,
+  val deviceName: String? = null,
+  val locator: JsonObject? = null,
 )
 
 @Serializable
@@ -225,6 +241,17 @@ internal fun CatalogBook.toNativeResponse(): XoboroMediaItemResponse =
     createdAtMillis = book.createdAtMillis,
     updatedAtMillis = book.updatedAtMillis,
     sourceModifiedAtMillis = book.fileModifiedAtMillis,
+  )
+
+internal fun ReadProgress.toNativeProgressResponse(): XoboroMediaProgressResponse =
+  XoboroMediaProgressResponse(
+    page = page,
+    completed = completed,
+    readAtMillis = readAtMillis,
+    updatedAtMillis = updatedAtMillis,
+    deviceId = deviceId.takeIf(String::isNotEmpty),
+    deviceName = deviceName.takeIf(String::isNotEmpty),
+    locator = locatorJson?.let { Json.parseToJsonElement(it).jsonObject },
   )
 
 internal fun CatalogPage<CatalogSeries>.toNativeSeriesPage(): XoboroPageResponse<XoboroSeriesResponse> =

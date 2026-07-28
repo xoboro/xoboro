@@ -61,11 +61,6 @@ fun Route.komgaKoreaderSyncRoutes(sync: KoreaderSyncLifecycle) {
           call.respond(HttpStatusCode.NotFound)
         } catch (_: KoreaderFingerprintConflictException) {
           call.respond(HttpStatusCode.Conflict)
-        } catch (failure: IllegalStateException) {
-          call.respond(
-            HttpStatusCode.Conflict,
-            mapOf("error" to (failure.message ?: "Stale progression")),
-          )
         } catch (failure: IllegalArgumentException) {
           call.respond(
             HttpStatusCode.BadRequest,

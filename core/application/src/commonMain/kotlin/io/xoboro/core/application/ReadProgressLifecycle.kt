@@ -38,6 +38,29 @@ fun interface ReadProgressEventPublisher {
   fun publish(event: ReadProgressEvent)
 }
 
+/**
+ * Outcome of a progression update.
+ *
+ * [Applied] normally implies a [ReadProgressEvent.Changed] publication, but not always: when the
+ * accepted row is deleted concurrently the update is still reported as applied while no event is
+ * published. Callers must not treat [Applied] as a guarantee that an event was emitted.
+ *
+ * [Stale.stored] is the progress currently held by the server. In the same concurrent-delete case
+ * the row no longer exists and the rejected candidate is returned in its place, so callers should
+ * not echo it to clients as authoritative server state.
+ */
+sealed interface ReadProgressUpdate {
+  data object MediaItemNotFound : ReadProgressUpdate
+
+  data class Applied(
+    val progress: ReadProgress,
+  ) : ReadProgressUpdate
+
+  data class Stale(
+    val stored: ReadProgress,
+  ) : ReadProgressUpdate
+}
+
 class ReadProgressLifecycle(
   private val books: BookRepository,
   private val series: SeriesRepository,
@@ -119,8 +142,8 @@ class ReadProgressLifecycle(
     deviceId: String,
     deviceName: String,
     locatorJson: String,
-  ): ReadProgress? {
-    val book = books.findByIdOrNull(bookId) ?: return null
+  ): ReadProgressUpdate {
+    val book = books.findByIdOrNull(bookId) ?: return ReadProgressUpdate.MediaItemNotFound
     require(book.deletedAtMillis == null) { "Cannot update progress for a deleted book" }
     require(modifiedAtMillis >= 0) { "Progression timestamp must not be negative" }
     require(locatorJson.isNotBlank()) { "Progression locator must not be blank" }
@@ -131,11 +154,8 @@ class ReadProgressLifecycle(
       "Page argument ($page) must be within 1 and book page count (${analyzed.pageCount})"
     }
     val existing = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
-    check(existing == null || modifiedAtMillis > existing.readAtMillis) {
-      "Progression is older than existing"
-    }
     val now = now()
-    progresses.upsert(
+    val candidate =
       ReadProgress(
         bookId = book.id,
         userId = userId,
@@ -147,10 +167,15 @@ class ReadProgressLifecycle(
         locatorJson = locatorJson,
         createdAtMillis = existing?.createdAtMillis ?: now,
         updatedAtMillis = now,
-      ),
-    )
-    return progresses.findByBookIdAndUserIdOrNull(book.id, userId)
-      ?.also { eventPublisher.publish(ReadProgressEvent.Changed(it)) }
+      )
+    if (!progresses.upsertIfNewer(candidate)) {
+      return ReadProgressUpdate.Stale(
+        progresses.findByBookIdAndUserIdOrNull(book.id, userId) ?: candidate,
+      )
+    }
+    val stored = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
+    return ReadProgressUpdate.Applied(stored ?: candidate)
+      .also { if (stored != null) eventPublisher.publish(ReadProgressEvent.Changed(stored)) }
   }
 
   fun markSeriesCompleted(

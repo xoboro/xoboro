@@ -502,22 +502,16 @@ class CatalogRoutesTest {
             setBody(progression)
           }.status,
         )
-        val savedProgressionResponse =
-          client.get("/api/v1/books/book-1/progression") {
-            basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
-          }
-        assertEquals(HttpStatusCode.OK, savedProgressionResponse.status)
-        val savedProgression =
-          KOMGA_JSON.decodeFromString<R2ProgressionDto>(savedProgressionResponse.bodyAsText())
-        assertEquals(progression, savedProgression)
+        verifyStoredProgression(client, progression)
         assertEquals(
-          HttpStatusCode.Conflict,
+          HttpStatusCode.NoContent,
           client.put("/api/v1/books/book-1/progression") {
             basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
             header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
             setBody(progression.copy(modified = "2029-01-02T03:04:05Z"))
           }.status,
         )
+        verifyStoredProgression(client, progression)
         assertEquals(
           HttpStatusCode.BadRequest,
           client.put("/api/v1/books/book-1/progression") {
@@ -940,6 +934,21 @@ class CatalogRoutesTest {
         )
       }
     }
+  }
+
+  private suspend fun verifyStoredProgression(
+    client: HttpClient,
+    expected: R2ProgressionDto,
+  ) {
+    val response =
+      client.get("/api/v1/books/book-1/progression") {
+        basicAuth(ADMIN_EMAIL, ADMIN_PASSWORD)
+      }
+    assertEquals(HttpStatusCode.OK, response.status)
+    assertEquals(
+      expected,
+      KOMGA_JSON.decodeFromString<R2ProgressionDto>(response.bodyAsText()),
+    )
   }
 
   private suspend fun verifyDeprecatedCollectionFilter(

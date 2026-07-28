@@ -4,9 +4,9 @@ The native API is the supported boundary for Xoboro web and mobile clients. It
 is rooted at `/api/xoboro/v1`, uses JSON request and response bodies, and does
 not reproduce Komga DTOs or endpoint shapes.
 
-This document covers authentication and read-only catalog discovery.
-Administration mutations, media delivery, and OpenAPI contracts will be added
-as their native routes are released.
+This document covers authentication, catalog discovery, and read progress
+mutation. Administration mutations, media delivery, and OpenAPI contracts will
+be added as their native routes are released.
 
 ## Errors
 
@@ -23,6 +23,7 @@ Clients must branch on `code`, not the human-readable `message`. Malformed JSON
 returns `400 invalid_request`, missing or invalid authentication returns
 `401 authentication_required`, and login throttling returns
 `429 rate_limit_exceeded` with a `Retry-After` header.
+Read progress conflicts return `409 stale_progress`.
 
 ## Session transports
 
@@ -182,3 +183,32 @@ The response uses the common Xoboro media hierarchy. Existing storage is
 classified as `COMIC` for comic archives, `NOVEL` for EPUB, and `BOOK` for
 PDF. The same contract can later add `VIDEO` and `AUDIO` without introducing
 a second catalog API.
+
+## Read progress
+
+`PUT /api/xoboro/v1/media-items/{mediaItemId}/progress`
+
+```json
+{
+  "page": 4,
+  "locator": {
+    "href": "chapter-2.xhtml",
+    "locations": {
+      "progression": 0.25
+    }
+  },
+  "deviceId": "synthetic-device",
+  "deviceName": "Synthetic reader",
+  "modifiedAtMillis": 1735689600000
+}
+```
+
+`locator` is an opaque JSON object stored with the page position.
+`modifiedAtMillis` is the client's own clock and is the sole conflict-ordering
+key; the server does not substitute its own clock. A value older than or equal
+to the currently stored progress returns `409 stale_progress` without applying
+the write.
+
+The endpoint supports the same cookie and bearer transports, including the
+same-origin requirements for cookie mutations, described in
+[Session transports](#session-transports).

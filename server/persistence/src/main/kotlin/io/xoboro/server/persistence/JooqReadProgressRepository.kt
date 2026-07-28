@@ -89,6 +89,15 @@ class JooqReadProgressRepository(
     }
   }
 
+  override fun upsertIfNewer(progress: ReadProgress): Boolean =
+    database.transaction { transaction ->
+      val changed = transaction.upsertProgressIfNewer(progress)
+      if (changed) {
+        transaction.recomputeSeriesForBooks(listOf(progress.bookId), progress.userId)
+      }
+      changed
+    }
+
   override fun upsertAll(progresses: Collection<ReadProgress>) {
     if (progresses.isEmpty()) return
     database.transaction { transaction ->
@@ -163,6 +172,35 @@ class JooqReadProgressRepository(
       progress.updatedAtMillis,
     )
   }
+
+  private fun DSLContext.upsertProgressIfNewer(progress: ReadProgress): Boolean =
+    execute(
+      """
+      INSERT INTO read_progress (
+        book_id, user_id, page, completed, read_at_ms, device_id, device_name,
+        locator_json, created_at_ms, updated_at_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(book_id, user_id) DO UPDATE SET
+        page = excluded.page,
+        completed = excluded.completed,
+        read_at_ms = excluded.read_at_ms,
+        device_id = excluded.device_id,
+        device_name = excluded.device_name,
+        locator_json = excluded.locator_json,
+        updated_at_ms = excluded.updated_at_ms
+      WHERE excluded.read_at_ms > read_progress.read_at_ms
+      """.trimIndent(),
+      progress.bookId.value,
+      progress.userId.value,
+      progress.page,
+      progress.completed.toSqliteInt(),
+      progress.readAtMillis,
+      progress.deviceId,
+      progress.deviceName,
+      progress.locatorJson,
+      progress.createdAtMillis,
+      progress.updatedAtMillis,
+    ) > 0
 
   private fun DSLContext.recomputeSeriesForBooks(
     bookIds: Collection<BookId>,
