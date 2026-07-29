@@ -9,6 +9,33 @@ import org.jooq.Record
 class JooqDurableTaskQueue(
   private val database: XoboroDatabase,
 ) : DurableTaskQueue {
+  /**
+   * Inserts [task], or updates an existing row with the same id.
+   *
+   * Task ids are deterministic for most types (`REFRESH_SERIES_METADATA_<seriesId>` and friends),
+   * so a re-enqueue routinely collides with a row that is already there. State decides what
+   * happens:
+   *
+   * - `PENDING` — refreshed in place, keeping the earliest `available_at_ms`.
+   * - `DEAD` — revived back to `PENDING`, **without resetting `attempt_count`**. `claimNext`
+   *   filters candidates on state, availability and group but not on attempts, so a revived row
+   *   that has already exhausted `max_attempts` is claimed once, increments past the limit, and
+   *   returns to `DEAD` after that single run. A task that keeps dying therefore costs one
+   *   attempt per external re-enqueue rather than a fresh `max_attempts` budget, and
+   *   `attempt_count` and `last_error` survive as the record of how often it has died.
+   * - `RUNNING` — left alone, and the enqueue reports false. Mutating a row under a live lease
+   *   would race `complete`/`fail`, which key on `lease_token`. A lease that is genuinely stuck
+   *   is recovered by [claimNext], which is the right place for it.
+   *
+   * Reviving matters because the previous guard only matched `PENDING`: a single death made a
+   * deterministic id permanently un-enqueueable, silently, with no log line, and the only
+   * remediation on offer deletes pending work along with the corpse.
+   *
+   * Note for whoever adds a deterministic-id task whose payload is not a pure function of its
+   * id: a `RUNNING` collision discards the newer payload, and lease recovery keeps the old one.
+   * Every current deterministic id derives its payload from the id, so nothing depends on that
+   * today.
+   */
   override fun enqueue(
     task: DurableTask,
     nowMillis: Long,
@@ -26,9 +53,14 @@ class JooqDurableTaskQueue(
         priority = excluded.priority,
         group_id = excluded.group_id,
         max_attempts = excluded.max_attempts,
-        available_at_ms = min(task.available_at_ms, excluded.available_at_ms),
+        state = 'PENDING',
+        available_at_ms =
+          CASE
+            WHEN task.state = 'DEAD' THEN excluded.available_at_ms
+            ELSE min(task.available_at_ms, excluded.available_at_ms)
+          END,
         updated_at_ms = excluded.updated_at_ms
-      WHERE task.state = 'PENDING'
+      WHERE task.state IN ('PENDING', 'DEAD')
       """.trimIndent(),
       task.id,
       task.type,
