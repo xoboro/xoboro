@@ -83,6 +83,7 @@ import io.xoboro.server.api.XOBORO_API_PREFIX
 import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroInvalidQueryException
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
+import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
@@ -462,6 +463,9 @@ fun Application.xoboroModule(
       userLifecycle?.let {
         nativeSessions?.let { sessions ->
           xoboroNativeAuthenticationRoutes(it, sessions)
+          if (catalogReadRepository != null && artworkLifecycle != null) {
+            xoboroNativeArtworkRoutes(catalogReadRepository, artworkLifecycle)
+          }
           if (libraryAdministrationLifecycle != null && catalogReadRepository != null) {
             xoboroNativeCatalogRoutes(
               libraries = libraryAdministrationLifecycle,

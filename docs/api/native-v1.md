@@ -302,3 +302,30 @@ the write.
 The endpoint supports the same cookie and bearer transports, including the
 same-origin requirements for cookie mutations, described in
 [Session transports](#session-transports).
+
+## Artwork
+
+Artwork routes are available under both
+`/api/xoboro/v1/media-items/{mediaItemId}` and
+`/api/xoboro/v1/series/{seriesId}`:
+
+- `GET /artwork` returns the selected artwork bytes.
+- `GET /artworks` returns the stored artwork metadata collection.
+- `GET /artworks/{artworkId}` returns one stored artwork's bytes.
+- `POST /artworks` uploads and selects a new artwork. It requires an
+  administrator and returns `201 Created` with the stored artwork.
+- `PUT /artworks/{artworkId}/selected` selects stored artwork. It requires an
+  administrator and returns `204 No Content`.
+- `DELETE /artworks/{artworkId}` deletes uploaded artwork. It requires an
+  administrator and returns `204 No Content`.
+
+Singular `artwork` means the selected image; plural `artworks` means the
+collection of stored images. A missing selected image or identifier returns
+`404 artwork_not_found`. There is no page render fallback: artwork is produced
+during scanning, so absence is a real state rather than an image to synthesize
+on every request.
+
+Uploads larger than 20 MiB return `413 artwork_too_large`. A non-empty upload
+whose image format cannot be processed returns `415 artwork_not_supported`.
+Select and delete use `204`, not `202`, because each operation is complete
+before the response is sent.
