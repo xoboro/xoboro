@@ -87,6 +87,7 @@ import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
+import io.xoboro.server.api.xoboroNativeMetadataRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
 import io.xoboro.server.api.xoboroNativeSelfServiceRoutes
 import io.xoboro.server.api.xoboroNativeUserAdminRoutes
@@ -492,6 +493,13 @@ fun Application.xoboroModule(
             }
             readProgressLifecycle?.let {
               xoboroNativeProgressRoutes(catalogReadRepository, it)
+            }
+            if (metadataEditingLifecycle != null && metadataFacetRepository != null) {
+              xoboroNativeMetadataRoutes(
+                catalogReadRepository,
+                metadataEditingLifecycle,
+                metadataFacetRepository,
+              )
             }
           }
         }
