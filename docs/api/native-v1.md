@@ -692,3 +692,97 @@ Running and dead tasks are untouched: only unclaimed work is discarded. Both
 routes return `403 task_administration_forbidden` for a non-administrator, and
 the administrator check runs before the queue is consulted, so a refused request
 never reaches it.
+
+## Operational metrics
+
+`GET /api/xoboro/v1/metrics` requires an administrator and returns a bounded,
+in-process operational snapshot as JSON:
+
+```json
+{
+  "ready": true,
+  "uptimeSeconds": 812.4,
+  "activeRequests": 1,
+  "totalRequests": 4032,
+  "requestsByStatusClass": { "2xx": 3990, "4xx": 40, "5xx": 2 },
+  "taskQueue": { "pending": 3, "running": 1, "dead": 2 },
+  "taskWorkerCount": 4
+}
+```
+
+This is separate from the pre-existing bounded Prometheus scrape at the
+unversioned `/metrics` path (see ADR 0053), which is gated by a static
+`XOBORO_METRICS_TOKEN` bearer secret for external scrapers. The native
+endpoint answers to any authenticated administrator session so an
+administration UI does not need a separate scrape secret; both surfaces read
+from the same in-process counters. A non-administrator receives
+`403 operational_metrics_forbidden`.
+
+## Backups
+
+Backup files are stored under a server-controlled directory
+(`XOBORO_BACKUPS_PATH`, default `config/backups`) and are only ever referenced
+by an opaque ID — the API never returns an absolute filesystem path. All
+backup routes require an administrator.
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `POST` | `/api/xoboro/v1/backups` | `201 Created` |
+| `GET` | `/api/xoboro/v1/backups` | `200 OK` |
+| `DELETE` | `/api/xoboro/v1/backups/{backupId}` | `204 No Content` |
+
+`POST /backups` runs a `VACUUM INTO` snapshot of the live catalog database and
+verifies its integrity before returning. This is a bounded, single SQL
+statement rather than a filesystem walk, so unlike library scans it completes
+synchronously and answers `201 Created` with the descriptor once done, not
+`202 Accepted`:
+
+```json
+{ "id": "0f8a3c1e9b7d4a2f", "sizeBytes": 10485760, "createdAtMillis": 1732900000000 }
+```
+
+`GET /backups` lists every stored backup, most recent first. `DELETE
+/backups/{backupId}` removes one; an unknown ID returns `404 backup_not_found`.
+A non-administrator receives `403 backup_administration_forbidden` before any
+backup is read, created, or deleted.
+
+Restoring a backup is intentionally **not** exposed over HTTP: restoring
+requires taking the live database file offline, which conflicts with the
+running server's own file lock. Restore remains an operator action via the
+`xoboro restore <path>` CLI command, alongside the existing `backup` and
+`verify-backup` commands.
+
+## Catalog maintenance
+
+These commands queue the same durable analysis and metadata-refresh work as
+the per-library maintenance routes, scoped to a single media item or series.
+All routes require an administrator.
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `POST` | `/api/xoboro/v1/media-items/{mediaItemId}/analyze` | `202 Accepted` |
+| `POST` | `/api/xoboro/v1/media-items/{mediaItemId}/metadata-refresh` | `202 Accepted` |
+| `POST` | `/api/xoboro/v1/series/{seriesId}/analyze` | `202 Accepted` |
+| `POST` | `/api/xoboro/v1/series/{seriesId}/metadata-refresh` | `202 Accepted` |
+
+A missing media item returns `404 media_item_not_found`; a missing series
+returns `404 series_not_found`. A non-administrator receives `403
+catalog_maintenance_forbidden` before any existence check or task is queued.
+
+Duplicate-page removal and book-artwork regeneration are intentionally not
+ported to the native surface yet: they are tracked separately under artwork
+and duplicate-detection work in `docs/feature-coverage.md` rather than as
+general "maintenance" commands.
+
+> **Known caveat:** `Application.kt` installs a global `StatusPages
+> status(HttpStatusCode.NotFound, HttpStatusCode.Forbidden)` handler that
+> rewrites every native 404/403 body to a generic `{"code":"not_found"}` or
+> `{"code":"forbidden"}`, discarding the specific code a route already set
+> (`backup_not_found`, `media_item_not_found`, `series_not_found`, and every
+> other existing native `*_not_found`/`*_forbidden` code, including
+> pre-existing routes such as the metadata PATCH endpoints). This was verified
+> against the real production wiring while adding this section and is a
+> pre-existing defect that predates this change; it is not fixed here because
+> correcting it touches the shared error-handling pipeline for the entire
+> native API. Route-level tests intentionally exercise routes directly and
+> therefore still assert the specific codes documented above.
