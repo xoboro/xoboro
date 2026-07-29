@@ -15,8 +15,10 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -70,7 +72,10 @@ fun Route.komgaSseRoutes(
             // bounds the cost to one lookup per recheck period per subscriber regardless of
             // event volume.
             if (nextAuthorizationCheck.hasPassedNow()) {
-              val current = users.currentOrNull(principal.user.id)
+              // The snapshot is a blocking JDBC read. Running it on the dispatcher that carries
+              // the SSE session blocks that thread for the duration of the query, once per
+              // recheck period per subscriber, so it is dispatched to the IO pool instead.
+              val current = withContext(Dispatchers.IO) { users.currentOrNull(principal.user.id) }
               if (current == null || current.invalidatesKomgaSessionFrom(principal.user)) {
                 close()
                 return@use
