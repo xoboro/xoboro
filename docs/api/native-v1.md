@@ -465,3 +465,47 @@ User and API-key operations use these error codes:
   sole remaining administrator.
 - `503 api_key_generation_failed` when unique key generation exhausts all
   attempts.
+## Metadata and facets
+
+Metadata editing is available to any authenticated caller for content visible
+through that caller's normal catalog access. It is not administrator-gated.
+Missing and unauthorized content are deliberately indistinguishable: both
+return `404` with `media_item_not_found` for media items or `series_not_found`
+for series.
+
+- `PATCH /api/xoboro/v1/media-items/{mediaItemId}/metadata` returns `200 OK`
+  with the updated book metadata.
+- `PATCH /api/xoboro/v1/media-items/metadata` returns `200 OK` with the updated
+  book metadata array.
+- `PATCH /api/xoboro/v1/series/{seriesId}/metadata` returns `200 OK` with the
+  updated series metadata.
+- `GET /api/xoboro/v1/facets?facet={facet}` returns `200 OK` with the visible
+  values as a JSON array.
+- `GET /api/xoboro/v1/facets/authors` returns `200 OK` with a paginated author
+  response.
+
+For fields represented as patch fields, an absent property preserves the
+stored value, while an explicit JSON `null` clears it. Clearing a non-nullable
+string or collection stores its empty value; clearing a nullable scalar stores
+`null`. Plain optional properties treat absence and `null` alike and preserve
+the stored value. Lock properties are stored alongside metadata for refresh
+pipelines to respect. They do not prevent a later manual patch from changing
+the locked field.
+
+The bulk media-item endpoint accepts at most 200 entries. It validates catalog
+visibility for every requested identifier before applying any write. If any
+identifier is missing or unauthorized, the whole request returns `404
+media_item_not_found` and nothing is changed.
+
+Authorization is therefore all-or-nothing, but a patch can still fail while the
+batch is being applied. When fewer entries are stored than were requested the
+endpoint returns `409 bulk_patch_incomplete` rather than `200` with a shorter
+array, because a short success would report that edits happened when they did
+not. That response means the batch is **partially applied**: re-read the
+requested media items to find the current state.
+
+Facet values and authors are scoped to the caller's granted libraries and
+content restrictions. `/facets` requires one case-sensitive `facet` value:
+`genre`, `seriesTag`, `bookTag`, `language`, `publisher`, `ageRating`,
+`sharingLabel`, or `releaseYear`. Both facet routes accept an optional repeated
+`libraryId` filter.

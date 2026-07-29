@@ -261,7 +261,7 @@ internal fun CatalogPage<CatalogBook>.toNativeMediaItemPage():
   XoboroPageResponse<XoboroMediaItemResponse> =
   toNativePage(content.map(CatalogBook::toNativeResponse))
 
-private fun <T, R> CatalogPage<T>.toNativePage(items: List<R>): XoboroPageResponse<R> {
+internal fun <T, R> CatalogPage<T>.toNativePage(items: List<R>): XoboroPageResponse<R> {
   val totalPages =
     if (totalElements == 0L) {
       0
@@ -279,13 +279,13 @@ private fun <T, R> CatalogPage<T>.toNativePage(items: List<R>): XoboroPageRespon
   )
 }
 
-private fun Author.toNativeResponse(): XoboroAuthorResponse =
+internal fun Author.toNativeResponse(): XoboroAuthorResponse =
   XoboroAuthorResponse(name = name, role = role)
 
-private fun WebLink.toNativeResponse(): XoboroWebLinkResponse =
+internal fun WebLink.toNativeResponse(): XoboroWebLinkResponse =
   XoboroWebLinkResponse(label = label, url = url)
 
-private fun AlternateTitle.toNativeResponse(): XoboroAlternateTitleResponse =
+internal fun AlternateTitle.toNativeResponse(): XoboroAlternateTitleResponse =
   XoboroAlternateTitleResponse(label = label, title = title)
 
 private fun MediaItemType.toNativeValue(): String = name
