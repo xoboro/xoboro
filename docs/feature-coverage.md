@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, file download, artwork, and library administration are implemented; add user/role administration, recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
+| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, file download, artwork, and library administration are implemented; add recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
@@ -78,9 +78,9 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Initial administrator and multi-user management | PARTIAL | Native setup is implemented; add native user management and an automated initial-user option |
+| Initial administrator and multi-user management | PARTIAL | Native setup and native user management are implemented; add an automated initial-user option |
 | Roles, library grants, age ratings, and sharing-label restrictions | PARTIAL | Audit enforcement across every native and protocol interface |
-| API keys | PARTIAL | Native management API, scoped keys, expiration, and protocol-specific transport review |
+| API keys | PARTIAL | Native self-service management API is implemented; add scoped keys, expiration, and protocol-specific transport review |
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |
 | Authentication activity | PARTIAL | Record session/OAuth flows and schedule retention cleanup |
 | Per-user client settings | READY | Replace arbitrary compatibility keys with versioned native preferences where possible |
