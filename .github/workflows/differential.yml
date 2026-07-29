@@ -216,6 +216,27 @@ jobs:
               printf '%s\n' "${reference_books}" | jq . || printf '%s\n' "${reference_books}"
               echo "--- candidate 127.0.0.1:25611 /api/v1/books ---"
               printf '%s\n' "${candidate_books}" | jq . || printf '%s\n' "${candidate_books}"
+              # The readiness predicate above asserts a one-shot's seriesTitle, which is only
+              # correct once REFRESH_SERIES_METADATA has run for that series. When it does not
+              # match, the open question is always "did that task run, die, or never get
+              # claimed" — and that is answered by the queue, not by the HTTP response.
+              #
+              # Read SQLite directly rather than the native GET /tasks endpoint: this step
+              # authenticates with basic auth, which the native API does not accept, and the
+              # table also exposes last_error and lease_expires_at_ms, which the counts
+              # endpoint does not. WAL mode allows this concurrent read while the server holds
+              # the database open.
+              candidate_database="${RUNNER_TEMP}/xoboro.sqlite"
+              echo "--- candidate task queue ---"
+              sqlite3 "${candidate_database}" \
+                "select id, task_type, state, attempt_count, max_attempts,
+                        lease_expires_at_ms, substr(coalesce(last_error, ''), 1, 400)
+                 from task order by created_at_ms;" 2>&1 || true
+              echo "--- candidate series rows ---"
+              sqlite3 "${candidate_database}" \
+                "select s.id, s.name, s.oneshot, m.title
+                 from series s left join series_metadata m on m.series_id = s.id
+                 order by s.name;" 2>&1 || true
             } >&2
             exit 1
           fi
