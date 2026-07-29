@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, and file download are implemented; add administration commands, artwork, events, cursor pagination, and OpenAPI |
+| Xoboro-native HTTP API | PARTIAL | Setup/session, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, file download, and artwork are implemented; add administration commands, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
