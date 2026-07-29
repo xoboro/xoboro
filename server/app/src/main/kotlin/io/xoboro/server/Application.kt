@@ -89,6 +89,7 @@ import io.xoboro.server.api.xoboroNativeCollectionsRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeMetadataRoutes
+import io.xoboro.server.api.xoboroNativeOpsRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
 import io.xoboro.server.api.xoboroNativeSelfServiceRoutes
 import io.xoboro.server.api.xoboroNativeUserAdminRoutes
@@ -473,6 +474,19 @@ fun Application.xoboroModule(
             xoboroNativeSelfServiceRoutes(it)
           } else {
             xoboroNativeSelfServiceRoutes(it, apiKeyLifecycle)
+          }
+          if (
+            serverSettingsLifecycle != null &&
+            clientSettingsLifecycle != null &&
+            authenticationActivityLifecycle != null &&
+            historicalEventRepository != null
+          ) {
+            xoboroNativeOpsRoutes(
+              serverSettingsLifecycle,
+              clientSettingsLifecycle,
+              authenticationActivityLifecycle,
+              historicalEventRepository,
+            )
           }
           if (catalogReadRepository != null && artworkLifecycle != null) {
             xoboroNativeArtworkRoutes(catalogReadRepository, artworkLifecycle)
