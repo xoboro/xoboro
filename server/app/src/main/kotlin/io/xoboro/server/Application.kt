@@ -88,6 +88,8 @@ import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
+import io.xoboro.server.api.xoboroNativeSelfServiceRoutes
+import io.xoboro.server.api.xoboroNativeUserAdminRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.KomgaDatabaseImporter
@@ -464,6 +466,12 @@ fun Application.xoboroModule(
       userLifecycle?.let {
         nativeSessions?.let { sessions ->
           xoboroNativeAuthenticationRoutes(it, sessions)
+          xoboroNativeUserAdminRoutes(it)
+          if (apiKeyLifecycle == null) {
+            xoboroNativeSelfServiceRoutes(it)
+          } else {
+            xoboroNativeSelfServiceRoutes(it, apiKeyLifecycle)
+          }
           if (catalogReadRepository != null && artworkLifecycle != null) {
             xoboroNativeArtworkRoutes(catalogReadRepository, artworkLifecycle)
           }
