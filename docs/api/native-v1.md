@@ -6,7 +6,8 @@ not reproduce Komga DTOs or endpoint shapes.
 
 This document covers authentication, catalog discovery, page and resource
 discovery, page and resource delivery, original file download, and read progress
-mutation. OpenAPI contracts remain pending.
+mutation, settings, authentication activity, and history. OpenAPI contracts
+remain pending.
 
 ## Errors
 
@@ -543,6 +544,87 @@ User and API-key operations use these error codes:
   sole remaining administrator.
 - `503 api_key_generation_failed` when unique key generation exhausts all
   attempts.
+
+## Server, client settings, and operational activity
+
+All routes in this section require a valid cookie or bearer session.
+Administrator-only routes reject an authenticated non-administrator before
+reading query parameters or a request body.
+
+### Server settings
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/server-settings` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/server-settings` | `204 No Content` |
+
+`GET /server-settings` returns exactly these settings:
+`deleteEmptyCollections`, `deleteEmptyReadLists`, `rememberMeDurationDays`,
+`thumbnailSize`, `taskPoolSize`, `serverPort`, `serverContextPath`,
+`koboProxy`, `koboPort`, and `kepubifyPath`. The `serverPort`,
+`serverContextPath`, and `kepubifyPath` values include their
+`configurationSource`, `databaseSource`, and `effectiveValue`.
+
+GET /server-settings never returns the remember-me signing key; PUT accepts
+`renewRememberMeKey` to rotate it without ever exposing its value. Fields absent
+from a PUT body are left unchanged. An explicit `null` clears the database
+override for `serverPort`, `serverContextPath`, `koboPort`, or `kepubifyPath`;
+the other optional fields treat absence or `null` as no change.
+
+Malformed JSON, unknown thumbnail sizes, and invalid setting values return
+`400 invalid_request`. A non-administrator receives
+`403 server_settings_forbidden`.
+
+### Client settings
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/client-settings` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/client-settings` | `204 No Content` |
+| `GET` | `/api/xoboro/v1/client-settings/global` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/client-settings/global` | `204 No Content` |
+| `DELETE` | `/api/xoboro/v1/client-settings/global` | `204 No Content` |
+
+`GET /client-settings` merges the global settings with the caller's per-user
+settings. A per-user value overrides a global value with the same key.
+`PUT /client-settings` writes only the caller's scope and accepts a map whose
+values contain `value`. The global routes require an administrator. Global
+writes also require `allowUnauthorized` for every value, and global deletion
+accepts a JSON array of unique keys.
+
+Invalid keys, blank values, and malformed JSON return `400 invalid_request`.
+A non-administrator receives `403 client_settings_forbidden` from a global
+route.
+
+### Authentication activity and history
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/authentication-activity` | `200 OK` |
+| `GET` | `/api/xoboro/v1/me/authentication-activity` | `200 OK` |
+| `GET` | `/api/xoboro/v1/history` | `200 OK` |
+
+The administrator authentication-activity route returns activity across all
+users. The `/me/authentication-activity` route is available to every
+authenticated caller and returns only that caller's rows. Authentication
+activity exposes identity and request metadata, success or error state, source,
+and `dateTimeMillis`; it never contains raw API-key material.
+
+Authentication activity sorts are `dateTime`, `email`, `success`, `ip`,
+`error`, `userId`, and `userAgent`. History sorts are `type`, `bookId`,
+`seriesId`, and `timestamp`. Both resources use the native page envelope,
+zero-based `page`, and `size` from 1 through 200. A sort is
+`field[,asc|desc]` and defaults to descending timestamp order. Invalid paging
+or sorting returns `400 invalid_query`.
+
+The all-user authentication activity route returns
+`403 authentication_activity_forbidden` to non-administrators. History returns
+`403 history_forbidden` to non-administrators.
+
+Every route in this section returns `401 authentication_required` without a
+valid session. Cookie-authenticated `PUT` and `DELETE` requests without trusted
+same-origin provenance return `403 cross_site_request_rejected`.
+
 ## Metadata and facets
 
 Metadata editing is available to any authenticated caller for content visible
