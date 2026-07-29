@@ -40,6 +40,7 @@ import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
 import io.xoboro.compatibility.komga.api.KepubContentAccess
 import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
+import io.xoboro.compatibility.komga.api.KomgaSseUserSnapshot
 import io.xoboro.compatibility.komga.api.komgaSseRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.DurableTaskQueue
@@ -661,8 +662,15 @@ fun Application.xoboroModule(
         komgaReadProgressRoutes(catalogReadRepository, readProgressLifecycle)
       }
       koreaderSyncLifecycle?.let(::komgaKoreaderSyncRoutes)
-      if (sseEventHub != null && sseTaskStatusProvider != null) {
-        komgaSseRoutes(sseEventHub, sseTaskStatusProvider)
+      // userLifecycle also gates installKomgaBasicAuthentication above, which registers the
+      // providers this route authenticates against — so requiring it here does not drop a
+      // configuration that could ever have authenticated a subscriber.
+      if (sseEventHub != null && sseTaskStatusProvider != null && userLifecycle != null) {
+        komgaSseRoutes(
+          events = sseEventHub,
+          users = KomgaSseUserSnapshot(userLifecycle::findByIdOrNull),
+          tasks = sseTaskStatusProvider,
+        )
       }
       if (
         catalogReadRepository != null &&
