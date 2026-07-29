@@ -32,6 +32,31 @@ import kotlinx.coroutines.runBlocking
 
 class KomgaSseEventBridgeTest {
   @Test
+  fun `scopes catalog and library events but still broadcasts unscoped families`() =
+    runBlocking {
+      val hub = KomgaSseEventHub()
+      val bridge = KomgaSseEventBridge(hub)
+      val excluded =
+        user("excluded", setOf(UserRole.PAGE_STREAMING)).copy(
+          sharedLibraryIds = setOf(LibraryId("other-library")),
+          sharesAllLibraries = false,
+        )
+      hub.subscribe(excluded).use { events ->
+        // Carries a LibraryId, so it is scoped away from this subscriber.
+        bridge.publish(LibraryEvent.Added(LIBRARY))
+        bridge.publish(CatalogMutationEvent.Series(CatalogMutationKind.ADDED, SERIES_ID, LIBRARY_ID))
+
+        // Carries no library scope in its payload — a collection may legitimately span
+        // libraries — so it is still broadcast. This pins a gap recorded in ADR 0087, not
+        // desired behaviour: closing it needs a per-event lookup that cannot work for
+        // deletions. The assertion exists so narrowing it later is a deliberate change.
+        bridge.publish(OrganizationEvent.CollectionAdded(COLLECTION))
+        assertEquals("CollectionAdded", events.receive().name)
+      }
+      hub.close()
+    }
+
+  @Test
   fun `maps every global lifecycle mutation to the Komga event contract`() =
     runBlocking {
       val hub = KomgaSseEventHub()
