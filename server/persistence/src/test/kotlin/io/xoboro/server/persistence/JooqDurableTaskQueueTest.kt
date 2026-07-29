@@ -270,6 +270,70 @@ class JooqDurableTaskQueueTest {
     }
   }
 
+  @Test
+  fun `revives a dead task on re-enqueue without resetting its attempts`() {
+    withQueue("dead-revival") { queue, _ ->
+      assertTrue(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
+      assertEquals(1, queue.claim("worker-1", "lease-1", nowMillis = 10L)?.attempt)
+      assertTrue(
+        queue.fail(
+          taskId = "task-1",
+          leaseToken = "lease-1",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 20L,
+        ),
+      )
+      assertEquals(TaskCounts(pending = 0L, running = 0L, dead = 1L), queue.counts())
+
+      // Task ids are deterministic, so before the revival this enqueue was silently discarded
+      // and the id could never be queued again.
+      assertTrue(
+        queue.enqueue(taskFixture(maxAttempts = 1, availableAtMillis = 30L), nowMillis = 30L),
+      )
+      assertEquals(TaskCounts(pending = 1L, running = 0L, dead = 0L), queue.counts())
+
+      // Attempts are preserved rather than reset, so this is the second attempt. Resetting the
+      // counter would report 1 here and hand a task that keeps dying a fresh budget every time.
+      assertEquals(2, queue.claim("worker-2", "lease-2", nowMillis = 31L)?.attempt)
+    }
+  }
+
+  @Test
+  fun `charges a repeatedly dying task one attempt per re-enqueue`() {
+    withQueue("dead-poison-pill") { queue, _ ->
+      assertTrue(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
+      var availableAt = 1L
+      // A task that fails deterministically must cost one claim per external re-enqueue, and its
+      // attempt count must keep climbing so "this has died repeatedly" stays visible.
+      (1..3).forEach { expectedAttempt ->
+        val claim = queue.claim("worker", "lease-$expectedAttempt", nowMillis = availableAt + 1L)
+        assertEquals(expectedAttempt, claim?.attempt)
+        assertTrue(
+          queue.fail(
+            taskId = "task-1",
+            leaseToken = "lease-$expectedAttempt",
+            error = "synthetic failure $expectedAttempt",
+            retryAtMillis = null,
+            nowMillis = availableAt + 2L,
+          ),
+        )
+        assertEquals(TaskCounts(pending = 0L, running = 0L, dead = 1L), queue.counts())
+        availableAt += 10L
+        assertTrue(
+          queue.enqueue(
+            taskFixture(maxAttempts = 1, availableAtMillis = availableAt),
+            nowMillis = availableAt,
+          ),
+        )
+      }
+      // Exactly one claim became available per re-enqueue: the fourth claim is the revival above,
+      // and nothing further is waiting behind it.
+      assertNotNull(queue.claim("worker", "lease-4", nowMillis = availableAt + 1L))
+      assertNull(queue.claim("worker", "lease-5", nowMillis = availableAt + 2L))
+    }
+  }
+
   private fun withQueue(
     name: String,
     block: (JooqDurableTaskQueue, XoboroDatabase) -> Unit,
