@@ -5,9 +5,9 @@ is rooted at `/api/xoboro/v1`, uses JSON request and response bodies, and does
 not reproduce Komga DTOs or endpoint shapes.
 
 This document covers authentication, catalog discovery, page and resource
-discovery, page delivery, and read progress mutation. Administration mutations,
-resource byte delivery, original file download, artwork, and OpenAPI contracts
-remain pending.
+discovery, page and resource delivery, original file download, and read progress
+mutation. Administration mutations, artwork, and OpenAPI contracts remain
+pending.
 
 ## Errors
 
@@ -187,9 +187,10 @@ a second catalog API.
 
 ## Media delivery
 
-All media-delivery routes require authentication and the `PAGE_STREAMING`
-role. Page numbers are one-based. There is no `zero_based` query parameter on
-the native surface.
+All media-delivery routes require authentication. Page and EPUB-resource
+delivery require the `PAGE_STREAMING` role; original file download requires
+`FILE_DOWNLOAD`. Page numbers are one-based. There is no `zero_based` query
+parameter on the native surface.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/pages` returns the indexed page
 manifest as a JSON list. Each entry contains its one-based `number`,
@@ -223,18 +224,55 @@ directory, so a client that parses the OPF itself and sends its raw hrefs will
 receive 404 responses. Manifest order is stable stored order (the OPF manifest
 order), not reading or spine order.
 
+`GET /api/xoboro/v1/media-items/{mediaItemId}/resources/{resource...}` returns
+one indexed EPUB-container resource. Send a `path` from the resource manifest
+verbatim; a raw OPF-relative href does not resolve. The endpoint is EPUB-only:
+CBZ/DiViNa content is represented by its pages and has no separate resources.
+Resource resolution is an exact archive-path index lookup, not a filesystem
+join, so path traversal is structurally impossible.
+
+Successful resource responses set
+`Content-Security-Policy: script-src 'none'; object-src 'none';` because EPUB
+resources are user-supplied same-origin content. They do not set
+`Content-Disposition`, since resources can be iframe subresources. Resource
+bytes use the same strong content-derived ETag, private conditional caching,
+and 304 behavior as page bytes. They do not support byte ranges.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}/file` downloads the original
+media file. It uses `Content-Disposition: attachment` with both a safe ASCII
+`filename=` fallback and an RFC 5987 UTF-8 `filename*=` parameter.
+
+File responses use the weak validator
+`W/"<fileSize>-<fileModifiedAtMillis>"`. The tag is weak because size and
+modification time do not prove byte-for-byte identity. Computing it entirely
+from authorized catalog metadata avoids opening or buffering a potentially
+large or remote file for a conditional request. A matching `If-None-Match`
+therefore returns 304 before content access.
+
+The file endpoint advertises `Accept-Ranges: bytes` and supports one fixed,
+open-ended, or suffix byte range. A satisfiable range returns 206 with
+`Content-Range`; a syntactically valid range starting outside the file returns
+416 with `Content-Range: bytes */<fileSize>`. Malformed ranges are ignored.
+Multiple ranges deliberately produce a full 200 response rather than Komga's
+416 response because the native endpoint does not implement multipart ranges
+and a complete representation remains useful. `If-Range` accepts the current
+weak ETag or `Last-Modified`; a mismatch ignores the range and sends the full
+file, preventing a resumed download from splicing bytes from different file
+versions.
+
 Delivery failures use these native error codes:
 
 - `403 page_streaming_forbidden` when the user lacks the required role.
+- `403 file_download_forbidden` when the user lacks original-file download
+  permission.
 - `404 media_item_not_found` for missing or unauthorized media items.
 - `404 page_not_found` for a page outside the indexed media range or unavailable
   from the content provider.
+- `404 resource_not_found` for a missing, invalid, or non-EPUB resource.
 - `409 media_not_ready` when indexed media is not ready for page delivery.
 - `409 page_not_decodable` when an existing page cannot be decoded.
 
 Invalid page numbers, formats, and dimensions return `400 invalid_query`.
-Resource byte delivery and original file download remain pending follow-up
-work.
 
 ## Read progress
 
