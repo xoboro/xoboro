@@ -41,6 +41,10 @@ private fun String.komgaSecurityServletPathOrNull(): String? =
         }
     }.minOrNull()
     ?.let(::substring)
+    // "/api" also matches the separate native API mounted at XOBORO_NATIVE_API_PREFIX
+    // (server/api's XOBORO_API_PREFIX). Komga's CORS/security-header contract must never
+    // extend to that native surface, so exclude it after the servlet path is resolved.
+    ?.takeUnless { it.startsWithPathSegment(XOBORO_NATIVE_API_PREFIX) }
 
 private fun String.startsWithPathSegment(prefix: String): Boolean =
   this == prefix || startsWith("$prefix/")
@@ -55,6 +59,10 @@ private val KOMGA_CORS_VARY_HEADERS =
     "Access-Control-Request-Headers",
   )
 private val KOMGA_DENY_FRAME_PREFIXES = listOf("/kobo", "/koreader")
+
+// Duplicated locally rather than depending on server:api's XOBORO_API_PREFIX constant:
+// compatibility:komga-api has no (and should not gain) a dependency on server:api.
+private const val XOBORO_NATIVE_API_PREFIX = "/api/xoboro"
 private val KOMGA_SECURITY_PREFIXES =
   listOf(
     "/api",
