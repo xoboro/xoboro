@@ -6,8 +6,7 @@ not reproduce Komga DTOs or endpoint shapes.
 
 This document covers authentication, catalog discovery, page and resource
 discovery, page and resource delivery, original file download, and read progress
-mutation. Administration mutations, artwork, and OpenAPI contracts remain
-pending.
+mutation. OpenAPI contracts remain pending.
 
 ## Errors
 
@@ -389,3 +388,80 @@ Uploads larger than 20 MiB return `413 artwork_too_large`. A non-empty upload
 whose image format cannot be processed returns `415 artwork_not_supported`.
 Select and delete use `204`, not `202`, because each operation is complete
 before the response is sent.
+
+## Users and API keys
+
+Authenticated users have a self-service surface that never accepts a user
+identifier. This separation prevents a non-administrator from selecting or
+acting on another account:
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/me` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/me/password` | `204 No Content` |
+| `GET` | `/api/xoboro/v1/me/api-keys` | `200 OK` |
+| `POST` | `/api/xoboro/v1/me/api-keys` | `201 Created` |
+| `DELETE` | `/api/xoboro/v1/me/api-keys/{apiKeyId}` | `204 No Content` |
+
+`PUT /me/password` requires both `currentPassword` and `newPassword`. An
+incorrect current password does not change the password or invalidate
+sessions. Every successful password change invalidates all existing sessions
+for that user.
+
+`POST /me/api-keys` accepts a non-empty `comment`. Its response includes the
+plaintext key as `token` exactly once. Xoboro stores a digest, not the
+plaintext value, so the token cannot be retrieved again. `GET /me/api-keys`
+returns metadata only: identifier, comment, and creation/update timestamps.
+Deleting a missing key or a key owned by another user returns the same
+`404 api_key_not_found` response.
+
+User administration is a separate administrator-only surface:
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/users` | `200 OK` |
+| `POST` | `/api/xoboro/v1/users` | `201 Created` |
+| `PUT` | `/api/xoboro/v1/users/{userId}` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/users/{userId}/password` | `204 No Content` |
+| `DELETE` | `/api/xoboro/v1/users/{userId}` | `204 No Content` |
+
+User responses contain account identity, roles, library grants, content
+restrictions, and timestamps; password hashes are never returned.
+`PUT /users/{userId}` replaces roles, shared-library identifiers,
+`sharesAllLibraries`, and restrictions exactly as submitted. Unknown role names
+and invalid library identifiers return `400 invalid_request` and change nothing;
+they are not dropped, because a mistyped role would otherwise grant fewer
+rights than requested while still answering with success. An administrator
+password reset accepts only `newPassword`; it does not require the target
+user's current password. Like a self-service password change, it invalidates
+all of that user's existing sessions.
+
+Administrators cannot delete their own account. Xoboro also prevents deleting
+or demoting the sole remaining administrator. Changing or deleting an
+administrator is allowed when another administrator remains.
+
+User and API-key operations use these error codes:
+
+- `400 invalid_request` for malformed JSON, invalid account fields, blank
+  passwords, or a blank API-key comment.
+- `401 authentication_required` when no valid cookie or bearer session is
+  supplied.
+- `403 user_administration_forbidden` when a non-administrator calls a user
+  administration route.
+- `403 invalid_credentials` when `PUT /me/password` receives the wrong current
+  password.
+- `403 cross_site_request_rejected` for a cookie-authenticated mutation
+  without trusted same-origin provenance.
+- `404 user_not_found` when an administration target does not exist.
+- `404 api_key_not_found` when a self-service deletion target is missing or is
+  owned by another user.
+- `409 user_email_already_exists` when an account already uses the requested
+  email.
+- `409 duplicate_api_key_comment` when the caller already has an API key with
+  the requested comment.
+- `409 cannot_delete_own_account` when an administrator targets their own
+  account for deletion.
+- `409 last_administrator_protected` when a request would delete or demote the
+  sole remaining administrator.
+- `503 api_key_generation_failed` when unique key generation exhausts all
+  attempts.
