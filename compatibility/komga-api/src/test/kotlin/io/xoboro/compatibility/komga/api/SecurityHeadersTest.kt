@@ -69,6 +69,8 @@ class SecurityHeadersTest {
     assertEquals("DENY", "/koreader".komgaFramePolicyOrNull())
     assertNull("/reader/apian".komgaFramePolicyOrNull())
     assertNull("/reader/kobold".komgaFramePolicyOrNull())
+    assertNull("/api/xoboro/v1/users".komgaFramePolicyOrNull())
+    assertNull("/reader/api/xoboro/v1/users".komgaFramePolicyOrNull())
   }
 }
 

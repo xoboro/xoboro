@@ -94,6 +94,42 @@ class CorsTest {
     }
 
   @Test
+  fun `never applies Komga CORS to the native API prefix`() =
+    testApplication {
+      application {
+        installKomgaSecurityHeaders()
+        installKomgaCors(setOf(ALLOWED_ORIGIN))
+        routing {
+          get("/api/xoboro/v1/synthetic") {
+            call.respondText("native")
+          }
+          get("/reader/api/xoboro/v1/synthetic") {
+            call.respondText("native")
+          }
+        }
+      }
+
+      val direct =
+        client.get("/api/xoboro/v1/synthetic") {
+          header(HttpHeaders.Origin, ALLOWED_ORIGIN)
+        }
+      assertEquals(HttpStatusCode.OK, direct.status)
+      assertEquals("native", direct.bodyAsText())
+      assertNull(direct.headers[HttpHeaders.AccessControlAllowOrigin])
+      assertNull(direct.headers[HttpHeaders.AccessControlAllowCredentials])
+      assertNull(direct.headers["X-Frame-Options"])
+
+      val behindContextPath =
+        client.get("/reader/api/xoboro/v1/synthetic") {
+          header(HttpHeaders.Origin, ALLOWED_ORIGIN)
+        }
+      assertEquals(HttpStatusCode.OK, behindContextPath.status)
+      assertEquals("native", behindContextPath.bodyAsText())
+      assertNull(behindContextPath.headers[HttpHeaders.AccessControlAllowOrigin])
+      assertNull(behindContextPath.headers[HttpHeaders.AccessControlAllowCredentials])
+    }
+
+  @Test
   fun `ignores origins without configuration and outside Komga protocols`() =
     testApplication {
       application {
