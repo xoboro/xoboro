@@ -157,6 +157,66 @@ Only administrators receive the source provider and location. Reader accounts
 receive `source: null`, preventing local paths and future remote-source
 identifiers from leaking through catalog discovery.
 
+## Library administration
+
+All library administration routes require an administrator. An authenticated
+non-administrator receives `403 library_administration_forbidden` before the
+server looks up a library or reads a request body.
+
+- `POST /api/xoboro/v1/libraries` creates a library and returns `201 Created`.
+- `PUT /api/xoboro/v1/libraries/{libraryId}` fully replaces the library name,
+  source, and settings and returns `200 OK`.
+- `DELETE /api/xoboro/v1/libraries/{libraryId}` returns `204 No Content`. It is
+  refused with `409 library_unavailable` while the library storage is
+  unavailable, so a catalog is not deleted because a mount went missing. The
+  flag is only cleared by a successful scan, so storage that is gone for good
+  would otherwise leave the library undeletable; repeat the request with
+  `?force=true` to delete it anyway. A `force` value that is not `true` or
+  `false` returns `400 invalid_query` rather than being coerced.
+- `POST /api/xoboro/v1/libraries/{libraryId}/scan` enqueues a standard scan and
+  returns `202 Accepted`.
+- `POST /api/xoboro/v1/libraries/{libraryId}/analyze` enqueues analysis and
+  returns `202 Accepted`.
+- `POST /api/xoboro/v1/libraries/{libraryId}/metadata-refresh` enqueues a
+  metadata refresh and returns `202 Accepted`.
+- `POST /api/xoboro/v1/libraries/{libraryId}/empty-trash` enqueues trash
+  emptying and returns `202 Accepted`.
+
+Create and update use the same request shape:
+
+```json
+{
+  "name": "Synthetic Library",
+  "source": {
+    "provider": "local",
+    "location": "file:///synthetic/library"
+  },
+  "settings": {
+    "scanOnStartup": true,
+    "scanInterval": "DAILY"
+  }
+}
+```
+
+Omitted settings use the server defaults. `PUT` is a full replacement rather
+than a partial patch. The four task-trigger endpoints return `202` because
+they enqueue durable background work. This deliberately differs from artwork
+mutations that return `204` only after completing synchronously.
+
+Library administration failures use these codes:
+
+- `library_administration_forbidden`: the authenticated user is not an
+  administrator.
+- `library_not_found`: the requested library does not exist.
+- `invalid_request`: the JSON or otherwise supplied library data is invalid.
+- `library_root_missing`: the supplied source location does not exist.
+- `library_root_not_directory`: the supplied source location is not a
+  directory.
+- `library_name_conflict`: another library already uses the supplied name.
+- `library_root_overlap`: the supplied root overlaps another library root.
+- `library_unavailable`: deletion is refused while the library storage is
+  unavailable. Repeat with `force=true` to override.
+
 ## Series
 
 `GET /api/xoboro/v1/series` returns visible, non-deleted series. It accepts:

@@ -86,6 +86,7 @@ import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
+import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
 import io.xoboro.server.persistence.DatabaseConfig
@@ -471,6 +472,13 @@ fun Application.xoboroModule(
               libraries = libraryAdministrationLifecycle,
               catalog = catalogReadRepository,
             )
+            if (libraryScanRequester != null && libraryMaintenanceRequester != null) {
+              xoboroNativeLibraryAdminRoutes(
+                libraries = libraryAdministrationLifecycle,
+                scanRequester = libraryScanRequester,
+                maintenanceRequester = libraryMaintenanceRequester,
+              )
+            }
             if (bookContentAccess != null) {
               xoboroNativeDeliveryRoutes(catalogReadRepository, bookContentAccess)
             }
