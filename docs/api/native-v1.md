@@ -389,6 +389,84 @@ whose image format cannot be processed returns `415 artwork_not_supported`.
 Select and delete use `204`, not `202`, because each operation is complete
 before the response is sent.
 
+## Collections and read lists
+
+Collections organize series; read lists organize media items. The native API
+uses `mediaItemIds`, not `bookIds`, and `/media-items`, not `/books`.
+
+| Method | Path | Success | Administrator |
+| --- | --- | --- | --- |
+| `GET` | `/api/xoboro/v1/collections` | `200 OK` | No |
+| `POST` | `/api/xoboro/v1/collections` | `201 Created` | Yes |
+| `GET` | `/api/xoboro/v1/collections/{collectionId}` | `200 OK` | No |
+| `PUT` | `/api/xoboro/v1/collections/{collectionId}` | `200 OK` | Yes |
+| `DELETE` | `/api/xoboro/v1/collections/{collectionId}` | `204 No Content` | Yes |
+| `GET` | `/api/xoboro/v1/collections/{collectionId}/series` | `200 OK` | No |
+| `GET` | `/api/xoboro/v1/read-lists` | `200 OK` | No |
+| `POST` | `/api/xoboro/v1/read-lists` | `201 Created` | Yes |
+| `GET` | `/api/xoboro/v1/read-lists/{readListId}` | `200 OK` | No |
+| `PUT` | `/api/xoboro/v1/read-lists/{readListId}` | `200 OK` | Yes |
+| `DELETE` | `/api/xoboro/v1/read-lists/{readListId}` | `204 No Content` | Yes |
+| `GET` | `/api/xoboro/v1/read-lists/{readListId}/media-items` | `200 OK` | No |
+| `GET` | `/api/xoboro/v1/series/{seriesId}/collections` | `200 OK` | No |
+| `GET` | `/api/xoboro/v1/media-items/{mediaItemId}/read-lists` | `200 OK` | No |
+
+Collection create and update requests use `name`, `ordered`, and `seriesIds`.
+Read-list requests use `name`, `summary`, `ordered`, and `mediaItemIds`.
+`ordered` defaults to `true` on create, and read-list `summary` defaults to an
+empty string on create. Detail and list responses do not embed member
+identifiers; ordered members are available only through the dedicated member
+routes.
+
+`PUT` is a full replacement of the name, ordering flag, member list, and member
+order, not a merge. Read-list updates also fully replace the summary. A create
+or update is rejected in full if any submitted member is missing or invisible
+under the administrator's own library grants and content restrictions.
+
+Member routes use the native page envelope and accept zero-based `page` and a
+`size` from 1 through 200. They do not accept `sort`: the stored member order is
+the contract. Visibility filtering removes unauthorized members while
+preserving the remaining members' stored relative order.
+
+The same visibility rule applies to list, detail, member, and reverse-lookup
+responses. `memberCount` is the number of members visible to the caller, not
+the stored total. If every stored member is invisible, detail and member
+routes return the same `404` as a missing resource rather than an empty
+response. This prevents callers from using the difference between an empty
+response and a missing identifier to enumerate collections or read lists they
+cannot see.
+
+Collection and read-list failures use these native error codes:
+
+- `400 invalid_request` for malformed JSON, invalid fields, domain validation
+  failures, or a submitted member that is missing or invisible.
+- `400 invalid_query` for invalid member pagination, a size over 200, or a
+  `sort` parameter on an ordered member route.
+- `401 authentication_required` when no valid cookie or bearer session is
+  supplied.
+- `403 collection_administration_forbidden` when a non-administrator calls a
+  collection mutation.
+- `403 read_list_administration_forbidden` when a non-administrator calls a
+  read-list mutation.
+- `403 cross_site_request_rejected` for a cookie-authenticated mutation
+  without trusted same-origin provenance.
+- `404 collection_not_found` when a collection is missing or has no members
+  visible to the caller.
+- `404 read_list_not_found` when a read list is missing or has no members
+  visible to the caller.
+- `404 series_not_found` when a reverse lookup targets a missing or invisible
+  series.
+- `404 media_item_not_found` when a reverse lookup targets a missing or
+  invisible media item.
+- `409 collection_name_conflict` when another collection already uses the
+  requested name.
+- `409 read_list_name_conflict` when another read list already uses the
+  requested name.
+
+Collection/read-list artwork and ComicRack CBL import are outside this feature.
+There is no native collection/read-list artwork resource yet, and CBL import is
+a separate migration and interoperability concern.
+
 ## Users and API keys
 
 Authenticated users have a self-service surface that never accepts a user

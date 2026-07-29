@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, file download, artwork, library administration, metadata editing, and facets are implemented; add collections, read lists, history, task status, settings, recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
+| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery, page/resource delivery, file download, artwork, library administration, metadata editing, facets, and collection and read-list administration are implemented; add history, task status, settings, recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
@@ -70,8 +70,8 @@ Statuses:
 | Manual metadata, field locks, and bulk updates | READY | Native UI |
 | Full-text search | READY | Native query contract |
 | Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | PARTIAL | Native core search/filter/sort/on-deck/keep-reading queries and facets are implemented; add named discovery feeds and uncommon combination/error cases |
-| Collections and manual ordering | PARTIAL | Native API/UI and generated artwork |
-| Read lists, ComicRack CBL import, and ordering | READY | Native API/UI |
+| Collections and manual ordering | PARTIAL | Native UI and generated artwork |
+| Read lists, ComicRack CBL import, and ordering | READY | Native UI |
 | Historical activity | PARTIAL | Emit all native lifecycle/security/maintenance events and add retention controls |
 
 ## Users and reading
