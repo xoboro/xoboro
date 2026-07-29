@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, and history are implemented; add task-queue status, recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI. Task-queue status needs `XoboroRuntime` to expose the durable task queue first |
+| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, and history are implemented; add recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |

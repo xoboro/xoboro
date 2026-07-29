@@ -27,6 +27,10 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.ClaimedTask
+import io.xoboro.core.application.TaskCounts
+import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.ServerSettingStore
@@ -466,6 +470,7 @@ class XoboroNativeOpsTest {
           clientSettings = fixture.clientSettingsLifecycle,
           authenticationActivities = fixture.authenticationActivityLifecycle,
           history = fixture.history,
+          tasks = fixture.tasks,
         )
       }
     }
@@ -476,6 +481,87 @@ class XoboroNativeOpsTest {
         }
       }
   }
+
+  @Test
+  fun `task counts are administrator-only and reported from the queue`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val forbidden =
+        client.get("$XOBORO_API_PREFIX/tasks") { bearerAuth(fixture.readerToken) }
+      assertEquals(HttpStatusCode.Forbidden, forbidden.status)
+      assertEquals("task_administration_forbidden", forbidden.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.countsCalls)
+
+      val response = client.get("$XOBORO_API_PREFIX/tasks") { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(
+        XoboroTaskCountsResponse(pending = 3, running = 1, dead = 2),
+        response.body<XoboroTaskCountsResponse>(),
+      )
+      assertEquals(1, fixture.tasks.countsCalls)
+    }
+
+  @Test
+  fun `clearing unclaimed tasks reports the removed count and refuses non-administrators`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      // A non-administrator must not be able to discard queued work, and the queue must not even
+      // be asked - a status code alone cannot tell "refused" from "cleared then failed".
+      val forbidden =
+        client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.readerToken) }
+      assertEquals(HttpStatusCode.Forbidden, forbidden.status)
+      assertEquals("task_administration_forbidden", forbidden.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.clearCalls)
+      assertEquals(7, fixture.tasks.unclaimed)
+
+      val response =
+        client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(7, response.body<XoboroClearedTasksResponse>().cleared)
+      assertEquals(1, fixture.tasks.clearCalls)
+      assertEquals(0, fixture.tasks.unclaimed)
+    }
+
+  @Test
+  fun `task routes require authentication`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      assertEquals(
+        HttpStatusCode.Unauthorized,
+        client.get("$XOBORO_API_PREFIX/tasks").status,
+      )
+      assertEquals(
+        HttpStatusCode.Unauthorized,
+        client.delete("$XOBORO_API_PREFIX/tasks/unclaimed").status,
+      )
+      assertEquals(0, fixture.tasks.countsCalls)
+      assertEquals(0, fixture.tasks.clearCalls)
+    }
+
+  @Test
+  fun `cross-site cookie clearing is rejected before the queue is touched`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val response =
+        client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") {
+          cookie(XOBORO_SESSION_COOKIE, fixture.adminToken)
+          header(HttpHeaders.Origin, "https://cross-site.example.invalid")
+          header("Sec-Fetch-Site", "cross-site")
+        }
+
+      assertEquals(HttpStatusCode.Forbidden, response.status)
+      assertEquals("cross_site_request_rejected", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.clearCalls)
+      assertEquals(7, fixture.tasks.unclaimed)
+    }
 
   private class Fixture {
     private val users =
@@ -523,6 +609,7 @@ class XoboroNativeOpsTest {
         currentTimeMillis = { 3_000 },
       )
     val history = RecordingHistoricalEventRepository()
+    val tasks = RecordingTaskQueue()
     val sessions =
       UserSessionLifecycle(
         users = users,
@@ -747,6 +834,59 @@ class XoboroNativeOpsTest {
         request = request,
       )
     }
+  }
+
+  /** Only counts() and clearUnclaimed() are exercised; the rest of the queue is not this API's concern. */
+  private class RecordingTaskQueue : DurableTaskQueue {
+    var countsCalls = 0
+      private set
+    var clearCalls = 0
+      private set
+    var unclaimed = 7
+
+    override fun counts(): TaskCounts {
+      countsCalls += 1
+      return TaskCounts(pending = 3, running = 1, dead = 2)
+    }
+
+    override fun clearUnclaimed(): Int {
+      clearCalls += 1
+      val cleared = unclaimed
+      unclaimed = 0
+      return cleared
+    }
+
+    override fun enqueue(
+      task: DurableTask,
+      nowMillis: Long,
+    ): Boolean = error("enqueue is not used by the operations API")
+
+    override fun claimNext(
+      workerId: String,
+      leaseToken: String,
+      nowMillis: Long,
+      leaseDurationMillis: Long,
+    ): ClaimedTask? = error("claimNext is not used by the operations API")
+
+    override fun renewLease(
+      taskId: String,
+      leaseToken: String,
+      nowMillis: Long,
+      leaseDurationMillis: Long,
+    ): Boolean = error("renewLease is not used by the operations API")
+
+    override fun complete(
+      taskId: String,
+      leaseToken: String,
+    ): Boolean = error("complete is not used by the operations API")
+
+    override fun fail(
+      taskId: String,
+      leaseToken: String,
+      error: String,
+      retryAtMillis: Long?,
+      nowMillis: Long,
+    ): Boolean = error("fail is not used by the operations API")
   }
 
   private class RecordingHistoricalEventRepository : HistoricalEventRepository {

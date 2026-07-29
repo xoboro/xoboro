@@ -11,6 +11,8 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.NullableSettingUpdate
@@ -41,6 +43,7 @@ fun Route.xoboroNativeOpsRoutes(
   clientSettings: ClientSettingsLifecycle,
   authenticationActivities: AuthenticationActivityLifecycle,
   history: HistoricalEventRepository,
+  tasks: DurableTaskQueue,
 ) {
   route(XOBORO_API_PREFIX) {
     authenticate(
@@ -172,9 +175,56 @@ fun Route.xoboroNativeOpsRoutes(
         }
         call.respond(history.findAll(call.historicalEventPageRequest()).toNativePage())
       }
+      get("/tasks") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondTaskAdministrationForbidden()
+          return@get
+        }
+        call.respond(tasks.counts().toNativeResponse())
+      }
+      delete("/tasks/unclaimed") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondTaskAdministrationForbidden()
+          return@delete
+        }
+        // The number removed is the useful part of the answer, so this reports 200 with a body
+        // rather than 204. An administrator clearing a backlog needs to know how much went.
+        call.respond(XoboroClearedTasksResponse(cleared = tasks.clearUnclaimed()))
+      }
     }
   }
 }
+
+private suspend fun ApplicationCall.respondTaskAdministrationForbidden() {
+  respond(
+    HttpStatusCode.Forbidden,
+    XoboroApiError(
+      "task_administration_forbidden",
+      "Task administration requires an administrator",
+    ),
+  )
+}
+
+@Serializable
+internal data class XoboroTaskCountsResponse(
+  val pending: Long,
+  val running: Long,
+  val dead: Long,
+)
+
+@Serializable
+internal data class XoboroClearedTasksResponse(
+  val cleared: Int,
+)
+
+private fun TaskCounts.toNativeResponse(): XoboroTaskCountsResponse =
+  XoboroTaskCountsResponse(
+    pending = pending,
+    running = running,
+    dead = dead,
+  )
 
 private fun JsonObject.toServerSettingsUpdate(): ServerSettingsUpdate =
   ServerSettingsUpdate(
