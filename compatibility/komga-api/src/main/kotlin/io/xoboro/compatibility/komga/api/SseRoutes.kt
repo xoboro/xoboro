@@ -201,7 +201,7 @@ fun interface KomgaSseUserSnapshot {
  * ordinary successful login rewrites `passwordHash` and `updatedAtMillis`, and closing streams
  * on that would disconnect users for simply logging in elsewhere.
  */
-private fun User.invalidatesKomgaSessionFrom(connected: User): Boolean =
+internal fun User.invalidatesKomgaSessionFrom(connected: User): Boolean =
   email != connected.email ||
     roles != connected.roles ||
     sharedLibraryIds != connected.sharedLibraryIds ||
