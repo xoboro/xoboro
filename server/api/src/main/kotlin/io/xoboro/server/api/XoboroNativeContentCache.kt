@@ -28,9 +28,13 @@ internal suspend fun ApplicationCall.respondNativeCachedContent(
   if (isNativeContentNotModified(body.entityTag, lastModifiedMillis)) {
     respond(HttpStatusCode.NotModified)
   } else {
-    respondBytes(body.bytes, ContentType.parse(stream.mediaType))
+    respondBytes(body.bytes, stream.mediaType.toNativeContentType())
   }
 }
+
+internal fun String.toNativeContentType(): ContentType =
+  runCatching { ContentType.parse(this) }
+    .getOrDefault(ContentType.Application.OctetStream)
 
 private data class NativeCachedBody(
   val bytes: ByteArray,
@@ -77,7 +81,7 @@ private fun ApplicationCall.isNativeContentNotModified(
   return modifiedSince >= lastModifiedMillis.toHttpSecond()
 }
 
-private fun Long.toHttpSecond(): Long = this - Math.floorMod(this, 1_000L)
+internal fun Long.toHttpSecond(): Long = this - Math.floorMod(this, 1_000L)
 
 private const val ENTITY_TAG_HEX_LENGTH = 32
 private const val CONTENT_BUFFER_SIZE = 8 * 1_024
