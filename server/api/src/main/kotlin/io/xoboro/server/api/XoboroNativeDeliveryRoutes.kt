@@ -1,19 +1,25 @@
 package io.xoboro.server.api
 
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.toHttpDate
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
+import io.ktor.util.date.GMTDate
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.MediaFileKind
+import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.UserRole
 
@@ -137,6 +143,134 @@ fun Route.xoboroNativeDeliveryRoutes(
               },
           )
         }
+        get("/{mediaItemId}/resources/{resource...}") {
+          val user = call.nativeUser()
+          if (UserRole.PAGE_STREAMING !in user.roles) {
+            call.respondPageStreamingForbidden()
+            return@get
+          }
+          val bookId = BookId(call.requiredParameter("mediaItemId"))
+          val item = catalog.findBookByIdOrNull(bookId, user.nativeCatalogAccess())
+          if (item == null) {
+            call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+            return@get
+          }
+          if (item.book.mediaKind != MediaKind.EPUB) {
+            call.respondNativeNotFound("resource_not_found", "Resource was not found")
+            return@get
+          }
+          val resourcePath = call.parameters.getAll("resource")?.joinToString("/").orEmpty()
+          if (resourcePath.isBlank()) {
+            call.respondNativeNotFound("resource_not_found", "Resource was not found")
+            return@get
+          }
+          val stream =
+            try {
+              content.openResource(bookId, resourcePath)
+            } catch (_: IllegalArgumentException) {
+              call.respondNativeNotFound("resource_not_found", "Resource was not found")
+              return@get
+            }
+          if (stream == null) {
+            call.respondNativeNotFound("resource_not_found", "Resource was not found")
+            return@get
+          }
+          try {
+            call.response.header(
+              "Content-Security-Policy",
+              "script-src 'none'; object-src 'none';",
+            )
+            call.respondNativeCachedContent(stream, item.media!!.updatedAtMillis)
+          } finally {
+            stream.close()
+          }
+        }
+        get("/{mediaItemId}/file") {
+          val user = call.nativeUser()
+          if (UserRole.FILE_DOWNLOAD !in user.roles) {
+            call.respondFileDownloadForbidden()
+            return@get
+          }
+          val bookId = BookId(call.requiredParameter("mediaItemId"))
+          val item = catalog.findBookByIdOrNull(bookId, user.nativeCatalogAccess())
+          if (item == null) {
+            call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+            return@get
+          }
+          val totalLength = item.book.fileSize
+          val entityTag = "W/\"$totalLength-${item.book.fileModifiedAtMillis}\""
+          val lastModified =
+            GMTDate(item.book.fileModifiedAtMillis.toHttpSecond()).toHttpDate()
+          call.response.header(HttpHeaders.ETag, entityTag)
+          call.response.header(HttpHeaders.LastModified, lastModified)
+          if (call.isNativeDownloadNotModified(entityTag)) {
+            call.respond(HttpStatusCode.NotModified)
+            return@get
+          }
+          call.response.header(HttpHeaders.AcceptRanges, "bytes")
+          val opened =
+            try {
+              content.openBook(bookId)
+            } catch (_: IllegalArgumentException) {
+              call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+              return@get
+            }
+          if (opened == null) {
+            call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+            return@get
+          }
+          try {
+            call.response.header(
+              HttpHeaders.ContentDisposition,
+              nativeDownloadContentDisposition(item.book.name),
+            )
+            // The validator above is derived from catalog metadata so a conditional request can
+            // short-circuit without opening the file. Body length and range arithmetic must use
+            // the opened stream instead: if the file was replaced without a rescan the catalog
+            // size is stale, and advertising it would emit a Content-Length or Content-Range that
+            // does not match the bytes actually written.
+            val bodyLength = opened.contentLength ?: totalLength
+            when (
+              val range =
+                resolveNativeDownloadRange(
+                  rangeHeader = call.request.headers[HttpHeaders.Range],
+                  ifRangeHeader = call.request.headers[HttpHeaders.IfRange],
+                  entityTag = entityTag,
+                  lastModifiedMillis = item.book.fileModifiedAtMillis,
+                  totalLength = bodyLength,
+                )
+            ) {
+              NativeDownloadRange.Full ->
+                call.respondOutputStream(
+                  contentType = opened.mediaType.toNativeContentType(),
+                  status = HttpStatusCode.OK,
+                  contentLength = bodyLength,
+                ) {
+                  opened.writeNativeDownload(this, bodyLength)
+                }
+              is NativeDownloadRange.Partial -> {
+                call.response.header(
+                  HttpHeaders.ContentRange,
+                  "bytes ${range.first}-${range.last}/$bodyLength",
+                )
+                opened.skipNativeDownloadBytes(range.first)
+                call.respondOutputStream(
+                  contentType = opened.mediaType.toNativeContentType(),
+                  status = HttpStatusCode.PartialContent,
+                  contentLength = range.length,
+                ) {
+                  opened.writeNativeDownload(this, range.length)
+                }
+              }
+              NativeDownloadRange.Unsatisfiable -> {
+                call.response.header(HttpHeaders.ContentRange, "bytes */$bodyLength")
+                call.respond(HttpStatusCode.RequestedRangeNotSatisfiable)
+              }
+            }
+          } finally {
+            opened.close()
+          }
+        }
       }
     }
   }
@@ -181,6 +315,16 @@ private suspend fun ApplicationCall.respondPageStreamingForbidden() {
     XoboroApiError(
       "page_streaming_forbidden",
       "Page streaming permission is required",
+    ),
+  )
+}
+
+private suspend fun ApplicationCall.respondFileDownloadForbidden() {
+  respond(
+    HttpStatusCode.Forbidden,
+    XoboroApiError(
+      "file_download_forbidden",
+      "File download permission is required",
     ),
   )
 }

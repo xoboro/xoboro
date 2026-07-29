@@ -54,6 +54,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
@@ -409,6 +410,366 @@ class XoboroNativeDeliveryTest {
       assertEquals(0, fixture.content.openPageCallCount)
     }
 
+  @Test
+  fun `resource bytes preserve manifest path security policy and response semantics`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(RESOURCE_BYTES.decodeToString(), response.bodyAsText())
+      assertEquals("OEBPS/text/chapter-1.xhtml", fixture.content.lastResourcePath)
+      assertEquals("application/xhtml+xml", response.headers[HttpHeaders.ContentType])
+      val policy = assertNotNull(response.headers["Content-Security-Policy"])
+      assertTrue("script-src 'none'" in policy)
+      assertTrue("object-src 'none'" in policy)
+      assertNull(response.headers[HttpHeaders.ContentDisposition])
+      assertEquals(1, fixture.content.openResourceCallCount)
+      assertTrue(assertNotNull(fixture.content.lastResourceStream).closed)
+    }
+
+  @Test
+  fun `malformed resource media type falls back to octet stream`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      fixture.content.resourceStreamFactory = {
+        FakeMediaContentStream(RESOURCE_BYTES, "not a media type")
+      }
+      installDelivery(fixture)
+
+      val response = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(
+        "application/octet-stream",
+        response.headers[HttpHeaders.ContentType],
+      )
+      assertEquals(RESOURCE_BYTES.decodeToString(), response.bodyAsText())
+      assertTrue(assertNotNull(fixture.content.lastResourceStream).closed)
+    }
+
+  @Test
+  fun `non epub resource request returns not found without content access`() =
+    testApplication {
+      val fixture = Fixture.nonEpub()
+      installDelivery(fixture)
+
+      val response = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("resource_not_found", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.content.openResourceCallCount)
+    }
+
+  @Test
+  fun `unknown and invalid resource paths return resource not found`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val unknown =
+        client.get("$RESOURCES_PATH/OEBPS/text/missing.xhtml") {
+          bearerAuth(fixture.token)
+        }
+
+      assertEquals(HttpStatusCode.NotFound, unknown.status)
+      assertEquals("resource_not_found", unknown.body<XoboroApiError>().code)
+      assertEquals(1, fixture.content.openResourceCallCount)
+
+      fixture.content.resourceFailure = IllegalArgumentException("Synthetic resource failure")
+      val invalid = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, invalid.status)
+      assertEquals("resource_not_found", invalid.body<XoboroApiError>().code)
+      assertEquals(2, fixture.content.openResourceCallCount)
+    }
+
+  @Test
+  fun `blank resource tail returns not found without content access`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response = client.get("$RESOURCES_PATH/") { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("resource_not_found", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.content.openResourceCallCount)
+    }
+
+  @Test
+  fun `resource entity tag revalidates matching content and rejects stale validators`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+      val initial = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+      val entityTag = assertNotNull(initial.headers[HttpHeaders.ETag])
+
+      val matching =
+        client.get(RESOURCE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.IfNoneMatch, entityTag)
+        }
+      val stale =
+        client.get(RESOURCE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.IfNoneMatch, "\"stale\"")
+        }
+
+      assertEquals(HttpStatusCode.NotModified, matching.status)
+      assertEquals("", matching.bodyAsText())
+      assertEquals(HttpStatusCode.OK, stale.status)
+      assertEquals(RESOURCE_BYTES.decodeToString(), stale.bodyAsText())
+      assertEquals(3, fixture.content.openResourceCallCount)
+      assertTrue(assertNotNull(fixture.content.lastResourceStream).closed)
+    }
+
+  @Test
+  fun `restricted user cannot open resource bytes`() =
+    testApplication {
+      val fixture = Fixture.restricted()
+      installDelivery(fixture)
+
+      val response = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+      assertEquals(1, fixture.catalog.findByIdCallCount)
+      assertEquals(0, fixture.content.openResourceCallCount)
+    }
+
+  @Test
+  fun `page streaming role precedes catalog lookup for resource bytes`() =
+    testApplication {
+      val fixture = Fixture.roleLess()
+      installDelivery(fixture)
+
+      val response = client.get(RESOURCE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Forbidden, response.status)
+      assertEquals("page_streaming_forbidden", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.catalog.findByIdCallCount)
+      assertEquals(0, fixture.content.openResourceCallCount)
+    }
+
+  @Test
+  fun `full file download streams validators ranges and conformant disposition`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val response = client.get(FILE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(FILE_BYTES.decodeToString(), response.bodyAsText())
+      assertEquals("bytes", response.headers[HttpHeaders.AcceptRanges])
+      assertEquals(
+        "W/\"${FILE_BYTES.size}-2\"",
+        response.headers[HttpHeaders.ETag],
+      )
+      assertNotNull(response.headers[HttpHeaders.LastModified])
+      assertEquals(FILE_BYTES.size.toString(), response.headers[HttpHeaders.ContentLength])
+      val disposition = assertNotNull(response.headers[HttpHeaders.ContentDisposition])
+      assertTrue("attachment" in disposition)
+      assertTrue("filename=\"Synthetic delivery.epub\"" in disposition)
+      assertTrue("filename*=UTF-8''Synthetic%20delivery.epub" in disposition)
+      assertFalse("=?UTF-8?Q?" in disposition)
+      assertEquals(1, fixture.content.openBookCallCount)
+      assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+    }
+
+  @Test
+  fun `non ascii download name has ascii fallback and utf8 extended filename`() =
+    testApplication {
+      val fixture = Fixture.downloadable(name = "Synthetic cafe\u0301 \u2603.epub")
+      installDelivery(fixture)
+
+      val response = client.get(FILE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val disposition = assertNotNull(response.headers[HttpHeaders.ContentDisposition])
+      assertTrue("filename=\"Synthetic cafe_ _.epub\"" in disposition)
+      assertTrue(
+        "filename*=UTF-8''Synthetic%20cafe%CC%81%20%E2%98%83.epub" in disposition,
+      )
+      assertTrue(disposition.all { character -> character.code in 0x20..0x7e })
+      assertFalse("=?UTF-8?Q?" in disposition)
+    }
+
+  @Test
+  fun `fixed file range returns exact partial bytes and closes stream`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val response =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=2-5")
+        }
+
+      assertEquals(HttpStatusCode.PartialContent, response.status)
+      assertEquals("bytes 2-5/${FILE_BYTES.size}", response.headers[HttpHeaders.ContentRange])
+      assertEquals("nthe", response.bodyAsText())
+      assertEquals("4", response.headers[HttpHeaders.ContentLength])
+      assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+    }
+
+  @Test
+  fun `suffix and open ended file ranges return requested bytes`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val suffix =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=-3")
+        }
+      val openEnded =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=10-")
+        }
+
+      assertEquals(HttpStatusCode.PartialContent, suffix.status)
+      assertEquals(
+        "bytes ${FILE_BYTES.size - 3}-${FILE_BYTES.size - 1}/${FILE_BYTES.size}",
+        suffix.headers[HttpHeaders.ContentRange],
+      )
+      assertEquals(FILE_BYTES.takeLast(3).toByteArray().decodeToString(), suffix.bodyAsText())
+      assertEquals(HttpStatusCode.PartialContent, openEnded.status)
+      assertEquals(FILE_BYTES.copyOfRange(10, FILE_BYTES.size).decodeToString(), openEnded.bodyAsText())
+      assertEquals(2, fixture.content.openBookCallCount)
+      assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+    }
+
+  @Test
+  fun `unsatisfiable file range returns 416 and closes stream`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val response =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=999999-")
+        }
+
+      assertEquals(HttpStatusCode.RequestedRangeNotSatisfiable, response.status)
+      assertEquals("bytes */${FILE_BYTES.size}", response.headers[HttpHeaders.ContentRange])
+      assertEquals("", response.bodyAsText())
+      assertEquals("bytes", response.headers[HttpHeaders.AcceptRanges])
+      assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+    }
+
+  @Test
+  fun `multiple and malformed file ranges serve the complete body`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      for (range in listOf("bytes=0-1,4-5", "items=0-1", "bytes=broken")) {
+        val response =
+          client.get(FILE_PATH) {
+            bearerAuth(fixture.token)
+            header(HttpHeaders.Range, range)
+          }
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(FILE_BYTES.decodeToString(), response.bodyAsText())
+        assertNull(response.headers[HttpHeaders.ContentRange])
+        assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+      }
+      assertEquals(3, fixture.content.openBookCallCount)
+    }
+
+  @Test
+  fun `if range mismatch serves full body while matching validators preserve range`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+      val initial = client.get(FILE_PATH) { bearerAuth(fixture.token) }
+      val entityTag = assertNotNull(initial.headers[HttpHeaders.ETag])
+      val lastModified = assertNotNull(initial.headers[HttpHeaders.LastModified])
+
+      val mismatch =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=2-5")
+          header(HttpHeaders.IfRange, "W/\"stale\"")
+        }
+      val matchingTag =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=2-5")
+          header(HttpHeaders.IfRange, entityTag.removePrefix("W/"))
+        }
+      val matchingDate =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.Range, "bytes=2-5")
+          header(HttpHeaders.IfRange, lastModified)
+        }
+
+      assertEquals(HttpStatusCode.OK, mismatch.status)
+      assertEquals(FILE_BYTES.decodeToString(), mismatch.bodyAsText())
+      assertEquals(HttpStatusCode.PartialContent, matchingTag.status)
+      assertEquals("nthe", matchingTag.bodyAsText())
+      assertEquals(HttpStatusCode.PartialContent, matchingDate.status)
+      assertEquals("nthe", matchingDate.bodyAsText())
+      assertEquals(4, fixture.content.openBookCallCount)
+      assertTrue(assertNotNull(fixture.content.lastBookStream).closed)
+    }
+
+  @Test
+  fun `matching file entity tag returns 304 before opening content`() =
+    testApplication {
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val response =
+        client.get(FILE_PATH) {
+          bearerAuth(fixture.token)
+          header(HttpHeaders.IfNoneMatch, "\"${FILE_BYTES.size}-2\"")
+        }
+
+      assertEquals(HttpStatusCode.NotModified, response.status)
+      assertEquals("", response.bodyAsText())
+      assertEquals("W/\"${FILE_BYTES.size}-2\"", response.headers[HttpHeaders.ETag])
+      assertEquals(0, fixture.content.openBookCallCount)
+      assertNull(response.headers[HttpHeaders.AcceptRanges])
+    }
+
+  @Test
+  fun `file download role precedes catalog lookup`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response = client.get(FILE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Forbidden, response.status)
+      assertEquals("file_download_forbidden", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.catalog.findByIdCallCount)
+      assertEquals(0, fixture.content.openBookCallCount)
+    }
+
+  @Test
+  fun `restricted user cannot open original file`() =
+    testApplication {
+      val fixture = Fixture.downloadRestricted()
+      installDelivery(fixture)
+
+      val response = client.get(FILE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+      assertEquals(1, fixture.catalog.findByIdCallCount)
+      assertEquals(0, fixture.content.openBookCallCount)
+    }
+
   private fun ApplicationTestBuilder.installDelivery(fixture: Fixture) {
     application {
       install(ContentNegotiation) {
@@ -448,9 +809,11 @@ class XoboroNativeDeliveryTest {
   private class Fixture private constructor(
     user: User,
     status: MediaStatus,
+    mediaKind: MediaKind = MediaKind.EPUB,
+    name: String = "Synthetic delivery.epub",
   ) {
     private val users = InMemoryUserRepository(user)
-    private val book = syntheticBook(status)
+    private val book = syntheticBook(status, mediaKind, name)
     val sessions =
       UserSessionLifecycle(
         users = users,
@@ -480,6 +843,39 @@ class XoboroNativeDeliveryTest {
           user =
             syntheticUser(
               roles = setOf(UserRole.PAGE_STREAMING),
+              sharesAllLibraries = false,
+              sharedLibraryIds = setOf(VISIBLE_LIBRARY_ID),
+            ),
+          status = MediaStatus.READY,
+        )
+
+      fun nonEpub(): Fixture =
+        Fixture(
+          user =
+            syntheticUser(
+              roles = setOf(UserRole.PAGE_STREAMING),
+              sharesAllLibraries = true,
+            ),
+          status = MediaStatus.READY,
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+        )
+
+      fun downloadable(name: String = "Synthetic delivery.epub"): Fixture =
+        Fixture(
+          user =
+            syntheticUser(
+              roles = setOf(UserRole.FILE_DOWNLOAD),
+              sharesAllLibraries = true,
+            ),
+          status = MediaStatus.READY,
+          name = name,
+        )
+
+      fun downloadRestricted(): Fixture =
+        Fixture(
+          user =
+            syntheticUser(
+              roles = setOf(UserRole.FILE_DOWNLOAD),
               sharesAllLibraries = false,
               sharedLibraryIds = setOf(VISIBLE_LIBRARY_ID),
             ),
@@ -557,9 +953,31 @@ class XoboroNativeDeliveryTest {
       private set
     var lastStream: FakeMediaContentStream? = null
       private set
+    var openResourceCallCount = 0
+      private set
+    var lastResourcePath: String? = null
+      private set
+    var lastResourceStream: FakeMediaContentStream? = null
+      private set
+    var openBookCallCount = 0
+      private set
+    var lastBookStream: FakeMediaContentStream? = null
+      private set
     var failure: IllegalArgumentException? = null
+    var resourceFailure: IllegalArgumentException? = null
+    var bookFailure: IllegalArgumentException? = null
     var streamFactory: () -> FakeMediaContentStream? = {
       FakeMediaContentStream(PAGE_BYTES)
+    }
+    var resourceStreamFactory: (String) -> FakeMediaContentStream? = { resource ->
+      if (resource == RESOURCE_ARCHIVE_PATH) {
+        FakeMediaContentStream(RESOURCE_BYTES, "application/xhtml+xml")
+      } else {
+        null
+      }
+    }
+    var bookStreamFactory: () -> FakeMediaContentStream? = {
+      FakeMediaContentStream(FILE_BYTES, "application/epub+zip")
     }
 
     override fun pages(bookId: BookId): List<BookPage>? {
@@ -578,16 +996,30 @@ class XoboroNativeDeliveryTest {
       return streamFactory().also { lastStream = it }
     }
 
-    override fun openBook(bookId: BookId): MediaContentStream? = null
+    override fun openBook(bookId: BookId): MediaContentStream? {
+      openBookCallCount += 1
+      bookFailure?.let { throw it }
+      return bookStreamFactory().also { lastBookStream = it }
+    }
+
+    override fun openResource(
+      bookId: BookId,
+      resource: String,
+    ): MediaContentStream? {
+      openResourceCallCount += 1
+      lastResourcePath = resource
+      resourceFailure?.let { throw it }
+      return resourceStreamFactory(resource).also { lastResourceStream = it }
+    }
   }
 
   private class FakeMediaContentStream(
     private val bytes: ByteArray,
+    override val mediaType: String = "image/png",
   ) : MediaContentStream {
     private var position = 0
     var closed = false
       private set
-    override val mediaType: String = "image/png"
     override val contentLength: Long = bytes.size.toLong()
 
     override fun read(
@@ -649,10 +1081,15 @@ class XoboroNativeDeliveryTest {
     private val SERIES_ID = SeriesId("series-delivery")
     private val USER_ID = UserId("user-delivery")
     private val PAGE_BYTES = "synthetic-page-bytes".encodeToByteArray()
+    private val RESOURCE_BYTES = "<p>Synthetic chapter</p>".encodeToByteArray()
+    private val FILE_BYTES = "synthetic-original-file".encodeToByteArray()
+    private const val RESOURCE_ARCHIVE_PATH = "OEBPS/text/chapter-1.xhtml"
     private const val PAGES_PATH = "$XOBORO_API_PREFIX/media-items/media-delivery/pages"
     private const val PAGE_PATH = "$PAGES_PATH/1"
     private const val RESOURCES_PATH =
       "$XOBORO_API_PREFIX/media-items/media-delivery/resources"
+    private const val RESOURCE_PATH = "$RESOURCES_PATH/$RESOURCE_ARCHIVE_PATH"
+    private const val FILE_PATH = "$XOBORO_API_PREFIX/media-items/media-delivery/file"
 
     private fun syntheticUser(
       roles: Set<UserRole>,
@@ -669,18 +1106,22 @@ class XoboroNativeDeliveryTest {
         createdAtMillis = 1,
       )
 
-    private fun syntheticBook(status: MediaStatus): CatalogBook {
+    private fun syntheticBook(
+      status: MediaStatus,
+      mediaKind: MediaKind,
+      name: String,
+    ): CatalogBook {
       val book =
         Book(
           id = MEDIA_ID,
           libraryId = HIDDEN_LIBRARY_ID,
           seriesId = SERIES_ID,
-          name = "Synthetic delivery.epub",
+          name = name,
           relativePath = "Synthetic delivery/Synthetic delivery.epub",
           sourceItemId = "file:///synthetic/delivery/book.epub",
-          mediaKind = MediaKind.EPUB,
+          mediaKind = mediaKind,
           fileModifiedAtMillis = 2,
-          fileSize = 100,
+          fileSize = FILE_BYTES.size.toLong(),
           number = 1,
           createdAtMillis = 1,
         )
