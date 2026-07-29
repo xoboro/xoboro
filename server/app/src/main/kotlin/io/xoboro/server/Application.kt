@@ -85,6 +85,7 @@ import io.xoboro.server.api.XoboroInvalidQueryException
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
+import io.xoboro.server.api.xoboroNativeCollectionsRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeMetadataRoutes
@@ -475,6 +476,19 @@ fun Application.xoboroModule(
           }
           if (catalogReadRepository != null && artworkLifecycle != null) {
             xoboroNativeArtworkRoutes(catalogReadRepository, artworkLifecycle)
+          }
+          if (
+            organizationLifecycle != null &&
+            seriesCollectionRepository != null &&
+            readListRepository != null &&
+            catalogReadRepository != null
+          ) {
+            xoboroNativeCollectionsRoutes(
+              organization = organizationLifecycle,
+              collections = seriesCollectionRepository,
+              readLists = readListRepository,
+              catalog = catalogReadRepository,
+            )
           }
           if (libraryAdministrationLifecycle != null && catalogReadRepository != null) {
             xoboroNativeCatalogRoutes(

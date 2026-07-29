@@ -184,5 +184,5 @@ class XoboroInvalidQueryException(
   message: String,
 ) : IllegalArgumentException(message)
 
-private const val DEFAULT_PAGE_SIZE = 20
-private const val MAXIMUM_PAGE_SIZE = 200
+internal const val DEFAULT_PAGE_SIZE = 20
+internal const val MAXIMUM_PAGE_SIZE = 200
