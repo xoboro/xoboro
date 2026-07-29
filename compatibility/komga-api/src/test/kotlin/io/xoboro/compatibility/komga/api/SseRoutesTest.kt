@@ -90,6 +90,12 @@ class SseRoutesTest {
             komgaSseRoutes(
               events = hub,
               users = KomgaSseUserSnapshot(users::findByIdOrNull),
+              // Short periods so the server loop is never parked in a multi-second suspension
+              // when the client ends the request. A parked loop can outlive the test body, and
+              // runTest reports that as an uncompleted coroutine rather than a test failure.
+              heartbeatPeriod = QUIET_HEARTBEAT,
+              taskPeriod = RECHECK,
+              authorizationRecheckPeriod = RECHECK,
               tasks =
                 KomgaTaskStatusProvider {
                   KomgaTaskQueueSseDto(
