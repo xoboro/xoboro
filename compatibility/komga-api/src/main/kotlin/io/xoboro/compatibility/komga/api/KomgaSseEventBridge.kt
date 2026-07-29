@@ -12,6 +12,19 @@ import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.SeriesId
 
+/**
+ * Maps domain events onto the Komga-shaped SSE stream.
+ *
+ * Library scoping is applied where the domain event carries a `LibraryId` — [LibraryEvent] and
+ * [CatalogMutationEvent], which together are the entire scan firehose. [OrganizationEvent] and
+ * [ArtworkEvent] carry no library scope in their payloads (a collection may legitimately span
+ * libraries, and an artwork event carries only owner kind and id), so they are still broadcast
+ * to every subscriber. Resolving their scope would mean a per-event lookup that cannot work for
+ * deletions, so the gap is recorded in ADR 0087 rather than closed with a fail-open filter.
+ *
+ * [CatalogImportEvent] stays administrator-only and [ReadProgressEvent]/[UserEvent] stay scoped
+ * to their own user, as before.
+ */
 class KomgaSseEventBridge(
   private val events: KomgaSseEventHub,
   private val bookSeriesId: (BookId) -> SeriesId? = { null },
@@ -25,6 +38,7 @@ class KomgaSseEventBridge(
           is LibraryEvent.Deleted -> "LibraryDeleted"
         },
       data = KomgaLibrarySseDto(event.library.id.value),
+      libraryId = event.library.id,
     )
   }
 
@@ -39,6 +53,7 @@ class KomgaSseEventBridge(
               seriesId = event.seriesId.value,
               libraryId = event.libraryId.value,
             ),
+          libraryId = event.libraryId,
         )
       is CatalogMutationEvent.Series ->
         events.publishJson(
@@ -48,6 +63,7 @@ class KomgaSseEventBridge(
               seriesId = event.seriesId.value,
               libraryId = event.libraryId.value,
             ),
+          libraryId = event.libraryId,
         )
     }
   }
