@@ -42,6 +42,7 @@ import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
 import io.xoboro.compatibility.komga.api.komgaSseRoutes
 import io.xoboro.core.application.ApiKeyLifecycle
+import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
@@ -242,6 +243,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     koreaderSyncLifecycle = runtime.koreaderSyncLifecycle,
     sseEventHub = runtime.sseEventHub,
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
+    durableTaskQueue = runtime.durableTaskQueue,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
     corsAllowedOrigins = runtime.corsAllowedOrigins,
@@ -293,6 +295,7 @@ fun Application.xoboroModule(
   koreaderSyncLifecycle: KoreaderSyncLifecycle? = null,
   sseEventHub: KomgaSseEventHub? = null,
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
+  durableTaskQueue: DurableTaskQueue? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
   corsAllowedOrigins: Set<String> = emptySet(),
@@ -479,13 +482,15 @@ fun Application.xoboroModule(
             serverSettingsLifecycle != null &&
             clientSettingsLifecycle != null &&
             authenticationActivityLifecycle != null &&
-            historicalEventRepository != null
+            historicalEventRepository != null &&
+            durableTaskQueue != null
           ) {
             xoboroNativeOpsRoutes(
               serverSettingsLifecycle,
               clientSettingsLifecycle,
               authenticationActivityLifecycle,
               historicalEventRepository,
+              durableTaskQueue,
             )
           }
           if (catalogReadRepository != null && artworkLifecycle != null) {

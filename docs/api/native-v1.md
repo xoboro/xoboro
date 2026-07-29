@@ -669,3 +669,26 @@ content restrictions. `/facets` requires one case-sensitive `facet` value:
 `genre`, `seriesTag`, `bookTag`, `language`, `publisher`, `ageRating`,
 `sharingLabel`, or `releaseYear`. Both facet routes accept an optional repeated
 `libraryId` filter.
+
+## Task queue
+
+`GET /api/xoboro/v1/tasks` returns the durable queue's counts and requires an
+administrator:
+
+```json
+{ "pending": 3, "running": 1, "dead": 2 }
+```
+
+`DELETE /api/xoboro/v1/tasks/unclaimed` discards queued work that no worker has
+claimed and requires an administrator. It answers `200` with the number removed
+rather than `204`, because the count is the useful part of the reply for an
+administrator clearing a backlog:
+
+```json
+{ "cleared": 7 }
+```
+
+Running and dead tasks are untouched: only unclaimed work is discarded. Both
+routes return `403 task_administration_forbidden` for a non-administrator, and
+the administrator check runs before the queue is consulted, so a refused request
+never reaches it.

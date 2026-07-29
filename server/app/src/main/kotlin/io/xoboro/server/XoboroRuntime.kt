@@ -12,6 +12,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.CatalogReadRepository
@@ -196,6 +197,7 @@ class XoboroRuntime private constructor(
   val koreaderSyncLifecycle: KoreaderSyncLifecycle,
   val sseEventHub: KomgaSseEventHub,
   val sseTaskStatusProvider: KomgaTaskStatusProvider,
+  val durableTaskQueue: DurableTaskQueue,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
@@ -850,6 +852,7 @@ class XoboroRuntime private constructor(
           koreaderSyncLifecycle = koreaderSyncLifecycle,
           sseEventHub = sseEvents,
           sseTaskStatusProvider = sseTaskStatusProvider,
+          durableTaskQueue = queue,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,
