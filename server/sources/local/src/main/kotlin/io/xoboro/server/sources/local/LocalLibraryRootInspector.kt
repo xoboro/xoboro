@@ -29,6 +29,9 @@ class LocalLibraryRootInspector(
     }
   }
 
+  /** Matches [LocalSourceInventory]'s own precondition, so the two cannot disagree about a root. */
+  override fun isReadable(itemId: String): Boolean = Files.isReadable(itemId.toFilePath())
+
   override fun isSameOrAncestor(
     possibleAncestorItemId: String,
     possibleDescendantItemId: String,

@@ -21,6 +21,7 @@ import io.xoboro.core.application.CompatibilityMaintenanceRequester
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryAvailabilityLifecycle
+import io.xoboro.core.application.LibraryAvailabilityProbe
 import io.xoboro.core.application.LibraryEvent
 import io.xoboro.core.application.LibraryEventPublisher
 import io.xoboro.core.application.LibraryLifecycle
@@ -174,6 +175,7 @@ class XoboroRuntime private constructor(
   val announcementLifecycle: AnnouncementLifecycle,
   val artworkLifecycle: ArtworkLifecycle,
   val libraryAdministrationLifecycle: LibraryAdministrationLifecycle,
+  val libraryAvailabilityProbe: LibraryAvailabilityProbe,
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
@@ -572,16 +574,23 @@ class XoboroRuntime private constructor(
               )
             }
           }
+        val libraryRootAccess =
+          RoutingLibraryRootAccess(
+            listOf(LocalLibraryRootInspector()),
+          )
+        val libraryAvailabilityProbe =
+          LibraryAvailabilityProbe(
+            libraries = libraries,
+            rootAccess = libraryRootAccess,
+            availability = libraryAvailabilityLifecycle,
+          )
         val libraryAdministrationLifecycle =
           LibraryAdministrationLifecycle(
             libraries = libraries,
             lifecycle =
               LibraryLifecycle(
                 repository = libraries,
-                rootAccess =
-                  RoutingLibraryRootAccess(
-                    listOf(LocalLibraryRootInspector()),
-                  ),
+                rootAccess = libraryRootAccess,
                 maintenanceQueue = libraryMaintenanceQueue,
                 eventPublisher = { event ->
                   sseBridge.publish(event)
@@ -884,6 +893,7 @@ class XoboroRuntime private constructor(
           announcementLifecycle = announcementLifecycle,
           artworkLifecycle = artworkLifecycle,
           libraryAdministrationLifecycle = libraryAdministrationLifecycle,
+          libraryAvailabilityProbe = libraryAvailabilityProbe,
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,

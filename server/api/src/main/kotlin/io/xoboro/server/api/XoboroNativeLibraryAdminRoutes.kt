@@ -12,6 +12,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryAvailabilityProbe
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.domain.DuplicateLibraryNameException
@@ -25,6 +26,7 @@ fun Route.xoboroNativeLibraryAdminRoutes(
   libraries: LibraryAdministrationLifecycle,
   scanRequester: LibraryScanRequester,
   maintenanceRequester: LibraryMaintenanceRequester,
+  availabilityProbe: LibraryAvailabilityProbe,
 ) {
   route(XOBORO_API_PREFIX) {
     authenticate(
@@ -139,6 +141,21 @@ fun Route.xoboroNativeLibraryAdminRoutes(
           if (!call.requireExistingLibrary(libraries, id)) return@post
           maintenanceRequester.emptyTrash(id)
           call.respond(HttpStatusCode.Accepted)
+        }
+        // Synchronous, and 200 rather than the 202 the task triggers above return: this is one
+        // stat of the library root, and the resulting state is the whole point of the request.
+        // Routing it through the durable queue would make an operator poll for an answer the
+        // server already has.
+        post("/{libraryId}/availability") {
+          val user = call.nativeUser()
+          if (!call.requireLibraryAdministrator(user)) return@post
+          val id = LibraryId(call.requiredParameter("libraryId"))
+          val probed = availabilityProbe.probe(id)
+          if (probed == null) {
+            call.respondNativeNotFound("library_not_found", "Library was not found")
+            return@post
+          }
+          call.respond(probed.toNativeResponse(user))
         }
       }
     }

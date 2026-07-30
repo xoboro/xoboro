@@ -27,6 +27,8 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryAvailabilityLifecycle
+import io.xoboro.core.application.LibraryAvailabilityProbe
 import io.xoboro.core.application.LibraryEventPublisher
 import io.xoboro.core.application.LibraryLifecycle
 import io.xoboro.core.application.LibraryMaintenanceQueue
@@ -51,8 +53,10 @@ import io.xoboro.core.domain.UserRole
 import io.xoboro.server.security.InMemoryUserSessionRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 class XoboroNativeLibraryAdminTest {
@@ -314,6 +318,97 @@ class XoboroNativeLibraryAdminTest {
     }
 
   @Test
+  fun `clears the unavailable flag when the root is reachable again`() =
+    testApplication {
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+
+      val response =
+        client.post("$LIBRARIES_PATH/$UNAVAILABLE_LIBRARY_ID/availability") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val library = response.body<XoboroLibraryResponse>()
+      assertFalse(library.unavailable)
+      assertNull(library.unavailableSinceMillis)
+      // Recovery is persisted, not just reported: the point of the endpoint is that a normal
+      // DELETE stops being refused without a full scan having to run first.
+      assertNull(
+        fixture.repository.findByIdOrNull(LibraryId(UNAVAILABLE_LIBRARY_ID))?.unavailableAtMillis,
+      )
+    }
+
+  @Test
+  fun `marks a library unavailable when its root has gone missing`() =
+    testApplication {
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+
+      val response =
+        client.post("$LIBRARIES_PATH/$MISSING_ROOT_LIBRARY_ID/availability") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val library = response.body<XoboroLibraryResponse>()
+      assertTrue(library.unavailable)
+      assertEquals(PROBE_TIME_MILLIS, library.unavailableSinceMillis)
+    }
+
+  @Test
+  fun `marks a library unavailable when its root is a directory it cannot read`() =
+    testApplication {
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+
+      // The discriminating case: the root exists and is a directory, so a check based on root type
+      // alone would report available, and the next scan would immediately mark it unavailable
+      // again because the inventory requires a *readable* directory.
+      val response =
+        client.post("$LIBRARIES_PATH/$UNREADABLE_ROOT_LIBRARY_ID/availability") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val library = response.body<XoboroLibraryResponse>()
+      assertTrue(library.unavailable)
+      assertEquals(PROBE_TIME_MILLIS, library.unavailableSinceMillis)
+    }
+
+  @Test
+  fun `reports the outage timestamp without probing`() =
+    testApplication {
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+
+      val response =
+        client.put("$LIBRARIES_PATH/$UNAVAILABLE_LIBRARY_ID") {
+          bearerAuth(fixture.adminToken)
+          contentType(ContentType.Application.Json)
+          setBody(validRequest(name = "Renamed Unavailable Library"))
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(1_500, response.body<XoboroLibraryResponse>().unavailableSinceMillis)
+    }
+
+  @Test
+  fun `returns not found when probing a library that does not exist`() =
+    testApplication {
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+
+      val response =
+        client.post("$LIBRARIES_PATH/library-absent/availability") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("library_not_found", response.body<XoboroApiError>().code)
+    }
+
+  @Test
   fun `deletes an unavailable library when deletion is forced`() =
     testApplication {
       val fixture = Fixture()
@@ -487,6 +582,7 @@ class XoboroNativeLibraryAdminTest {
           libraries = fixture.libraries,
           scanRequester = fixture.scan,
           maintenanceRequester = fixture.maintenance,
+          availabilityProbe = fixture.availabilityProbe,
         )
       }
     }
@@ -528,6 +624,16 @@ class XoboroNativeLibraryAdminTest {
             root = "/synthetic/library/unavailable",
             unavailableAtMillis = 1_500,
           ),
+          syntheticLibrary(
+            id = MISSING_ROOT_LIBRARY_ID,
+            name = "Missing Root Library",
+            root = "/synthetic/missing",
+          ),
+          syntheticLibrary(
+            id = UNREADABLE_ROOT_LIBRARY_ID,
+            name = "Unreadable Root Library",
+            root = "/synthetic/unreadable",
+          ),
         ),
       )
     val lifecycleMaintenance = RecordingLibraryMaintenanceQueue()
@@ -543,6 +649,17 @@ class XoboroNativeLibraryAdminTest {
           ),
         libraryIdFactory = { "library-created" },
         currentTimeMillis = { 2_000 },
+      )
+    val availabilityProbe =
+      LibraryAvailabilityProbe(
+        libraries = repository,
+        rootAccess = SyntheticRootAccess,
+        availability =
+          LibraryAvailabilityLifecycle(
+            libraries = repository,
+            currentTimeMillis = { PROBE_TIME_MILLIS },
+            eventPublisher = LibraryEventPublisher {},
+          ),
       )
     val scan = RecordingLibraryScanRequester()
     val maintenance = RecordingLibraryMaintenanceRequester()
@@ -726,6 +843,11 @@ class XoboroNativeLibraryAdminTest {
         else -> RootType.DIRECTORY
       }
 
+    // A directory that exists but cannot be read is the case `typeOf` alone cannot express, and
+    // the one where an availability probe would otherwise disagree with the next scan.
+    override fun isReadable(root: SourceLocation): Boolean =
+      root.itemId != "/synthetic/unreadable"
+
     override fun isSameOrAncestor(
       possibleAncestor: SourceLocation,
       possibleDescendant: SourceLocation,
@@ -782,6 +904,9 @@ class XoboroNativeLibraryAdminTest {
     private const val LIBRARIES_PATH = "$XOBORO_API_PREFIX/libraries"
     private const val AVAILABLE_LIBRARY_ID = "library-available"
     private const val UNAVAILABLE_LIBRARY_ID = "library-unavailable"
+    private const val MISSING_ROOT_LIBRARY_ID = "library-missing-root"
+    private const val UNREADABLE_ROOT_LIBRARY_ID = "library-unreadable-root"
+    private const val PROBE_TIME_MILLIS = 3_000L
     private val ADMIN_USER_ID = UserId("admin-user")
     private val READER_USER_ID = UserId("reader-user")
     private val ADMINISTRATION_ROUTES =
@@ -796,6 +921,7 @@ class XoboroNativeLibraryAdminTest {
           "$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/metadata-refresh",
         ),
         AdministrationRoute(HttpMethod.Post, "$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/empty-trash"),
+        AdministrationRoute(HttpMethod.Post, "$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/availability"),
       )
 
     private fun validRequest(

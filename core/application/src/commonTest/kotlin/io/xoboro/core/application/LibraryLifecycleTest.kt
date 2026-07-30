@@ -182,6 +182,8 @@ class LibraryLifecycleTest {
   ) : LibraryRootAccess {
     override fun typeOf(root: SourceLocation): RootType = rootType
 
+    override fun isReadable(root: SourceLocation): Boolean = true
+
     override fun isSameOrAncestor(
       possibleAncestor: SourceLocation,
       possibleDescendant: SourceLocation,

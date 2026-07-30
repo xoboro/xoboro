@@ -64,6 +64,8 @@ class LibraryAdministrationLifecycleTest {
   private object DirectoryRootAccess : LibraryRootAccess {
     override fun typeOf(root: SourceLocation): RootType = RootType.DIRECTORY
 
+    override fun isReadable(root: SourceLocation): Boolean = true
+
     override fun isSameOrAncestor(
       possibleAncestor: SourceLocation,
       possibleDescendant: SourceLocation,

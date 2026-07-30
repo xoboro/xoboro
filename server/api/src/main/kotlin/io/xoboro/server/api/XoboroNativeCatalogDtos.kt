@@ -32,6 +32,12 @@ data class XoboroLibraryResponse(
   val id: String,
   val name: String,
   val unavailable: Boolean,
+  /**
+   * When the outage was first observed, or null while the library is available. [unavailable] on its
+   * own cannot distinguish a mount that dropped a minute ago from one that has been gone for a week,
+   * which is the difference between waiting and intervening.
+   */
+  val unavailableSinceMillis: Long? = null,
   val source: XoboroLibrarySourceResponse? = null,
   val createdAtMillis: Long,
   val updatedAtMillis: Long,
@@ -155,6 +161,7 @@ internal fun Library.toNativeResponse(user: User): XoboroLibraryResponse =
     id = id.value,
     name = name,
     unavailable = unavailableAtMillis != null,
+    unavailableSinceMillis = unavailableAtMillis,
     source =
       if (user.isAdmin) {
         XoboroLibrarySourceResponse(
