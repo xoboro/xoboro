@@ -108,16 +108,37 @@ internal class JooqBookMetadataAggregationRepository(
    *   waiting cannot change the fact that this transaction's read snapshot is already fixed - so
    *   SQLite fails it immediately instead.
    *
-   * Two layers of defense:
-   * 1. [forceImmediateWriteLock] asks this connection's next transaction to open with `BEGIN
-   *    IMMEDIATE` instead of the default deferred `BEGIN`, so the write lock is acquired upfront,
-   *    before any read establishes a snapshot that could go stale. When this connection needs to
-   *    wait for another writer, it now does so as a genuine fresh lock acquisition, which
-   *    `busy_timeout` *does* wait for.
-   * 2. [retryOnBusySnapshot] is a bounded safety net for whatever this first layer does not catch.
-   *    SQLite's own documentation gives the same remedy for both failure shapes above: roll back
-   *    and retry the whole transaction. A fresh attempt gets a new read snapshot and, if it needs to
-   *    write, a genuinely fresh lock acquisition.
+   * Two layers of defense, and the interaction between them is not what it first looks like:
+   * 1. [forceImmediateWriteLock] sets this pooled connection's SQLite transaction mode to
+   *    IMMEDIATE. `XoboroDatabase.transaction { block -> dsl.transactionResult { config ->
+   *    block(DSL.using(config)) } }` has jOOQ acquire the connection and call
+   *    `setAutoCommit(false)` - which is where SQLite reads the mode and issues `BEGIN` /
+   *    `BEGIN IMMEDIATE` - *before* the block runs. So setting the mode from inside the block, as
+   *    this does, has no effect on the transaction currently in progress; it only takes effect on
+   *    that same connection's *next* transaction.
+   * 2. [retryOnBusySnapshot] is a bounded retry on both failure shapes above.
+   *
+   * Because of (1), protection is a property of *connection reuse*, not of any single call: once a
+   * connection has been through one refreshDirty/refreshAllDirty call, its next transaction opens
+   * IMMEDIATE and is safe from this race; only that connection's very first transaction (before
+   * anything has ever set its mode) is still exposed to the deferred-BEGIN escalation. With a small
+   * pool serving many calls, nearly every call after the pool has "warmed up" is protected this
+   * way - which is why leaving the mode set (never resetting it) measures 0 failures per 4000 calls
+   * under sustained concurrent load, while resetting it to DEFERRED in a `finally` after every
+   * transaction (tried and rejected) measures 144 failures per 4000: every transaction starts
+   * unprotected again, because the reset undoes exactly the thing the *next* transaction was
+   * counting on. Pure retry with no `BEGIN IMMEDIATE` at all (25 attempts) also failed at this
+   * concurrency.
+   *
+   * This means [retryOnBusySnapshot] is not decoration for whatever layer 1 misses at the margins -
+   * it is load-bearing specifically for the first-use-per-connection window that layer 1
+   * structurally cannot cover. Do not lower its attempt budget without re-measuring.
+   *
+   * One consequence worth being explicit about: leaving the mode set does *not* reliably protect
+   * other read-then-write call sites elsewhere in this persistence layer that happen to draw a
+   * connection this repository previously used (e.g. JooqServerSettingRepository.findOrCreate,
+   * JooqMetadataOrganizationWriter). Whether any given call on those paths is protected depends on
+   * connection reuse order, which nothing here controls or guarantees. Treat them as unfixed.
    */
   private fun <T> retryOnBusySnapshot(
     attempts: Int = MAX_BUSY_SNAPSHOT_ATTEMPTS,
@@ -141,19 +162,16 @@ internal class JooqBookMetadataAggregationRepository(
       }
 
   /**
-   * This setting is intentionally left in place afterward rather than reset - every other
-   * `database.transaction { }` call site in this module starts with a write as its first
-   * statement, so it already needs to escalate to a writer immediately regardless of
-   * deferred/immediate mode. Leaving it set is a no-op for those (pinned by
+   * This setting is intentionally left in place afterward rather than reset - see the mechanistic
+   * explanation on the class doc above for why a `finally`-scoped reset was tried and measured to
+   * be actively harmful (144 SQLITE_BUSY_SNAPSHOT/SQLITE_BUSY failures per 4000 calls, vs. 0
+   * without the reset), and why "leave it set" only protects *this* repository's own connections
+   * reliably - not other read-then-write call sites elsewhere that might reuse the same connection.
+   * Every other `database.transaction { }` call site in this module starts with a write as its
+   * first statement, so leaving the mode set is at least a no-op for those (pinned by
    * JooqBookMetadataAggregationRepositoryConcurrencyTest's
-   * `leaving a connection in IMMEDIATE mode does not affect other write-first repositories`), and
-   * is a strict improvement for the few call sites elsewhere that share this same read-then-write
-   * shape (e.g. JooqServerSettingRepository.findOrCreate, JooqMetadataOrganizationWriter).
-   *
-   * A `finally`-scoped reset back to DEFERRED was tried and rejected: it reintroduced this exact
-   * failure class at a far higher rate than leaving the mode set (144 SQLITE_BUSY_SNAPSHOT/
-   * SQLITE_BUSY failures per 4000 calls at 8 concurrent readers + 4 writers, vs. 0 without the
-   * reset). Do not reintroduce a reset without re-measuring at that concurrency first.
+   * `leaving a connection in IMMEDIATE mode does not affect other write-first repositories`). Do
+   * not reintroduce a `finally` reset without re-measuring at high concurrency first.
    */
   private fun DSLContext.forceImmediateWriteLock() {
     connection { connection ->
