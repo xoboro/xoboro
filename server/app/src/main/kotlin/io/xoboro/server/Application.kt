@@ -50,6 +50,10 @@ import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CompatibilityMaintenanceRequester
+import io.xoboro.core.application.DatabaseBackupRequester
+import io.xoboro.core.application.OperationalMetricsSnapshotProvider
+import io.xoboro.core.application.OperationalStatusSnapshot
+import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.BookContentAccess
@@ -245,6 +249,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     sseEventHub = runtime.sseEventHub,
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     durableTaskQueue = runtime.durableTaskQueue,
+    databaseBackupRequester = runtime.databaseBackupRequester,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
     corsAllowedOrigins = runtime.corsAllowedOrigins,
@@ -297,6 +302,7 @@ fun Application.xoboroModule(
   sseEventHub: KomgaSseEventHub? = null,
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   durableTaskQueue: DurableTaskQueue? = null,
+  databaseBackupRequester: DatabaseBackupRequester? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
   corsAllowedOrigins: Set<String> = emptySet(),
@@ -308,7 +314,10 @@ fun Application.xoboroModule(
   monitor.subscribe(ApplicationStopped) {
     onStop()
   }
-  val operationalMetrics = metricsToken?.let { OperationalMetrics() }
+  // Created unconditionally: the raw Prometheus scrape route below stays gated behind
+  // metricsToken, but the native JSON metrics endpoint is available to any authenticated
+  // administrator and should not require operators to also configure a separate scrape secret.
+  val operationalMetrics = OperationalMetrics()
   install(CallLogging) {
     format { call ->
       val status = call.response.status()?.value ?: 0
@@ -446,7 +455,19 @@ fun Application.xoboroModule(
       configureXoboroNativeRateLimits()
     }
   }
-  operationalMetrics?.let(::installOperationalMetrics)
+  installOperationalMetrics(operationalMetrics)
+  val operationalMetricsSnapshotProvider =
+    OperationalMetricsSnapshotProvider {
+      OperationalStatusSnapshot(
+        ready = readiness(),
+        uptimeSeconds = operationalMetrics.uptimeSeconds(),
+        activeRequests = operationalMetrics.activeRequestCount(),
+        totalRequests = operationalMetrics.totalRequestCount(),
+        requestsByStatusClass = operationalMetrics.requestCountsByStatusClass(),
+        taskQueue = durableTaskQueue?.counts() ?: TaskCounts(pending = 0, running = 0, dead = 0),
+        taskWorkerCount = workerCount(),
+      )
+    }
 
   routing {
     val routes: Route.() -> Unit = {
@@ -456,7 +477,7 @@ fun Application.xoboroModule(
       metricsToken?.let { token ->
         operationalMetricsRoute(
           token = token,
-          metrics = requireNotNull(operationalMetrics),
+          metrics = operationalMetrics,
           readiness = readiness,
           taskQueueSize = taskQueueSize,
           workerCount = workerCount,
@@ -484,14 +505,21 @@ fun Application.xoboroModule(
             clientSettingsLifecycle != null &&
             authenticationActivityLifecycle != null &&
             historicalEventRepository != null &&
-            durableTaskQueue != null
+            durableTaskQueue != null &&
+            catalogReadRepository != null &&
+            catalogMaintenanceRequester != null &&
+            databaseBackupRequester != null
           ) {
             xoboroNativeOpsRoutes(
-              serverSettingsLifecycle,
-              clientSettingsLifecycle,
-              authenticationActivityLifecycle,
-              historicalEventRepository,
-              durableTaskQueue,
+              serverSettings = serverSettingsLifecycle,
+              clientSettings = clientSettingsLifecycle,
+              authenticationActivities = authenticationActivityLifecycle,
+              history = historicalEventRepository,
+              tasks = durableTaskQueue,
+              catalog = catalogReadRepository,
+              catalogMaintenance = catalogMaintenanceRequester,
+              backups = databaseBackupRequester,
+              operationalMetrics = operationalMetricsSnapshotProvider,
             )
           }
           if (catalogReadRepository != null && artworkLifecycle != null) {

@@ -9,9 +9,16 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.xoboro.core.application.CatalogMaintenanceRequester
+import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.DatabaseBackupDescriptor
+import io.xoboro.core.application.DatabaseBackupRequester
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.OperationalMetricsSnapshotProvider
+import io.xoboro.core.application.OperationalStatusSnapshot
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
@@ -25,12 +32,14 @@ import io.xoboro.core.domain.AuthenticationActivity
 import io.xoboro.core.domain.AuthenticationActivityPage
 import io.xoboro.core.domain.AuthenticationActivityPageRequest
 import io.xoboro.core.domain.AuthenticationActivitySortField
+import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ClientSetting
 import io.xoboro.core.domain.HistoricalEvent
 import io.xoboro.core.domain.HistoricalEventPage
 import io.xoboro.core.domain.HistoricalEventPageRequest
 import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.HistoricalEventSortField
+import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SortDirection
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -44,6 +53,10 @@ fun Route.xoboroNativeOpsRoutes(
   authenticationActivities: AuthenticationActivityLifecycle,
   history: HistoricalEventRepository,
   tasks: DurableTaskQueue,
+  catalog: CatalogReadRepository,
+  catalogMaintenance: CatalogMaintenanceRequester,
+  backups: DatabaseBackupRequester,
+  operationalMetrics: OperationalMetricsSnapshotProvider,
 ) {
   route(XOBORO_API_PREFIX) {
     authenticate(
@@ -193,6 +206,99 @@ fun Route.xoboroNativeOpsRoutes(
         // rather than 204. An administrator clearing a backlog needs to know how much went.
         call.respond(XoboroClearedTasksResponse(cleared = tasks.clearUnclaimed()))
       }
+      get("/metrics") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondOperationalMetricsForbidden()
+          return@get
+        }
+        call.respond(operationalMetrics.snapshot().toNativeResponse())
+      }
+      route("/backups") {
+        post {
+          val caller = call.nativeUser()
+          if (!caller.isAdmin) {
+            call.respondBackupAdministrationForbidden()
+            return@post
+          }
+          call.respond(HttpStatusCode.Created, backups.create().toNativeResponse())
+        }
+        get {
+          val caller = call.nativeUser()
+          if (!caller.isAdmin) {
+            call.respondBackupAdministrationForbidden()
+            return@get
+          }
+          call.respond(backups.list().map(DatabaseBackupDescriptor::toNativeResponse))
+        }
+        delete("/{backupId}") {
+          val caller = call.nativeUser()
+          if (!caller.isAdmin) {
+            call.respondBackupAdministrationForbidden()
+            return@delete
+          }
+          val id = call.requiredParameter("backupId")
+          if (backups.delete(id)) {
+            call.respond(HttpStatusCode.NoContent)
+          } else {
+            call.respondNativeNotFound("backup_not_found", "Backup was not found")
+          }
+        }
+      }
+      post("/media-items/{mediaItemId}/analyze") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondCatalogMaintenanceForbidden()
+          return@post
+        }
+        val id = BookId(call.requiredParameter("mediaItemId"))
+        if (catalogMaintenance.analyzeBook(id)) {
+          call.respond(HttpStatusCode.Accepted)
+        } else {
+          call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+        }
+      }
+      post("/media-items/{mediaItemId}/metadata-refresh") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondCatalogMaintenanceForbidden()
+          return@post
+        }
+        val id = BookId(call.requiredParameter("mediaItemId"))
+        if (catalogMaintenance.refreshBookMetadata(id)) {
+          call.respond(HttpStatusCode.Accepted)
+        } else {
+          call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+        }
+      }
+      post("/series/{seriesId}/analyze") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondCatalogMaintenanceForbidden()
+          return@post
+        }
+        val id = SeriesId(call.requiredParameter("seriesId"))
+        if (catalog.findSeriesByIdOrNull(id, caller.nativeCatalogAccess()) == null) {
+          call.respondNativeNotFound("series_not_found", "Series was not found")
+          return@post
+        }
+        catalogMaintenance.analyzeSeries(id)
+        call.respond(HttpStatusCode.Accepted)
+      }
+      post("/series/{seriesId}/metadata-refresh") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondCatalogMaintenanceForbidden()
+          return@post
+        }
+        val id = SeriesId(call.requiredParameter("seriesId"))
+        if (catalog.findSeriesByIdOrNull(id, caller.nativeCatalogAccess()) == null) {
+          call.respondNativeNotFound("series_not_found", "Series was not found")
+          return@post
+        }
+        catalogMaintenance.refreshSeriesMetadata(id)
+        call.respond(HttpStatusCode.Accepted)
+      }
     }
   }
 }
@@ -207,8 +313,38 @@ private suspend fun ApplicationCall.respondTaskAdministrationForbidden() {
   )
 }
 
+private suspend fun ApplicationCall.respondOperationalMetricsForbidden() {
+  respond(
+    HttpStatusCode.Forbidden,
+    XoboroApiError(
+      "operational_metrics_forbidden",
+      "Operational metrics require an administrator",
+    ),
+  )
+}
+
+private suspend fun ApplicationCall.respondBackupAdministrationForbidden() {
+  respond(
+    HttpStatusCode.Forbidden,
+    XoboroApiError(
+      "backup_administration_forbidden",
+      "Backup administration requires an administrator",
+    ),
+  )
+}
+
+private suspend fun ApplicationCall.respondCatalogMaintenanceForbidden() {
+  respond(
+    HttpStatusCode.Forbidden,
+    XoboroApiError(
+      "catalog_maintenance_forbidden",
+      "Catalog maintenance requires an administrator",
+    ),
+  )
+}
+
 @Serializable
-internal data class XoboroTaskCountsResponse(
+data class XoboroTaskCountsResponse(
   val pending: Long,
   val running: Long,
   val dead: Long,
@@ -218,6 +354,42 @@ internal data class XoboroTaskCountsResponse(
 internal data class XoboroClearedTasksResponse(
   val cleared: Int,
 )
+
+@Serializable
+data class XoboroBackupResponse(
+  val id: String,
+  val sizeBytes: Long,
+  val createdAtMillis: Long,
+)
+
+private fun DatabaseBackupDescriptor.toNativeResponse(): XoboroBackupResponse =
+  XoboroBackupResponse(
+    id = id,
+    sizeBytes = sizeBytes,
+    createdAtMillis = createdAtMillis,
+  )
+
+@Serializable
+data class XoboroOperationalMetricsResponse(
+  val ready: Boolean,
+  val uptimeSeconds: Double,
+  val activeRequests: Long,
+  val totalRequests: Long,
+  val requestsByStatusClass: Map<String, Long>,
+  val taskQueue: XoboroTaskCountsResponse,
+  val taskWorkerCount: Int,
+)
+
+private fun OperationalStatusSnapshot.toNativeResponse(): XoboroOperationalMetricsResponse =
+  XoboroOperationalMetricsResponse(
+    ready = ready,
+    uptimeSeconds = uptimeSeconds,
+    activeRequests = activeRequests,
+    totalRequests = totalRequests,
+    requestsByStatusClass = requestsByStatusClass,
+    taskQueue = taskQueue.toNativeResponse(),
+    taskWorkerCount = taskWorkerCount,
+  )
 
 private fun TaskCounts.toNativeResponse(): XoboroTaskCountsResponse =
   XoboroTaskCountsResponse(
