@@ -792,7 +792,12 @@ class XoboroRuntime private constructor(
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
                 RefreshBookMetadataTaskHandler(
                   metadataRefreshLifecycle,
-                  afterRefresh = { localArtworkRefreshLifecycle.refreshBook(it) },
+                  afterRefresh =
+                    BookMetadataRefreshCompletion(
+                      books = books,
+                      localArtworkRefresh = localArtworkRefreshLifecycle,
+                      refreshMetadataTaskEmitter = refreshMetadataTaskEmitter,
+                    ),
                 ),
                 RefreshSeriesMetadataTaskHandler(
                   metadataRefreshLifecycle,
