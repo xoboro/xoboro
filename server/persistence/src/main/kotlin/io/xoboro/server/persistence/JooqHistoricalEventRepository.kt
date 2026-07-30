@@ -60,6 +60,16 @@ class JooqHistoricalEventRepository(
     )
   }
 
+  /**
+   * Property rows go with their event by `ON DELETE CASCADE`, so this deletes only the parent. An
+   * orphaned property row would be reattached to whatever event later reused the id.
+   */
+  override fun deleteOlderThan(timestampMillis: Long): Int =
+    database.dsl.execute(
+      "DELETE FROM historical_event WHERE timestamp_ms < ?",
+      timestampMillis,
+    )
+
   override fun insert(event: HistoricalEvent) {
     database.transaction { transaction ->
       transaction.execute(

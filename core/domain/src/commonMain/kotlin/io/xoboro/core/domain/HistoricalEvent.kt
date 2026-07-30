@@ -52,4 +52,13 @@ interface HistoricalEventRepository {
   fun findAll(request: HistoricalEventPageRequest): HistoricalEventPage
 
   fun insert(event: HistoricalEvent)
+
+  /**
+   * Deletes rows whose timestamp is strictly older than [timestampMillis] and returns how many went.
+   *
+   * The cutoff is an absolute instant rather than an age, so the caller owns the clock and a retention
+   * sweep is a pure function of the value it is given — which is what makes it testable without
+   * waiting.
+   */
+  fun deleteOlderThan(timestampMillis: Long): Int
 }
