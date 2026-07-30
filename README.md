@@ -220,6 +220,86 @@ Komga server settings and Komga-specific synchronization snapshots are not
 copied; Xoboro server settings retain their deployment defaults and each sync
 adapter establishes new Xoboro snapshots after cutover.
 
+### Performance harness
+
+An opt-in harness generates a synthetic large library on disk (deterministic,
+seeded, no real titles or media) and drives it through the production scanner
+and analyzer, then measures native API latency against the resulting
+database. It is not part of `check` or `test`; run it explicitly:
+
+```shell
+mise exec -- ./gradlew :server:app:performanceHarness \
+  -Pxoboro.perf.seriesCount=300 \
+  -Pxoboro.perf.booksPerSeries=10 \
+  -Pxoboro.perf.oneShotCount=50
+```
+
+Omit the properties for a small, fast smoke run (20 series × 5 books + 5
+one-shots). Output is printed twice: stable `xoboro.perf.<metric>=<value>`
+lines for diffing across runs, and a markdown table. It reports numbers only
+and does not assert performance thresholds; see the harness class doc at
+`server/app/src/test/kotlin/io/xoboro/server/perf/PerformanceHarnessTest.kt`
+for exactly what it measures and what it deliberately does not (concurrent
+multi-user load, a cold OS page cache, real network transport, artwork
+generation).
+
+One metric, `api.first_series_read_after_scan`, is a single cold-cache
+observation of the first `/series` call after a scan, not steady-state
+latency: that call absorbs a one-time full-catalog metadata-aggregation
+rebuild covering every series scanned so far, and can be considerably
+slower than the `api.series_listing` steady-state numbers reported
+alongside it. Do not quote it as `/series` performance. It is reported
+as four separate values rather than one: `.successful_attempt` (the
+isolated duration of the call that actually succeeded), `.harness_wall`
+(the retry loop's full wall-clock time including every failed attempt
+and backoff sleep — this is harness time, not a server cost, and is
+labeled as such), `.attempts`/`.failed_attempts`, and
+`.last_failure_type`. A single number that folded backoff sleep into a
+"cold read" latency would measure the harness's own retry loop instead
+of the server.
+
+`unchanged_rescan.wall` reruns the rescan several times against the
+already-open, already-warm runtime and reports `.p50`/`.min`/`.max`
+across those reps, the same shape used for the API latency metrics.
+This is deliberately different from `cold_scan`/`cold_analyze`/
+`cold_full_scan`, which are reported from a single sample each — see
+below for why.
+
+#### A single run cannot establish a regression or an improvement
+
+Three runs of `cold_analyze` at the same size (300 series × 10 books +
+50 one-shots) on the same machine came back as 9,385 / 12,738 / 11,079
+ms; `cold_full_scan` came back as 12,436 / 16,058 / 14,223 ms. That is
+roughly ±25% run-to-run variance. If you run this harness once before a
+change and once after, and the two numbers differ by 20%, that
+difference is noise, not a verdict — the variance above is bigger than
+most regressions or improvements you would be checking for.
+
+To get a number that can actually support a before/after comparison,
+run the harness multiple times as **separate Gradle invocations** and
+compare medians across runs, not single numbers:
+
+```shell
+for i in $(seq 1 5); do
+  mise exec -- ./gradlew :server:app:performanceHarness \
+    -Pxoboro.perf.seriesCount=300 \
+    -Pxoboro.perf.booksPerSeries=10 \
+    -Pxoboro.perf.oneShotCount=50
+done
+```
+
+then take the median of the `xoboro.perf.cold_*` lines across the five
+runs. This has to be separate process invocations, not a loop added
+inside the harness: `cold_scan`/`cold_analyze`/`cold_full_scan` measure
+the first request of a JVM's lifetime, before JIT compilation and class
+loading have caught up. Looping that sequence inside one JVM would make
+later reps systematically faster — a warming trend, not noise — and a
+median or trimmed mean over those reps would quietly stop measuring a
+cold start. `unchanged_rescan` does not have this problem, which is why
+it is the one metric repeated in-process (see above): a real deployment
+reruns it warm, every `scanInterval`, so back-to-back in-process calls
+measure the real, repeatable thing.
+
 ## Feature status
 
 The auditable release ledger is maintained in

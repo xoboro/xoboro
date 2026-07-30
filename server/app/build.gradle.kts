@@ -54,5 +54,49 @@ dependencies {
 }
 
 tasks.test {
-  useJUnitPlatform()
+  useJUnitPlatform {
+    excludeTags("performance")
+  }
+}
+
+// Opt-in synthetic large-library performance harness (see server/app/src/test/kotlin/io/xoboro/
+// server/perf). It is a `@Tag("performance")` JUnit test excluded from the default `test`/`check`
+// tasks above, and is only run through this dedicated task so a multi-thousand-book scan never
+// slows down ordinary CI runs. Library size is controlled via -Pxoboro.perf.* Gradle properties
+// (or the matching XOBORO_PERF_* environment variables), defaulting to a small smoke-run size.
+fun perfIntProperty(
+  gradlePropertyName: String,
+  environmentVariableName: String,
+  default: Int,
+): String =
+  (providers.gradleProperty(gradlePropertyName).orNull ?: System.getenv(environmentVariableName))
+    ?: default.toString()
+
+tasks.register<Test>("performanceHarness") {
+  group = "verification"
+  description =
+    "Runs the opt-in synthetic large-library performance harness. Not part of check/test; " +
+      "size via -Pxoboro.perf.seriesCount/-Pxoboro.perf.booksPerSeries/-Pxoboro.perf.oneShotCount."
+  testClassesDirs = sourceSets.test.get().output.classesDirs
+  classpath = sourceSets.test.get().runtimeClasspath
+  useJUnitPlatform {
+    includeTags("performance")
+  }
+  systemProperty(
+    "xoboro.perf.seriesCount",
+    perfIntProperty("xoboro.perf.seriesCount", "XOBORO_PERF_SERIES_COUNT", 20),
+  )
+  systemProperty(
+    "xoboro.perf.booksPerSeries",
+    perfIntProperty("xoboro.perf.booksPerSeries", "XOBORO_PERF_BOOKS_PER_SERIES", 5),
+  )
+  systemProperty(
+    "xoboro.perf.oneShotCount",
+    perfIntProperty("xoboro.perf.oneShotCount", "XOBORO_PERF_ONE_SHOT_COUNT", 5),
+  )
+  testLogging {
+    showStandardStreams = true
+    events("passed", "skipped", "failed", "standardOut", "standardError")
+  }
+  outputs.upToDateWhen { false }
 }
