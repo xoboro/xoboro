@@ -23,6 +23,7 @@ import io.xoboro.core.application.CatalogSearchOperator
 import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.ReadList
@@ -47,7 +48,7 @@ fun Route.xoboroNativeCollectionsRoutes(
       install(XoboroCookieCsrfProtection)
       route("/collections") {
         get {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           call.respond(
             collections.findAll().mapNotNull { collection ->
               val visible = collection.visibleSeriesInOrder(access, catalog)
@@ -61,7 +62,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             call.respondCollectionAdministrationForbidden()
             return@post
           }
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val request = call.receive<XoboroCollectionCreationRequest>()
           val seriesIds =
             try {
@@ -86,7 +87,7 @@ fun Route.xoboroNativeCollectionsRoutes(
           call.respond(HttpStatusCode.Created, created.toNativeResponse(visible.size))
         }
         get("/{collectionId}") {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           val collection =
             collections.findByIdOrNull(
               CollectionId(call.requiredParameter("collectionId")),
@@ -105,7 +106,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             return@put
           }
           val id = CollectionId(call.requiredParameter("collectionId"))
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val existing = collections.findByIdOrNull(id)
           if (
             existing == null ||
@@ -145,7 +146,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             return@delete
           }
           val id = CollectionId(call.requiredParameter("collectionId"))
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val existing = collections.findByIdOrNull(id)
           if (
             existing == null ||
@@ -161,7 +162,7 @@ fun Route.xoboroNativeCollectionsRoutes(
           call.respond(HttpStatusCode.NoContent)
         }
         get("/{collectionId}/series") {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           val collection =
             collections.findByIdOrNull(
               CollectionId(call.requiredParameter("collectionId")),
@@ -179,7 +180,7 @@ fun Route.xoboroNativeCollectionsRoutes(
       }
       route("/read-lists") {
         get {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           call.respond(
             readLists.findAll().mapNotNull { readList ->
               val visible = readList.visibleBooksInOrder(access, catalog)
@@ -193,7 +194,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             call.respondReadListAdministrationForbidden()
             return@post
           }
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val request = call.receive<XoboroReadListCreationRequest>()
           val bookIds =
             try {
@@ -219,7 +220,7 @@ fun Route.xoboroNativeCollectionsRoutes(
           call.respond(HttpStatusCode.Created, created.toNativeResponse(visible.size))
         }
         get("/{readListId}") {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           val readList =
             readLists.findByIdOrNull(
               ReadListId(call.requiredParameter("readListId")),
@@ -238,7 +239,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             return@put
           }
           val id = ReadListId(call.requiredParameter("readListId"))
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val existing = readLists.findByIdOrNull(id)
           if (
             existing == null ||
@@ -279,7 +280,7 @@ fun Route.xoboroNativeCollectionsRoutes(
             return@delete
           }
           val id = ReadListId(call.requiredParameter("readListId"))
-          val access = caller.nativeCatalogAccess()
+          val access = caller.catalogAccess()
           val existing = readLists.findByIdOrNull(id)
           if (
             existing == null ||
@@ -295,7 +296,7 @@ fun Route.xoboroNativeCollectionsRoutes(
           call.respond(HttpStatusCode.NoContent)
         }
         get("/{readListId}/media-items") {
-          val access = call.nativeUser().nativeCatalogAccess()
+          val access = call.nativeUser().catalogAccess()
           val readList =
             readLists.findByIdOrNull(
               ReadListId(call.requiredParameter("readListId")),
@@ -312,7 +313,7 @@ fun Route.xoboroNativeCollectionsRoutes(
         }
       }
       get("/series/{seriesId}/collections") {
-        val access = call.nativeUser().nativeCatalogAccess()
+        val access = call.nativeUser().catalogAccess()
         val seriesId = SeriesId(call.requiredParameter("seriesId"))
         if (catalog.findSeriesByIdOrNull(seriesId, access) == null) {
           call.respondNativeNotFound("series_not_found", "Series was not found")
@@ -326,7 +327,7 @@ fun Route.xoboroNativeCollectionsRoutes(
         )
       }
       get("/media-items/{mediaItemId}/read-lists") {
-        val access = call.nativeUser().nativeCatalogAccess()
+        val access = call.nativeUser().catalogAccess()
         val mediaItemId = BookId(call.requiredParameter("mediaItemId"))
         if (catalog.findBookByIdOrNull(mediaItemId, access) == null) {
           call.respondNativeNotFound("media_item_not_found", "Media item was not found")

@@ -25,6 +25,7 @@ import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.SeriesCatalogQuery
 import io.xoboro.core.application.SeriesRegexSearch
 import io.xoboro.core.application.SeriesRegexSearchField
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.BookMedia
@@ -525,13 +526,6 @@ private fun ApplicationCall.catalogPrincipal(): KomgaPrincipal =
 internal suspend inline fun <reified T> ApplicationCall.respondCatalog(body: T) {
   respond(KOMGA_CATALOG_RESPONSE_JSON.encodeToJsonElement(body))
 }
-
-internal fun User.catalogAccess(): CatalogAccess =
-  CatalogAccess(
-    userId = id,
-    libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
-    restrictions = restrictions,
-  )
 
 internal fun ApplicationCall.catalogPageRequest(
   defaultSort: List<CatalogSort> = emptyList(),

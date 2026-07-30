@@ -18,6 +18,7 @@ import io.xoboro.core.application.MetadataFacet
 import io.xoboro.core.application.MetadataFacetQuery
 import io.xoboro.core.application.MetadataFacetRepository
 import io.xoboro.core.application.PatchField
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.BookId

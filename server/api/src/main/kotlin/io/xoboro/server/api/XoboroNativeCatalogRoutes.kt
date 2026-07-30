@@ -11,6 +11,7 @@ import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.SeriesId
@@ -60,7 +61,7 @@ fun Route.xoboroNativeCatalogRoutes(
             catalog
               .findSeries(
                 query = call.nativeSeriesQuery(),
-                access = user.nativeCatalogAccess(),
+                access = user.catalogAccess(),
                 page = call.nativeSeriesPageRequest(),
               ).toNativeSeriesPage(),
           )
@@ -70,7 +71,7 @@ fun Route.xoboroNativeCatalogRoutes(
           val series =
             catalog.findSeriesByIdOrNull(
               SeriesId(call.requiredParameter("seriesId")),
-              user.nativeCatalogAccess(),
+              user.catalogAccess(),
             )
           if (series == null) {
             call.respondNativeNotFound("series_not_found", "Series was not found")
@@ -81,7 +82,7 @@ fun Route.xoboroNativeCatalogRoutes(
         get("/{seriesId}/media-items") {
           val user = call.nativeUser()
           val seriesId = SeriesId(call.requiredParameter("seriesId"))
-          val access = user.nativeCatalogAccess()
+          val access = user.catalogAccess()
           if (catalog.findSeriesByIdOrNull(seriesId, access) == null) {
             call.respondNativeNotFound("series_not_found", "Series was not found")
             return@get
@@ -103,7 +104,7 @@ fun Route.xoboroNativeCatalogRoutes(
             catalog
               .findBooks(
                 query = call.nativeMediaItemQuery(),
-                access = user.nativeCatalogAccess(),
+                access = user.catalogAccess(),
                 page = call.nativeMediaItemPageRequest(),
               ).toNativeMediaItemPage(),
           )
@@ -113,7 +114,7 @@ fun Route.xoboroNativeCatalogRoutes(
           val item =
             catalog.findBookByIdOrNull(
               BookId(call.requiredParameter("mediaItemId")),
-              user.nativeCatalogAccess(),
+              user.catalogAccess(),
             )
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
@@ -137,7 +138,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondAdjacentMe
   previous: Boolean,
 ) {
   val id = BookId(requiredParameter("mediaItemId"))
-  val access = nativeUser().nativeCatalogAccess()
+  val access = nativeUser().catalogAccess()
   val item =
     if (previous) {
       catalog.findPreviousBookOrNull(id, access)
@@ -153,13 +154,6 @@ private suspend fun io.ktor.server.application.ApplicationCall.respondAdjacentMe
 
 internal fun io.ktor.server.application.ApplicationCall.nativeUser(): User =
   requireNotNull(principal<XoboroPrincipal>()).user
-
-internal fun User.nativeCatalogAccess(): CatalogAccess =
-  CatalogAccess(
-    userId = id,
-    libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
-    restrictions = restrictions,
-  )
 
 internal fun io.ktor.server.application.ApplicationCall.requiredParameter(name: String): String =
   requireNotNull(parameters[name]).takeIf(String::isNotBlank)

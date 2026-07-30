@@ -1,7 +1,7 @@
 package io.xoboro.compatibility.komga.api
 
-import io.ktor.http.ContentType
 import io.ktor.http.ContentDisposition
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -11,24 +11,25 @@ import io.ktor.server.auth.principal
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
-import io.ktor.server.response.header
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogReadRepository
-import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.ReadProgressLifecycle
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.BookId
-import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaFileKind
 import io.xoboro.core.domain.MediaNavigationEntry
 import io.xoboro.core.domain.MediaPosition
+import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadingDirection
 import java.time.Instant

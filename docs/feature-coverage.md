@@ -79,7 +79,7 @@ Statuses:
 | Capability | Status | Remaining work |
 |---|---|---|
 | Initial administrator and multi-user management | PARTIAL | Native setup and native user management are implemented; add an automated initial-user option |
-| Roles, library grants, age ratings, and sharing-label restrictions | PARTIAL | Audit enforcement across every native and protocol interface |
+| Roles, library grants, age ratings, and sharing-label restrictions | READY | Audited across every native route group and protocol adapter (ADR 0090); roles are checked at the route, library grants and content restrictions are SQL predicates carried by the `CatalogAccess` that every `CatalogReadRepository` method requires. The audit fixed a KOReader fingerprint path that enforced library grants but not content restrictions, and collapsed five duplicate copies of the access projection into one |
 | API keys | PARTIAL | Native self-service management API is implemented; add scoped keys, expiration, and protocol-specific transport review |
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |
 | Authentication activity | PARTIAL | Native administrator and caller-scoped activity paging is implemented; record session/OAuth flows and schedule retention cleanup |

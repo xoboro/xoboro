@@ -17,6 +17,7 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.MediaFileKind
 import io.xoboro.core.domain.MediaKind
@@ -44,7 +45,7 @@ fun Route.xoboroNativeDeliveryRoutes(
           val item =
             catalog.findBookByIdOrNull(
               BookId(call.requiredParameter("mediaItemId")),
-              user.nativeCatalogAccess(),
+              user.catalogAccess(),
             )
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
@@ -72,7 +73,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           val bookId = BookId(call.requiredParameter("mediaItemId"))
-          val item = catalog.findBookByIdOrNull(bookId, user.nativeCatalogAccess())
+          val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
@@ -119,7 +120,7 @@ fun Route.xoboroNativeDeliveryRoutes(
           val item =
             catalog.findBookByIdOrNull(
               BookId(call.requiredParameter("mediaItemId")),
-              user.nativeCatalogAccess(),
+              user.catalogAccess(),
             )
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
@@ -147,7 +148,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           val bookId = BookId(call.requiredParameter("mediaItemId"))
-          val item = catalog.findBookByIdOrNull(bookId, user.nativeCatalogAccess())
+          val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
@@ -189,7 +190,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           val bookId = BookId(call.requiredParameter("mediaItemId"))
-          val item = catalog.findBookByIdOrNull(bookId, user.nativeCatalogAccess())
+          val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
           if (item == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
