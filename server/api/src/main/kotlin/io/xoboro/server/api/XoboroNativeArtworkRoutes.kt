@@ -19,6 +19,7 @@ import io.ktor.utils.io.readRemaining
 import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.MediaContentStream
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.ArtworkId
 import io.xoboro.core.domain.ArtworkOwner
 import io.xoboro.core.domain.ArtworkOwnerKind
@@ -184,7 +185,7 @@ internal suspend fun ApplicationCall.authorizedArtworkOwnerOrNull(
         if (
           catalog.findBookByIdOrNull(
             BookId(mediaItemId),
-            user.nativeCatalogAccess(),
+            user.catalogAccess(),
           ) == null
         ) {
           respondNativeNotFound("media_item_not_found", "Media item was not found")
@@ -197,7 +198,7 @@ internal suspend fun ApplicationCall.authorizedArtworkOwnerOrNull(
         if (
           catalog.findSeriesByIdOrNull(
             SeriesId(seriesId),
-            user.nativeCatalogAccess(),
+            user.catalogAccess(),
           ) == null
         ) {
           respondNativeNotFound("series_not_found", "Series was not found")

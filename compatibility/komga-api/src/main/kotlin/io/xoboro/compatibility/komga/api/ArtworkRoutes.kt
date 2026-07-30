@@ -19,6 +19,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.ktor.utils.io.readRemaining
 import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.BookContentAccess
@@ -27,6 +28,7 @@ import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.Artwork
 import io.xoboro.core.domain.ArtworkId
 import io.xoboro.core.domain.ArtworkOwner
@@ -38,7 +40,6 @@ import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.User
-import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString

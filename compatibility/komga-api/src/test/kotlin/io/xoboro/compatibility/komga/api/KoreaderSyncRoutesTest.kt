@@ -18,9 +18,11 @@ import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.UserLifecycle
+import io.xoboro.core.domain.AgeRestriction
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMedia
+import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaFile
@@ -29,17 +31,21 @@ import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SeriesMetadata
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.core.domain.UserRole
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookRepository
+import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqMediaItemFingerprintIndex
 import io.xoboro.server.persistence.JooqReadProgressRepository
+import io.xoboro.server.persistence.JooqSeriesMetadataRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.XoboroDatabase
@@ -48,6 +54,7 @@ import io.xoboro.server.security.Sha512TokenEncoder
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import org.junit.jupiter.api.io.TempDir
 
 class KoreaderSyncRoutesTest {
@@ -106,7 +113,7 @@ class KoreaderSyncRoutesTest {
       val sync =
         KoreaderSyncLifecycle(
           fingerprints = JooqMediaItemFingerprintIndex(database),
-          books = books,
+          catalog = JooqCatalogReadRepository(database),
           media = analyzed,
           progress = progress,
           currentTimeMillis = { now++ },
@@ -209,7 +216,7 @@ class KoreaderSyncRoutesTest {
       val sync =
         KoreaderSyncLifecycle(
           fingerprints = JooqMediaItemFingerprintIndex(database),
-          books = books,
+          catalog = JooqCatalogReadRepository(database),
           media = JooqBookMediaRepository(database),
           progress =
             ReadProgressLifecycle(
@@ -266,7 +273,7 @@ class KoreaderSyncRoutesTest {
       val sync =
         KoreaderSyncLifecycle(
           fingerprints = JooqMediaItemFingerprintIndex(database),
-          books = books,
+          catalog = JooqCatalogReadRepository(database),
           media = media,
           progress =
             ReadProgressLifecycle(
@@ -329,6 +336,123 @@ class KoreaderSyncRoutesTest {
         assertEquals("Synthetic device", saved.device)
         assertEquals("device-1", saved.deviceId)
       }
+    }
+  }
+
+  @Test
+  fun `hides age-restricted media items from fingerprint lookups`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("restricted.sqlite"))).use { database ->
+      seed(database)
+      // The one series in the fixture is rated 18; the restricted reader may see up to 12.
+      JooqSeriesMetadataRepository(database).upsert(
+        SeriesMetadata(
+          seriesId = SeriesId("series-1"),
+          title = "Synthetic series",
+          ageRating = 18,
+          createdAtMillis = 1,
+        ),
+      )
+      val userRepository = JooqUserRepository(database)
+      var now = 10L
+      val userIds = ArrayDeque(listOf("user-1", "user-2"))
+      val users =
+        UserLifecycle(
+          users = userRepository,
+          passwordHasher = AdaptivePasswordHasher(),
+          userIdFactory = userIds::removeFirst,
+          currentTimeMillis = { now++ },
+        )
+      val administrator =
+        users.claimInitialAdministrator("reader@example.invalid", "SyntheticPassword1!")
+      // Shares every library, so only the age restriction can deny this reader.
+      val restricted =
+        users.createUser(
+          email = "restricted@example.invalid",
+          rawPassword = "SyntheticPassword2!",
+          roles = setOf(UserRole.PAGE_STREAMING),
+          restrictions =
+            ContentRestrictions(
+              ageRestriction = AgeRestriction(age = 12, mode = RestrictionMode.ALLOW_ONLY),
+            ),
+        )
+      val media = JooqBookMediaRepository(database)
+      val sync =
+        KoreaderSyncLifecycle(
+          fingerprints = JooqMediaItemFingerprintIndex(database),
+          catalog = JooqCatalogReadRepository(database),
+          media = media,
+          progress =
+            ReadProgressLifecycle(
+              books = JooqBookRepository(database),
+              series = JooqSeriesRepository(database),
+              media = media,
+              progresses = JooqReadProgressRepository(database),
+              currentTimeMillis = { now++ },
+            ),
+          currentTimeMillis = { now++ },
+        )
+      val update =
+        KoreaderDocumentProgressDto(
+          document = "epub-fingerprint",
+          percentage = 0.75F,
+          progress = "/body/DocFragment[2]/body/p[1]/text().0",
+          device = "Synthetic device",
+          deviceId = "device-1",
+        )
+
+      // Control: the fingerprint really does resolve, so a denial below cannot come from a
+      // fixture that simply has no matching item.
+      assertEquals(KoreaderProgressResult.NoProgress, sync.find("epub-fingerprint", administrator))
+
+      assertEquals(KoreaderProgressResult.NotFound, sync.find("epub-fingerprint", restricted))
+      assertFailsWith<IllegalStateException> { sync.update(update, restricted) }
+
+      // The rejected write must not have landed under the administrator's item either.
+      assertEquals(KoreaderProgressResult.NoProgress, sync.find("epub-fingerprint", administrator))
+    }
+  }
+
+  @Test
+  fun `hides media items in unshared libraries from fingerprint lookups`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("unshared.sqlite"))).use { database ->
+      seed(database)
+      val userRepository = JooqUserRepository(database)
+      var now = 10L
+      val userIds = ArrayDeque(listOf("user-1", "user-2"))
+      val users =
+        UserLifecycle(
+          users = userRepository,
+          passwordHasher = AdaptivePasswordHasher(),
+          userIdFactory = userIds::removeFirst,
+          currentTimeMillis = { now++ },
+        )
+      users.claimInitialAdministrator("reader@example.invalid", "SyntheticPassword1!")
+      val outsider =
+        users.createUser(
+          email = "outsider@example.invalid",
+          rawPassword = "SyntheticPassword2!",
+          roles = setOf(UserRole.PAGE_STREAMING),
+          sharedLibraryIds = emptySet(),
+          sharesAllLibraries = false,
+        )
+      val media = JooqBookMediaRepository(database)
+      val sync =
+        KoreaderSyncLifecycle(
+          fingerprints = JooqMediaItemFingerprintIndex(database),
+          catalog = JooqCatalogReadRepository(database),
+          media = media,
+          progress =
+            ReadProgressLifecycle(
+              books = JooqBookRepository(database),
+              series = JooqSeriesRepository(database),
+              media = media,
+              progresses = JooqReadProgressRepository(database),
+              currentTimeMillis = { now++ },
+            ),
+          currentTimeMillis = { now++ },
+        )
+
+      assertEquals(KoreaderProgressResult.NotFound, sync.find("epub-fingerprint", outsider))
     }
   }
 

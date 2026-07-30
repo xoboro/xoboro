@@ -13,6 +13,7 @@ import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.IndexedReadProgress
 import io.xoboro.core.application.NumberedReadProgress
 import io.xoboro.core.application.SequentialReadProgressLifecycle
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.SeriesId
 import kotlinx.serialization.Serializable
@@ -30,7 +31,7 @@ fun Route.komgaTachiyomiProgressRoutes(progress: SequentialReadProgressLifecycle
       val result =
         progress.findReadList(
           id = ReadListId(requireNotNull(call.parameters["id"])),
-          access = principal.user.tachiyomiAccess(),
+          access = principal.user.catalogAccess(),
           allowEmpty = principal.user.isAdmin,
         )
       if (result == null) call.respond(HttpStatusCode.NotFound) else call.respond(result.toDto())
@@ -42,7 +43,7 @@ fun Route.komgaTachiyomiProgressRoutes(progress: SequentialReadProgressLifecycle
         val updated =
           progress.updateReadList(
             id = ReadListId(requireNotNull(call.parameters["id"])),
-            access = principal.user.tachiyomiAccess(),
+            access = principal.user.catalogAccess(),
             userId = principal.user.id,
             lastBookRead = request.lastBookRead,
             allowEmpty = principal.user.isAdmin,
@@ -60,7 +61,7 @@ fun Route.komgaTachiyomiProgressRoutes(progress: SequentialReadProgressLifecycle
       val result =
         progress.findSeries(
           id = SeriesId(requireNotNull(call.parameters["seriesId"])),
-          access = principal.user.tachiyomiAccess(),
+          access = principal.user.catalogAccess(),
         )
       if (result == null) call.respond(HttpStatusCode.NotFound) else call.respond(result.toDto())
     }
@@ -71,7 +72,7 @@ fun Route.komgaTachiyomiProgressRoutes(progress: SequentialReadProgressLifecycle
         val updated =
           progress.updateSeries(
             id = SeriesId(requireNotNull(call.parameters["seriesId"])),
-            access = principal.user.tachiyomiAccess(),
+            access = principal.user.catalogAccess(),
             userId = principal.user.id,
             lastBookNumberSortRead = request.lastBookNumberSortRead,
           )
@@ -132,11 +133,4 @@ private fun NumberedReadProgress.toDto(): TachiyomiReadProgressV2Dto =
     booksInProgressCount,
     lastReadContinuousNumberSort,
     maxNumberSort,
-  )
-
-private fun io.xoboro.core.domain.User.tachiyomiAccess(): CatalogAccess =
-  CatalogAccess(
-    userId = id,
-    libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
-    restrictions = restrictions,
   )

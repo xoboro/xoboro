@@ -36,6 +36,7 @@ import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.ArtworkOwner
 import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.BookId

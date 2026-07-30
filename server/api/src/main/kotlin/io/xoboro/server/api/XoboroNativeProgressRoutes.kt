@@ -11,6 +11,7 @@ import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ReadProgressLifecycle
 import io.xoboro.core.application.ReadProgressUpdate
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -29,7 +30,7 @@ fun Route.xoboroNativeProgressRoutes(
       put("/media-items/{mediaItemId}/progress") {
         val user = call.nativeUser()
         val id = BookId(call.requiredParameter("mediaItemId"))
-        if (catalog.findBookByIdOrNull(id, user.nativeCatalogAccess()) == null) {
+        if (catalog.findBookByIdOrNull(id, user.catalogAccess()) == null) {
           call.respondNativeNotFound("media_item_not_found", "Media item was not found")
           return@put
         }

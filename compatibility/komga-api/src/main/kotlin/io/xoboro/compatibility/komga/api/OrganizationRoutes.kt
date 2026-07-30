@@ -25,6 +25,7 @@ import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.CatalogSort
 import io.xoboro.core.application.OrganizationLifecycle
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.LibraryId
