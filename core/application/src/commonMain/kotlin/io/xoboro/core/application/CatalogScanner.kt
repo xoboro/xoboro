@@ -134,6 +134,22 @@ interface CatalogReconciliationStore {
     candidates: List<CatalogCandidate>,
   )
 
+  /**
+   * Relative paths of staged candidates whose file name could name one volume of a multi-volume
+   * archive set.
+   *
+   * A coarse filter is enough and is the point: the store narrows to rows worth looking at, and
+   * [RarVolumeNames] decides. Keeping the naming rule out of SQL means it can be read and tested as
+   * one thing, and it means the store cannot drift from the parser.
+   */
+  fun stagedVolumeCandidatePaths(sessionId: ScanSessionId): List<String>
+
+  /** Removes staged candidates by relative path, returning how many were removed. */
+  fun unstage(
+    sessionId: ScanSessionId,
+    relativePaths: Collection<String>,
+  ): Int
+
   fun complete(
     sessionId: ScanSessionId,
     failedEntries: Long,
@@ -202,6 +218,10 @@ class CatalogScanner(
       if (batch.isNotEmpty()) {
         reconciliationStore.stage(session, batch.toList())
       }
+      // Runs after every candidate is staged, because the decision needs the whole set: a continuation
+      // volume is only recognisable as one when its first volume is present beside it. Doing this in
+      // the streaming callback would mean buffering the entire library in memory.
+      ignoredFiles += suppressContinuationVolumes(session)
       reconciliationStore.complete(
         sessionId = session,
         failedEntries = summary.failedEntries,
@@ -214,6 +234,47 @@ class CatalogScanner(
       }.exceptionOrNull()?.let(failure::addSuppressed)
       throw failure
     }
+  }
+
+  /**
+   * Drops staged candidates that are continuation volumes of a multi-volume archive whose first volume
+   * is staged beside them, and returns how many were dropped so the scan can count them as ignored.
+   *
+   * A multi-volume set is one logical archive split across files. Only the first volume opens; every
+   * other one surfaced as its own book with a media item that could never be read.
+   *
+   * Two conditions must hold together, and each guards against a different mistake:
+   *
+   * - The name matches the tool-generated `.partN.rar` shape ([RarVolumeNames]), so a book genuinely
+   *   titled `Series - part 2.cbr` is untouched.
+   * - **The first volume is present in the same directory.** A lone `x.part2.rar` with no `x.part1.rar`
+   *   beside it is far more likely an oddly named book than half a set, and suppressing it would make
+   *   a book silently vanish — strictly worse than leaving a broken one visible, which is what happens
+   *   today and at least shows the user something is wrong.
+   *
+   * Grouping is per directory because a set lives in one directory. Two unrelated series that both
+   * have a `part1`/`part2` pair in different folders must not interact.
+   */
+  private fun suppressContinuationVolumes(session: ScanSessionId): Long {
+    val paths = reconciliationStore.stagedVolumeCandidatePaths(session)
+    if (paths.isEmpty()) return 0
+    val volumesBySet =
+      paths
+        .mapNotNull { path ->
+          RarVolumeNames.parseOrNull(path.substringAfterLast('/'))?.let { volume ->
+            Triple(path.substringBeforeLast('/', missingDelimiterValue = ""), volume, path)
+          }
+        }.groupBy { (directory, volume, _) -> directory to volume.stem }
+    val suppressed =
+      volumesBySet.values.flatMap { volumes ->
+        if (volumes.none { (_, volume, _) -> volume.isFirst }) {
+          emptyList()
+        } else {
+          volumes.filterNot { (_, volume, _) -> volume.isFirst }.map { (_, _, path) -> path }
+        }
+      }
+    if (suppressed.isEmpty()) return 0
+    return reconciliationStore.unstage(session, suppressed).toLong()
   }
 
   private fun SourceFile.toCandidate(library: Library): CatalogCandidate? {

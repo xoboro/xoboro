@@ -164,6 +164,7 @@ class CatalogScannerTest {
   ) : CatalogReconciliationStore {
     val sessionId = ScanSessionId("scan-1")
     val staged = mutableListOf<List<CatalogCandidate>>()
+    val unstaged = mutableSetOf<String>()
     var deep: Boolean? = null
     var startedAtMillis: Long? = null
     var completedAtMillis: Long? = null
@@ -189,6 +190,30 @@ class CatalogScannerTest {
       staged += candidates
     }
 
+    /**
+     * Derived from what was staged rather than tracked separately, so the fake cannot report a volume
+     * candidate the scanner never staged. The coarse `.part` filter mirrors the real store's `LIKE`.
+     */
+    override fun stagedVolumeCandidatePaths(sessionId: ScanSessionId): List<String> {
+      assertEquals(this.sessionId, sessionId)
+      return staged
+        .flatten()
+        .filterNot { it.relativePath in unstaged }
+        .filter { it.mediaKind == MediaKind.COMIC_ARCHIVE }
+        .map(CatalogCandidate::relativePath)
+        .filter { it.lowercase().contains(".part") }
+        .sorted()
+    }
+
+    override fun unstage(
+      sessionId: ScanSessionId,
+      relativePaths: Collection<String>,
+    ): Int {
+      assertEquals(this.sessionId, sessionId)
+      unstaged += relativePaths
+      return relativePaths.size
+    }
+
     override fun complete(
       sessionId: ScanSessionId,
       failedEntries: Long,
@@ -209,6 +234,106 @@ class CatalogScannerTest {
       assertEquals(this.sessionId, sessionId)
       this.abortedAtMillis = abortedAtMillis
     }
+  }
+
+  @Test
+  fun `suppresses continuation volumes of a multi-volume archive set`() {
+    val inventory =
+      FakeInventory(
+        files =
+          listOf(
+            sourceFile("Series/Volume 01.part1.rar"),
+            sourceFile("Series/Volume 01.part2.rar"),
+            sourceFile("Series/Volume 01.part03.rar"),
+            sourceFile("Series/Volume 02.cbz"),
+          ),
+      )
+    val store = RecordingStore()
+    val scanner = scanner(inventory, store)
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    // Only the first volume survives: the others are continuations of one logical archive and could
+    // never have opened on their own.
+    assertEquals(
+      listOf("Series/Volume 01.part1.rar", "Series/Volume 02.cbz"),
+      store.staged.flatten().filterNot { it.relativePath in store.unstaged }.map { it.relativePath },
+    )
+    // Counted as ignored, so the scan reports them rather than making them vanish from every total.
+    assertEquals(2L, store.ignoredFiles)
+  }
+
+  @Test
+  fun `keeps a lone continuation volume whose first volume is absent`() {
+    val inventory =
+      FakeInventory(
+        files =
+          listOf(
+            sourceFile("Series/Volume 01.part2.rar"),
+            sourceFile("Series/Volume 01.part3.rar"),
+          ),
+      )
+    val store = RecordingStore()
+    val scanner = scanner(inventory, store)
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    // Without a first volume these are far more likely oddly named books than half a set. Suppressing
+    // them would make a book silently vanish, which is worse than leaving a broken one visible.
+    assertEquals(emptySet(), store.unstaged)
+    assertEquals(0L, store.ignoredFiles)
+  }
+
+  @Test
+  fun `keeps a book whose title merely contains the word part`() {
+    val inventory =
+      FakeInventory(
+        files =
+          listOf(
+            sourceFile("Series/Story.part1.rar"),
+            sourceFile("Series/Story - part 2.cbr"),
+            sourceFile("Series/Story part 3.cbr"),
+          ),
+      )
+    val store = RecordingStore()
+    val scanner = scanner(inventory, store)
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    // The first-volume name is present, so a looser rule would have taken both real books with it.
+    assertEquals(emptySet(), store.unstaged)
+  }
+
+  @Test
+  fun `keeps sets in different directories apart`() {
+    val inventory =
+      FakeInventory(
+        files =
+          listOf(
+            sourceFile("First/Volume.part1.rar"),
+            sourceFile("Second/Volume.part2.rar"),
+          ),
+      )
+    val store = RecordingStore()
+    val scanner = scanner(inventory, store)
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    // A set lives in one directory. The `part1` in First must not make the `part2` in Second a
+    // continuation of it.
+    assertEquals(emptySet(), store.unstaged)
+  }
+
+  private fun scanner(
+    inventory: FakeInventory,
+    store: RecordingStore,
+  ): CatalogScanner {
+    val times = ArrayDeque(listOf(10L, 20L))
+    return CatalogScanner(
+      inventories = listOf(inventory),
+      reconciliationStore = store,
+      currentTimeMillis = times::removeFirst,
+    )
   }
 
   private fun sourceFile(relativePath: String): SourceFile =
