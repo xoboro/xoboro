@@ -198,6 +198,7 @@ class JooqLibraryRepositoryTest {
           importComicInfoSeriesAppendVolume = false,
           importEpubBook = false,
           importEpubSeries = false,
+          importPdfBook = false,
           importMylarSeries = false,
           importLocalArtwork = false,
           importBarcodeIsbn = false,

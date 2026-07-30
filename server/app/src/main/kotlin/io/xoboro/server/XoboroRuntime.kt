@@ -114,6 +114,7 @@ import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.metadata.EpubMetadataProvider
 import io.xoboro.server.metadata.IsbnBarcodeMetadataProvider
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
+import io.xoboro.server.metadata.PdfMetadataProvider
 import io.xoboro.server.metadata.OneShotSeriesMetadataProvider
 import io.xoboro.server.sources.local.LocalLibraryRootInspector
 import io.xoboro.server.sources.local.LocalSourceInventory
@@ -647,6 +648,8 @@ class XoboroRuntime private constructor(
           ComicInfoMetadataProvider(listOf(localMediaAccess))
         val epubMetadataProvider =
           EpubMetadataProvider(listOf(localMediaAccess))
+        val pdfMetadataProvider =
+          PdfMetadataProvider(listOf(localMediaAccess))
         val isbnBarcodeMetadataProvider =
           IsbnBarcodeMetadataProvider(bookContentAccess)
         val metadataRefreshLifecycle =
@@ -660,6 +663,7 @@ class XoboroRuntime private constructor(
               listOf(
                 comicInfoMetadataProvider,
                 epubMetadataProvider,
+                pdfMetadataProvider,
                 isbnBarcodeMetadataProvider,
               ),
             seriesProviders =
