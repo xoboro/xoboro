@@ -71,6 +71,11 @@ class RoutingLibraryRootAccessTest {
       return rootType
     }
 
+    override fun isReadable(itemId: String): Boolean {
+      inspectedItems += itemId
+      return rootType == RootType.DIRECTORY
+    }
+
     override fun isSameOrAncestor(
       possibleAncestorItemId: String,
       possibleDescendantItemId: String,

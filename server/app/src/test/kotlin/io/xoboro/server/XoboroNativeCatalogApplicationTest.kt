@@ -41,6 +41,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class XoboroNativeCatalogApplicationTest {
@@ -112,6 +113,39 @@ class XoboroNativeCatalogApplicationTest {
       assertEquals(1, media.totalItems)
       assertEquals("Synthetic issue", media.items.single().title)
       assertEquals("COMIC", media.items.single().type)
+
+      // Reconciliation soft-deletes what disappeared from storage, and empty-trash then destroys
+      // it. Both listings default to live entries, and `trashed=true` is the only way to see what
+      // a scan removed before agreeing to lose it.
+      val liveSeries =
+        client
+          .get("$XOBORO_API_PREFIX/series") {
+            bearerAuth(token)
+          }.body<XoboroPageResponse<XoboroSeriesResponse>>()
+      assertEquals(listOf("Synthetic catalog series"), liveSeries.items.map { it.title })
+      assertTrue(liveSeries.items.none(XoboroSeriesResponse::deleted))
+
+      val trashedSeries =
+        client
+          .get("$XOBORO_API_PREFIX/series?trashed=true") {
+            bearerAuth(token)
+          }.body<XoboroPageResponse<XoboroSeriesResponse>>()
+      assertEquals(listOf("Trashed catalog series"), trashedSeries.items.map { it.title })
+      assertTrue(trashedSeries.items.all(XoboroSeriesResponse::deleted))
+
+      val trashedMedia =
+        client
+          .get("$XOBORO_API_PREFIX/media-items?trashed=true") {
+            bearerAuth(token)
+          }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
+      assertEquals(listOf("Trashed issue"), trashedMedia.items.map { it.title })
+      assertTrue(trashedMedia.items.all(XoboroMediaItemResponse::deleted))
+
+      val invalid =
+        client.get("$XOBORO_API_PREFIX/series?trashed=perhaps") {
+          bearerAuth(token)
+        }
+      assertEquals(HttpStatusCode.BadRequest, invalid.status)
     }
 
     assertFalse(runtime.isReady())
@@ -169,6 +203,53 @@ class XoboroNativeCatalogApplicationTest {
         BookMetadata(
           bookId = bookId,
           title = "Synthetic issue",
+          number = "1",
+          numberSort = 1F,
+          createdAtMillis = 1,
+        ),
+      )
+      val trashedSeriesId = SeriesId("series-trashed")
+      val trashedBookId = BookId("media-trashed")
+      JooqSeriesRepository(database).insert(
+        Series(
+          id = trashedSeriesId,
+          libraryId = libraryId,
+          name = "Trashed catalog series",
+          relativePath = "Trashed catalog series",
+          sourceItemId = "file:///synthetic/trashed",
+          fileModifiedAtMillis = 2,
+          bookCount = 1,
+          createdAtMillis = 1,
+          deletedAtMillis = 3,
+        ),
+      )
+      JooqSeriesMetadataRepository(database).upsert(
+        SeriesMetadata(
+          seriesId = trashedSeriesId,
+          title = "Trashed catalog series",
+          createdAtMillis = 1,
+        ),
+      )
+      JooqBookRepository(database).insert(
+        Book(
+          id = trashedBookId,
+          libraryId = libraryId,
+          seriesId = trashedSeriesId,
+          name = "Trashed issue.cbz",
+          relativePath = "Trashed catalog series/Trashed issue.cbz",
+          sourceItemId = "file:///synthetic/trashed/issue.cbz",
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+          fileModifiedAtMillis = 2,
+          fileSize = 100,
+          number = 1,
+          createdAtMillis = 1,
+          deletedAtMillis = 3,
+        ),
+      )
+      JooqBookMetadataRepository(database).upsert(
+        BookMetadata(
+          bookId = trashedBookId,
+          title = "Trashed issue",
           number = "1",
           numberSort = 1F,
           createdAtMillis = 1,
