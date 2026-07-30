@@ -37,23 +37,33 @@ class DurableCompatibilityMaintenanceRequester(
   private val queue: DurableTaskQueue,
   private val taskIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
+  private val organizationArtwork: OrganizationArtworkTaskEmitter? = null,
 ) : CompatibilityMaintenanceRequester {
-  override fun regenerateBookArtwork(forBiggerResultOnly: Boolean): Int =
-    if (
-      enqueue(
-        type = FindBookArtworkTaskHandler.TASK_TYPE,
-        payload =
-          buildJsonObject {
-            put(BIGGER_ONLY_FIELD, forBiggerResultOnly)
-          }.toString(),
-        priority = TaskPriority.LOWEST,
-        groupId = BULK_ARTWORK_GROUP,
-      )
-    ) {
-      1
-    } else {
-      0
-    }
+  /**
+   * Covers collection and read-list artwork as well as media items. Komga's thumbnail regeneration
+   * task means every kind of thumbnail, so leaving groups out would have made this command quietly
+   * narrower than the one it stands in for.
+   */
+  override fun regenerateBookArtwork(forBiggerResultOnly: Boolean): Int {
+    val enqueuedGroups = organizationArtwork?.generateMissing() ?: 0
+    val enqueuedSweep =
+      if (
+        enqueue(
+          type = FindBookArtworkTaskHandler.TASK_TYPE,
+          payload =
+            buildJsonObject {
+              put(BIGGER_ONLY_FIELD, forBiggerResultOnly)
+            }.toString(),
+          priority = TaskPriority.LOWEST,
+          groupId = BULK_ARTWORK_GROUP,
+        )
+      ) {
+        1
+      } else {
+        0
+      }
+    return enqueuedSweep + enqueuedGroups
+  }
 
   override fun deleteDuplicatePages(
     hash: String,
