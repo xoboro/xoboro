@@ -23,9 +23,15 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.PasswordHasher
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
+import io.xoboro.core.domain.ApiKeyId
+import io.xoboro.core.domain.AuthenticationActivity
+import io.xoboro.core.domain.AuthenticationActivityPage
+import io.xoboro.core.domain.AuthenticationActivityPageRequest
+import io.xoboro.core.domain.AuthenticationActivityRepository
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
 import io.xoboro.core.domain.UserId
@@ -202,6 +208,75 @@ class XoboroNativeAuthenticationTest {
       assertNotNull(limited.headers[HttpHeaders.RetryAfter])
     }
 
+  @Test
+  fun `records the native session flow as authentication activity`() =
+    testApplication {
+      val fixture = installNativeAuthentication()
+      claimAdministrator()
+
+      // Setup is the first successful login on a new server, so it is a success row like any other.
+      assertEquals(1, fixture.recordedActivity.values.size)
+      fixture.recordedActivity.values.single().let { claimed ->
+        assertTrue(claimed.success)
+        assertEquals("admin@example.invalid", claimed.email)
+        assertEquals(XOBORO_NATIVE_AUTHENTICATION_SOURCE, claimed.source)
+      }
+
+      assertEquals(HttpStatusCode.Unauthorized, invalidBearerLogin().status)
+      fixture.recordedActivity.values.last().let { rejected ->
+        assertFalse(rejected.success)
+        assertEquals("invalid_credentials", rejected.error)
+        // The submitted address is kept even though no account matched it: "someone is trying this
+        // address" is the whole value of a failure row.
+        assertEquals("missing@example.invalid", rejected.email)
+        assertNull(rejected.userId)
+      }
+
+      val accepted =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+      assertEquals(HttpStatusCode.OK, accepted.status)
+      assertTrue(fixture.recordedActivity.values.last().success)
+      assertEquals(3, fixture.recordedActivity.values.size)
+    }
+
+  @Test
+  fun `records a cross-site session attempt as a failure`() =
+    testApplication {
+      val fixture = installNativeAuthentication()
+      claimAdministrator()
+      val before = fixture.recordedActivity.values.size
+
+      // No Origin and no Sec-Fetch-Site, so the cookie transport is refused. The browser is the one
+      // being told no, which is exactly why this has to reach the log instead.
+      val rejected =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.COOKIE,
+            ),
+          )
+        }
+
+      assertEquals(HttpStatusCode.Forbidden, rejected.status)
+      assertEquals(before + 1, fixture.recordedActivity.values.size)
+      fixture.recordedActivity.values.last().let { activity ->
+        assertFalse(activity.success)
+        assertEquals(CrossSiteRequestRejectedException.CODE, activity.error)
+      }
+    }
+
   private fun ApplicationTestBuilder.installNativeAuthentication(
     loginLimit: Int = 10,
   ): Fixture {
@@ -228,7 +303,7 @@ class XoboroNativeAuthenticationTest {
         }
       }
       routing {
-        xoboroNativeAuthenticationRoutes(fixture.users, fixture.sessions)
+        xoboroNativeAuthenticationRoutes(fixture.users, fixture.sessions, fixture.activities)
       }
     }
     createClient {
@@ -277,6 +352,12 @@ class XoboroNativeAuthenticationTest {
   private class Fixture {
     private val repository = InMemoryUserRepository()
     private val tokenSequence = AtomicInteger()
+    val recordedActivity = RecordingAuthenticationActivityRepository()
+    val activities =
+      AuthenticationActivityLifecycle(
+        activities = recordedActivity,
+        currentTimeMillis = { 1_000 },
+      )
     val sessions =
       UserSessionLifecycle(
         users = repository,
@@ -301,6 +382,38 @@ class XoboroNativeAuthenticationTest {
         userIdFactory = { "user-1" },
         currentTimeMillis = { 1_000 },
       )
+  }
+
+  private class RecordingAuthenticationActivityRepository : AuthenticationActivityRepository {
+    val values = mutableListOf<AuthenticationActivity>()
+
+    override fun findAll(request: AuthenticationActivityPageRequest): AuthenticationActivityPage =
+      AuthenticationActivityPage(values.toList(), values.size.toLong(), request)
+
+    override fun findAllByUser(
+      user: User,
+      request: AuthenticationActivityPageRequest,
+    ): AuthenticationActivityPage =
+      AuthenticationActivityPage(
+        values.filter { it.userId == user.id },
+        values.count { it.userId == user.id }.toLong(),
+        request,
+      )
+
+    override fun findMostRecentByUser(
+      user: User,
+      apiKeyId: ApiKeyId?,
+    ): AuthenticationActivity? = values.lastOrNull { it.userId == user.id }
+
+    override fun insert(activity: AuthenticationActivity) {
+      values += activity
+    }
+
+    override fun deleteOlderThan(dateTimeMillis: Long): Int {
+      val removed = values.count { it.dateTimeMillis < dateTimeMillis }
+      values.removeAll { it.dateTimeMillis < dateTimeMillis }
+      return removed
+    }
   }
 
   private class InMemoryUserRepository : UserRepository {

@@ -777,6 +777,24 @@ authenticated caller and returns only that caller's rows. Authentication
 activity exposes identity and request metadata, success or error state, source,
 and `dateTimeMillis`; it never contains raw API-key material.
 
+Every native session outcome is recorded under the source `XoboroSession`:
+initial setup, an accepted login, rejected credentials, and a cross-site session
+attempt refused by the CSRF check. The source is deliberately distinct from the
+Komga-compatible surface's `Password`, `ApiKey`, `RememberMe`, and per-provider
+OAuth2 sources — those are different entry points with different CSRF and
+transport rules, and one shared name would leave an administrator unable to tell
+which door was used.
+
+Two of those rows exist precisely because they are invisible elsewhere. A
+**rejected credential** row keeps the submitted email even though no account
+matched it, because "someone is trying this address" is the value of a failure
+row; `userId` is null for those. A **cross-site rejection** is recorded as a
+failure with the CSRF error code, since the response goes to the browser that was
+refused and nothing else would tell an administrator it happened.
+
+Recording never affects the outcome: a failure to write an activity row cannot
+turn a valid login into a rejected one.
+
 Authentication activity sorts are `dateTime`, `email`, `success`, `ip`,
 `error`, `userId`, and `userAgent`. History sorts are `type`, `bookId`,
 `seriesId`, and `timestamp`. Both resources use the native page envelope,

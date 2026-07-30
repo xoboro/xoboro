@@ -509,7 +509,7 @@ fun Application.xoboroModule(
       }
       userLifecycle?.let {
         nativeSessions?.let { sessions ->
-          xoboroNativeAuthenticationRoutes(it, sessions)
+          xoboroNativeAuthenticationRoutes(it, sessions, authenticationActivityLifecycle)
           xoboroNativeUserAdminRoutes(it)
           if (apiKeyLifecycle == null) {
             xoboroNativeSelfServiceRoutes(it)
