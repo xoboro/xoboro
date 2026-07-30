@@ -145,6 +145,8 @@ import io.xoboro.server.tasks.LibraryScanScheduler
 import io.xoboro.server.tasks.RefreshBookMetadataTaskHandler
 import io.xoboro.server.tasks.RefreshMetadataTaskEmitter
 import io.xoboro.server.tasks.RefreshSeriesMetadataTaskHandler
+import io.xoboro.server.tasks.OrganizationArtworkTaskEmitter
+import io.xoboro.server.tasks.OrganizationArtworkTaskHandler
 import io.xoboro.server.tasks.ScanLibraryTaskEmitter
 import io.xoboro.server.tasks.ScanLibraryTaskHandler
 import io.xoboro.server.tasks.ScheduledLeaseHeartbeat
@@ -296,9 +298,10 @@ class XoboroRuntime private constructor(
             readProgress = readProgresses,
           )
         val nativeEvents = XoboroNativeEventHub(catalog = catalogReads).also { nativeEventHub = it }
+        val artworkRepository = JooqArtworkRepository(database)
         val artworkLifecycle =
           ArtworkLifecycle(
-            artwork = JooqArtworkRepository(database),
+            artwork = artworkRepository,
             processor = SafeJpegArtworkProcessor(),
             idFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
@@ -742,6 +745,14 @@ class XoboroRuntime private constructor(
             queue = queue,
             taskIdFactory = { UUID.randomUUID().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            organizationArtwork =
+              OrganizationArtworkTaskEmitter(
+                collections = collections,
+                readLists = readLists,
+                artwork = artworkRepository,
+                queue = queue,
+                currentTimeMillis = System::currentTimeMillis,
+              ),
           )
         val libraryTrashStore = JooqLibraryTrashStore(database)
         val analyzeBook =
@@ -820,6 +831,13 @@ class XoboroRuntime private constructor(
                 DeleteSeriesFileTaskHandler(catalogSourceFileLifecycle),
                 ImportBookTaskHandler(catalogSourceFileLifecycle),
                 GenerateBookArtworkTaskHandler(bookContentAccess, artworkLifecycle),
+                OrganizationArtworkTaskHandler(
+                  collections = collections,
+                  readLists = readLists,
+                  books = books,
+                  artwork = artworkRepository,
+                  lifecycle = artworkLifecycle,
+                ),
                 FindBookArtworkTaskHandler(
                   catalog = catalogReads,
                   artwork = artworkLifecycle,
