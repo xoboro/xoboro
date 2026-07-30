@@ -300,6 +300,98 @@ class PerformanceHarnessTest {
           seriesListing.retriedSamples,
         )
 
+        // Offset pagination's cost is supposed to grow with the offset, because SQLite still has
+        // to walk and discard the skipped rows. Whether that is worth a second pagination mode is
+        // an empirical question, so measure the same endpoint at the deepest page that exists and
+        // report both. A cursor is only justified if this diverges from the first page.
+        val seriesPageCount =
+          retryingTransientFailures {
+            client.get("$XOBORO_API_PREFIX/series?page=0&size=$DEEP_PAGE_SIZE") { bearerAuth(token) }
+          }.body<XoboroPageResponse<XoboroSeriesResponse>>()
+            .totalPages
+        val lastSeriesListing =
+          measureRepeated {
+            client.get(
+              "$XOBORO_API_PREFIX/series?page=${(seriesPageCount - 1).coerceAtLeast(0)}" +
+                "&size=$DEEP_PAGE_SIZE",
+            ) { bearerAuth(token) }
+          }
+        report.recordLatency(
+          "api.series_listing_last_page",
+          scannedBookCount,
+          lastSeriesListing.stats,
+          lastSeriesListing.retriedSamples,
+        )
+        report.recordCount("api.series_listing_last_page.page_index", seriesPageCount - 1)
+
+        // Discriminates what the per-page cost actually is. If it is dominated by the total-count
+        // query - which every page pays regardless of depth, over the whole filtered set - then
+        // asking for 10x as many rows costs about the same. If it is dominated by fetching and
+        // serialising rows, it scales with the page size.
+        val wideSeriesListing =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/series?page=0&size=${DEEP_PAGE_SIZE * 10}") {
+              bearerAuth(token)
+            }
+          }
+        report.recordLatency(
+          "api.series_listing_wide_page",
+          scannedBookCount,
+          wideSeriesListing.stats,
+          wideSeriesListing.retriedSamples,
+        )
+
+        // Third leg of the same question. The wide-page probe rules out row work; this rules in or
+        // out "proportional to the set being scanned and counted" by narrowing that set ~30x while
+        // returning the same page size. Fast here means the cost tracks the filtered set, not the
+        // rows returned, not the offset, and not a fixed per-request overhead.
+        val narrowSeriesListing =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/series?oneShot=true&page=0&size=$DEEP_PAGE_SIZE") {
+              bearerAuth(token)
+            }
+          }
+        report.recordLatency(
+          "api.series_listing_narrow_filter",
+          scannedBookCount,
+          narrowSeriesListing.stats,
+          narrowSeriesListing.retriedSamples,
+        )
+
+        val mediaItemPageCount =
+          retryingTransientFailures {
+            client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
+              bearerAuth(token)
+            }
+          }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
+            .totalPages
+        val firstMediaItemListing =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
+              bearerAuth(token)
+            }
+          }
+        report.recordLatency(
+          "api.media_item_listing",
+          scannedBookCount,
+          firstMediaItemListing.stats,
+          firstMediaItemListing.retriedSamples,
+        )
+        val lastMediaItemListing =
+          measureRepeated {
+            client.get(
+              "$XOBORO_API_PREFIX/media-items?page=${(mediaItemPageCount - 1).coerceAtLeast(0)}" +
+                "&size=$DEEP_PAGE_SIZE",
+            ) { bearerAuth(token) }
+          }
+        report.recordLatency(
+          "api.media_item_listing_last_page",
+          scannedBookCount,
+          lastMediaItemListing.stats,
+          lastMediaItemListing.retriedSamples,
+        )
+        report.recordCount("api.media_item_listing_last_page.page_index", mediaItemPageCount - 1)
+
         val booksInSeries =
           measureRepeated {
             client.get("$XOBORO_API_PREFIX/series/${topSeries.id}/media-items?page=0&size=20") {
@@ -474,6 +566,8 @@ class PerformanceHarnessTest {
     const val RESCAN_REPEAT_COUNT = 5
     const val WARMUP_REQUESTS = 5
     const val MEASURED_REQUESTS = 50
+    /** Page size for the first-page/last-page comparison; matches `api.series_listing`'s. */
+    const val DEEP_PAGE_SIZE = 20
     const val KEEP_READING_SAMPLE_SIZE = 200
     const val KEEP_READING_SEED_STRIDE = 5
     const val TRANSIENT_RETRY_ATTEMPTS = 5
