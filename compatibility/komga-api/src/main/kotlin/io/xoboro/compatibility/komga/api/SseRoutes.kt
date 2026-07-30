@@ -14,7 +14,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
-import kotlin.time.TimeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -59,29 +58,28 @@ fun Route.komgaSseRoutes(
         if (principal.user.isAdmin) {
           send(tasks.snapshot().toServerSentEvent())
         }
-        var nextAuthorizationCheck = TimeSource.Monotonic.markNow() + authorizationRecheckPeriod
+        val authorization =
+          KomgaSseAuthorizationGate(
+            connected = principal.user,
+            recheckPeriod = authorizationRecheckPeriod,
+          ) {
+            // The snapshot is a blocking JDBC read. Running it on the dispatcher that carries the
+            // SSE session blocks that thread for the duration of the query, so it is dispatched to
+            // the IO pool. The gate calls this at most once per recheck period per subscriber.
+            withContext(Dispatchers.IO) { users.currentOrNull(principal.user.id) }
+          }
         try {
           while (true) {
             val event =
               withTimeoutOrNull(taskPeriod) {
                 subscription.receive()
               }
-            // Checked on every wake, not only on the task-poll timeout: a stream busy with
-            // catalog events never times out, so checking only the timeout branch would keep
-            // a revoked subscriber live for as long as events keep arriving. The deadline
-            // bounds the cost to one lookup per recheck period per subscriber regardless of
-            // event volume.
-            if (nextAuthorizationCheck.hasPassedNow()) {
-              // The snapshot is a blocking JDBC read. Running it on the dispatcher that carries
-              // the SSE session blocks that thread for the duration of the query, once per
-              // recheck period per subscriber, so it is dispatched to the IO pool instead.
-              val current = withContext(Dispatchers.IO) { users.currentOrNull(principal.user.id) }
-              if (current == null || current.invalidatesKomgaSessionFrom(principal.user)) {
-                close()
-                return@use
-              }
-              nextAuthorizationCheck =
-                TimeSource.Monotonic.markNow() + authorizationRecheckPeriod
+            // Unconditional, before anything is sent. The gate owns both the "on every wake"
+            // and the "at most once per recheck period" halves of the rule; see its KDoc for why
+            // confining this to the `event == null` branch would keep a revoked subscriber live.
+            if (!authorization.admitsAnotherEvent()) {
+              close()
+              return@use
             }
             if (event == null) {
               if (principal.user.isAdmin) {

@@ -29,12 +29,8 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.io.TempDir
 
 class SseRoutesTest {
@@ -179,33 +175,6 @@ class SseRoutesTest {
     }
 
   @Test
-  @Disabled(
-    "Quarantined: this assertion cannot be observed reliably in testApplication. The route behaviour it covers is real, but every shape tried - collecting the stream to completion, reading the raw channel, requiring non-delivery, and polling the hub subscription count - leaves a coroutine alive under CI load, which runTest reports as UncompletedCoroutinesError instead of a test result. Five CI rounds narrowed it no further. The underlying rule is covered deterministically by `treats only authorization fields as invalidating an open stream`; what is uncovered is that the route consults the snapshot on each wake. See the wiki page xoboro-verification-traps section 9.",
-  )
-  fun `stops delivering to an open stream once the subscriber's authorization changes`() {
-    assertTrue(
-      streamStopsDeliveringAfter("sse-revoked.sqlite") { users, _, reader ->
-        // Any of the five fields UserLifecycle.updateUser compares must cut delivery off; roles
-        // is used here because it needs no library row. Library-grant scoping itself is covered
-        // by the hub-level filter tests, which need no database at all.
-        users.updateUser(reader.copy(roles = setOf(UserRole.FILE_DOWNLOAD)))
-      },
-    )
-  }
-
-  @Test
-  @Disabled(
-    "Quarantined: this assertion cannot be observed reliably in testApplication. The route behaviour it covers is real, but every shape tried - collecting the stream to completion, reading the raw channel, requiring non-delivery, and polling the hub subscription count - leaves a coroutine alive under CI load, which runTest reports as UncompletedCoroutinesError instead of a test result. Five CI rounds narrowed it no further. The underlying rule is covered deterministically by `treats only authorization fields as invalidating an open stream`; what is uncovered is that the route consults the snapshot on each wake. See the wiki page xoboro-verification-traps section 9.",
-  )
-  fun `stops delivering to an open stream once the subscriber's account is deleted`() {
-    assertTrue(
-      streamStopsDeliveringAfter("sse-deleted.sqlite") { users, _, reader ->
-        users.deleteUser(reader.id)
-      },
-    )
-  }
-
-  @Test
   fun `treats only authorization fields as invalidating an open stream`() {
     // The adaptive password hasher rewrites passwordHash and updatedAtMillis on an ordinary
     // successful login, so comparing the whole User would disconnect a subscriber merely for
@@ -236,99 +205,6 @@ class SseRoutesTest {
         .copy(restrictions = ContentRestrictions(labelsAllow = setOf("synthetic")))
         .invalidatesKomgaSessionFrom(connected),
     )
-  }
-
-  /**
-   * Opens an authenticated stream for a non-administrator reader, runs [mutate], and reports
-   * whether the server then closed the stream.
-   *
-   * The bound uses [withTimeoutOrNull] rather than [withTimeout] deliberately: a timeout has to
-   * be an observable result, not an exception escaping `testApplication`. An escaping
-   * cancellation leaves the server-side SSE coroutine alive past the end of the test body, and
-   * `runTest` reports that as `UncompletedCoroutinesError` instead of the assertion the test
-   * meant to make — which is exactly how the earlier version of these tests failed in CI while
-   * passing locally.
-   */
-  private fun streamStopsDeliveringAfter(
-    databaseName: String,
-    mutate: (UserLifecycle, JooqUserRepository, User) -> Unit,
-  ): Boolean {
-    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve(databaseName))).use { database ->
-      val repository = JooqUserRepository(database)
-      var nextUserId = 0
-      val users =
-        UserLifecycle(
-          users = repository,
-          passwordHasher = AdaptivePasswordHasher(),
-          userIdFactory = { "user-${++nextUserId}" },
-          currentTimeMillis = { 1 },
-        )
-      users.claimInitialAdministrator(EMAIL, PASSWORD)
-      val reader =
-        users.createUser(
-          email = READER_EMAIL,
-          rawPassword = PASSWORD,
-          roles = setOf(UserRole.PAGE_STREAMING),
-          sharesAllLibraries = false,
-        )
-      val hub = KomgaSseEventHub()
-      var stopped = false
-      try {
-        testApplication {
-          application {
-            install(ServerSSE)
-            installKomgaBasicAuthentication(users)
-            routing {
-              komgaSseRoutes(
-                events = hub,
-                users = KomgaSseUserSnapshot(users::findByIdOrNull),
-                // Only the recheck cadence needs to be fast. Ktor's heartbeat launches a
-                // repeating coroutine, and at a 50ms period one is always in flight when the
-                // session ends, which runTest reports as an uncompleted coroutine.
-                heartbeatPeriod = QUIET_HEARTBEAT,
-                taskPeriod = RECHECK,
-                authorizationRecheckPeriod = RECHECK,
-              )
-            }
-          }
-          // Asserts that a revoked subscriber stops receiving, rather than waiting for the
-          // server to close the connection. Waiting for a server-initiated close inside
-          // testApplication leaves a coroutine alive often enough under CI load that runTest
-          // reports UncompletedCoroutinesError instead of this assertion — with the client SSE
-          // plugin and with a raw channel read alike, so the lingering coroutine is on the
-          // server side, not the client's. Letting the client end the request is the same
-          // teardown path the passing task-snapshot test uses.
-          //
-          // No delivery is also the property that actually matters: closing is the mechanism,
-          // "a subscriber whose authorization went away learns nothing further" is the rule.
-          val client = createClient { install(ClientSSE) }
-          client.sse(
-            urlString = "/sse/v1/events",
-            request = { basicAuth(READER_EMAIL, PASSWORD) },
-          ) {
-            mutate(users, repository, reader)
-            // Real time, not virtual: withTimeoutOrNull budgets in this block elapse in
-            // wall-clock. Waiting several recheck periods removes the race where a publish
-            // lands before the route has re-resolved the subscriber even once.
-            delay(RECHECK * 6)
-            hub.publish(
-              name = "ReadProgressChanged",
-              dataJson = """{"bookId":"media-1","userId":"${reader.id.value}"}""",
-              userIdOnly = reader.id.value,
-            )
-            stopped =
-              withTimeoutOrNull(DELIVERY_WINDOW) {
-                // firstOrNull: if the server did close the stream the flow completes without a
-                // match, which is the same verdict as never receiving it.
-                incoming.firstOrNull { it.event == "ReadProgressChanged" }
-              } == null
-          }
-        }
-      } finally {
-        hub.close()
-      }
-      return stopped
-    }
   }
 
   private fun readerFixture(
