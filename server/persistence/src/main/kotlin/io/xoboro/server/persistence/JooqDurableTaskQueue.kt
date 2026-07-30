@@ -4,6 +4,8 @@ import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskCounts
+import java.util.logging.Level
+import java.util.logging.Logger
 import org.jooq.Record
 
 class JooqDurableTaskQueue(
@@ -85,28 +87,36 @@ class JooqDurableTaskQueue(
     val leaseExpiresAtMillis = leaseExpiration(nowMillis, leaseDurationMillis)
 
     return database.transaction { transaction ->
-      transaction.execute(
-        """
-        UPDATE task SET
-          state = CASE WHEN attempt_count >= max_attempts THEN 'DEAD' ELSE 'PENDING' END,
-          available_at_ms = CASE
-            WHEN attempt_count >= max_attempts THEN available_at_ms
-            ELSE ?
-          END,
-          lease_owner = NULL,
-          lease_token = NULL,
-          lease_expires_at_ms = NULL,
-          last_error = CASE
-            WHEN attempt_count >= max_attempts THEN coalesce(last_error, 'Lease expired')
-            ELSE last_error
-          END,
-          updated_at_ms = ?
-        WHERE state = 'RUNNING' AND lease_expires_at_ms <= ?
-        """.trimIndent(),
-        nowMillis,
-        nowMillis,
-        nowMillis,
-      )
+      // RETURNING lets this report every row it dead-letters, not just the one (if any) this
+      // call goes on to claim below: any worker's claimNext can recover any other worker's
+      // expired lease, so a crashed worker's task can go silently DEAD here with nobody else
+      // ever seeing the transition otherwise.
+      transaction
+        .fetch(
+          """
+          UPDATE task SET
+            state = CASE WHEN attempt_count >= max_attempts THEN 'DEAD' ELSE 'PENDING' END,
+            available_at_ms = CASE
+              WHEN attempt_count >= max_attempts THEN available_at_ms
+              ELSE ?
+            END,
+            lease_owner = NULL,
+            lease_token = NULL,
+            lease_expires_at_ms = NULL,
+            last_error = CASE
+              WHEN attempt_count >= max_attempts THEN coalesce(last_error, 'Lease expired')
+              ELSE last_error
+            END,
+            updated_at_ms = ?
+          WHERE state = 'RUNNING' AND lease_expires_at_ms <= ?
+          RETURNING id, task_type, attempt_count, max_attempts, last_error, state
+          """.trimIndent(),
+          nowMillis,
+          nowMillis,
+          nowMillis,
+        )
+        .filter { record -> record.requiredString("state") == "DEAD" }
+        .forEach(::logLeaseExpiredDeadLetter)
 
       transaction
         .fetchOne(
@@ -152,6 +162,25 @@ class JooqDurableTaskQueue(
         )
         ?.toClaimedTask()
     }
+  }
+
+  /**
+   * The only signal an operator gets that [record]'s task was dead-lettered by lease-expiry
+   * recovery rather than an explicit handler failure - the worker that held the lease may have
+   * crashed before ever calling `fail()`, which is exactly the death an operator most needs to
+   * know about. Mirrors [io.xoboro.server.tasks.DurableTaskWorker]'s dead-letter log (WARNING,
+   * capped error text, no raw throwable - there isn't one here regardless), but lives here
+   * because this transition is decided entirely inside this bulk `UPDATE ... RETURNING`, with no
+   * single caller positioned to observe it otherwise.
+   */
+  private fun logLeaseExpiredDeadLetter(record: Record) {
+    logger.log(
+      Level.WARNING,
+      "Task ${record.requiredString("id")} (${record.requiredString("task_type")}) " +
+        "dead-lettered after its lease expired at ${record.requiredInt("attempt_count")}/" +
+        "${record.requiredInt("max_attempts")} attempts: " +
+        record.requiredString("last_error").take(DEAD_LETTER_LOG_ERROR_LIMIT),
+    )
   }
 
   override fun renewLease(
@@ -317,4 +346,9 @@ class JooqDurableTaskQueue(
       .toLong()
 
   private fun Boolean.toSqliteInt(): Int = if (this) 1 else 0
+
+  private companion object {
+    private val logger = Logger.getLogger(JooqDurableTaskQueue::class.java.name)
+    private const val DEAD_LETTER_LOG_ERROR_LIMIT = 500
+  }
 }

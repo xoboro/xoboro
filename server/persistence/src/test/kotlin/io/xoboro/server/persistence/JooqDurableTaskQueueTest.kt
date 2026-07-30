@@ -8,6 +8,10 @@ import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -175,6 +179,39 @@ class JooqDurableTaskQueueTest {
           leaseDuration = 10_000L,
         ),
       )
+      assertEquals(TaskCounts(pending = 0, running = 0, dead = 1), queue.counts())
+    }
+  }
+
+  @Test
+  fun `logs a warning when lease-expiry recovery dead-letters a task`() {
+    withQueue("lease-recovery-log") { queue, _ ->
+      val baseTime = 1_700_000_000_000L
+      queue.enqueue(
+        taskFixture(maxAttempts = 1, availableAtMillis = baseTime),
+        nowMillis = baseTime,
+      )
+      queue.claim("worker-1", "lease-1", nowMillis = baseTime, leaseDuration = 10_000L)
+
+      // A crashed worker never calls fail(), so this recovery step - run here by an unrelated
+      // worker polling for its own next task - is the only place this task's death is decided.
+      val records =
+        collectLogRecords(JooqDurableTaskQueue::class.java.name) {
+          assertNull(
+            queue.claim(
+              "worker-2",
+              "lease-2",
+              nowMillis = baseTime + 10_000L,
+              leaseDuration = 10_000L,
+            ),
+          )
+        }
+
+      val record = records.single { it.level == Level.WARNING }
+      assertTrue(record.message.contains("task-1"))
+      assertTrue(record.message.contains("SYNTHETIC"))
+      assertTrue(record.message.contains("1/1"))
+      assertTrue(record.message.contains("Lease expired"))
       assertEquals(TaskCounts(pending = 0, running = 0, dead = 1), queue.counts())
     }
   }
@@ -372,6 +409,32 @@ class JooqDurableTaskQueueTest {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("$name.sqlite"))).use { database ->
       block(JooqDurableTaskQueue(database), database)
     }
+  }
+
+  /** Attaches a temporary [Handler] to the named logger for the duration of [block]. */
+  private fun collectLogRecords(
+    loggerName: String,
+    block: () -> Unit,
+  ): List<LogRecord> {
+    val records = mutableListOf<LogRecord>()
+    val handler =
+      object : Handler() {
+        override fun publish(record: LogRecord) {
+          records += record
+        }
+
+        override fun flush() = Unit
+
+        override fun close() = Unit
+      }
+    val logger = Logger.getLogger(loggerName)
+    logger.addHandler(handler)
+    try {
+      block()
+    } finally {
+      logger.removeHandler(handler)
+    }
+    return records
   }
 
   private fun JooqDurableTaskQueue.claim(
