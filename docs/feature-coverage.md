@@ -15,7 +15,7 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, and history are implemented; add recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
+| Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, history, operational metrics, backup lifecycle, and catalog (media-item/series) maintenance commands are implemented; add recovery/unavailable-storage state endpoints, events, cursor pagination, and OpenAPI |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
@@ -27,8 +27,8 @@ Statuses:
 |---|---|---|
 | SQLite schema, migrations, transactions, and restart recovery | READY | Continue migration tests with every schema change |
 | Durable prioritized task processing | READY | Add operation-specific cancellation only if a native workflow requires it |
-| Health, readiness, structured logs, and bounded metrics | READY | Native administration UI |
-| Backup and offline restore | READY | Native administration UI and operator documentation |
+| Health, readiness, structured logs, and bounded metrics | READY | Native `GET /api/xoboro/v1/metrics` JSON snapshot is implemented alongside the token-gated Prometheus scrape; remaining work is the administrator UI |
+| Backup and offline restore | READY | Native backup create/list/delete over HTTP is implemented; restore stays CLI-only because it requires taking the live database offline; remaining work is the administrator UI and operator documentation |
 | Server-sent updates | PARTIAL | Define native event names/resume tokens and verify reconnect behavior |
 | Runtime configuration | PARTIAL | The typed native server-settings API is implemented; document restart-required fields and add the administrator UI |
 

@@ -22,6 +22,7 @@ class ServerConfigTest {
     assertEquals(null, config.configuredContextPath)
     assertEquals(workingDirectory.resolve("config/xoboro.sqlite"), config.databasePath)
     assertEquals(workingDirectory.resolve("config/fonts"), config.fontsDirectory)
+    assertEquals(workingDirectory.resolve("config/backups"), config.backupsDirectory)
     assertEquals(emptySet(), config.corsAllowedOrigins)
     assertEquals(4, config.workerCount)
     assertEquals(emptySet(), config.trustedProxyHosts)
@@ -45,6 +46,7 @@ class ServerConfigTest {
             "XOBORO_TASK_LEASE_MILLIS" to "1000",
             "XOBORO_SHUTDOWN_TIMEOUT_MILLIS" to "2000",
             "XOBORO_FONTS_PATH" to "assets/fonts",
+            "XOBORO_BACKUPS_PATH" to "state/backups",
             "KOMGA_CORS_ALLOWEDORIGINS" to
               "https://reader.example.invalid, http://localhost:1234,https://reader.example.invalid",
             "XOBORO_TRUSTED_PROXIES" to "127.0.0.1, proxy.internal,127.0.0.1",
@@ -63,6 +65,7 @@ class ServerConfigTest {
     assertEquals(1_000L, config.taskLeaseMillis)
     assertEquals(2_000L, config.shutdownTimeoutMillis)
     assertEquals(workingDirectory.resolve("assets/fonts"), config.fontsDirectory)
+    assertEquals(workingDirectory.resolve("state/backups"), config.backupsDirectory)
     assertEquals(
       setOf("https://reader.example.invalid", "http://localhost:1234"),
       config.corsAllowedOrigins,

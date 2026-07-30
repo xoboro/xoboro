@@ -7,6 +7,7 @@ import io.ktor.client.request.cookie
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -27,8 +28,22 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.xoboro.core.application.BookCatalogQuery
+import io.xoboro.core.application.CatalogAccess
+import io.xoboro.core.application.CatalogBook
+import io.xoboro.core.application.CatalogMaintenanceRequester
+import io.xoboro.core.application.CatalogPage
+import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.ClaimedTask
+import io.xoboro.core.application.DatabaseBackupDescriptor
+import io.xoboro.core.application.DatabaseBackupRequester
+import io.xoboro.core.application.BookMetadataAggregation
+import io.xoboro.core.application.OperationalMetricsSnapshotProvider
+import io.xoboro.core.application.OperationalStatusSnapshot
+import io.xoboro.core.application.SeriesCatalogQuery
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.AuthenticationActivityLifecycle
@@ -51,7 +66,10 @@ import io.xoboro.core.domain.HistoricalEventPage
 import io.xoboro.core.domain.HistoricalEventPageRequest
 import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.HistoricalEventSortField
+import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SeriesMetadata
 import io.xoboro.core.domain.SortDirection
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
@@ -471,6 +489,10 @@ class XoboroNativeOpsTest {
           authenticationActivities = fixture.authenticationActivityLifecycle,
           history = fixture.history,
           tasks = fixture.tasks,
+          catalog = fixture.catalog,
+          catalogMaintenance = fixture.catalogMaintenance,
+          backups = fixture.backups,
+          operationalMetrics = fixture.operationalMetrics,
         )
       }
     }
@@ -563,6 +585,133 @@ class XoboroNativeOpsTest {
       assertEquals(7, fixture.tasks.unclaimed)
     }
 
+  @Test
+  fun `reports operational metrics for administrators only`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val forbidden = client.get(METRICS_PATH) { bearerAuth(fixture.readerToken) }
+      assertEquals(HttpStatusCode.Forbidden, forbidden.status)
+      assertEquals("operational_metrics_forbidden", forbidden.body<XoboroApiError>().code)
+      assertEquals(0, fixture.operationalMetrics.snapshotCalls)
+
+      val response = client.get(METRICS_PATH) { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.OK, response.status)
+      val body = response.body<XoboroOperationalMetricsResponse>()
+      assertEquals(true, body.ready)
+      assertEquals(42L, body.totalRequests)
+      assertEquals(XoboroTaskCountsResponse(pending = 3, running = 1, dead = 2), body.taskQueue)
+      assertEquals(4, body.taskWorkerCount)
+      assertEquals(1, fixture.operationalMetrics.snapshotCalls)
+    }
+
+  @Test
+  fun `creates, lists, and deletes a backup without leaking a filesystem path`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val created =
+        client.post(BACKUPS_PATH) { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.Created, created.status)
+      val rawBody = created.bodyAsText()
+      assertTrue(!rawBody.contains('/'), rawBody)
+      assertTrue(!rawBody.contains('\\'), rawBody)
+      val backup = Json.decodeFromString<XoboroBackupResponse>(rawBody)
+
+      val listed = client.get(BACKUPS_PATH) { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.OK, listed.status)
+      assertEquals(listOf(backup), listed.body<List<XoboroBackupResponse>>())
+
+      val deleted = client.delete("$BACKUPS_PATH/${backup.id}") { bearerAuth(fixture.adminToken) }
+      val deletedAgain =
+        client.delete("$BACKUPS_PATH/${backup.id}") { bearerAuth(fixture.adminToken) }
+
+      assertEquals(HttpStatusCode.NoContent, deleted.status)
+      assertEquals(HttpStatusCode.NotFound, deletedAgain.status)
+      assertEquals("backup_not_found", deletedAgain.body<XoboroApiError>().code)
+      assertEquals(emptyList(), fixture.backups.list())
+    }
+
+  @Test
+  fun `returns not found for an unknown backup without administrator bypass`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val response =
+        client.delete("$BACKUPS_PATH/missing-backup") { bearerAuth(fixture.adminToken) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("backup_not_found", response.body<XoboroApiError>().code)
+    }
+
+  @Test
+  fun `queues media item maintenance and reports not found for a missing item`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+      val existingId = "media-item-existing"
+
+      val analyzed =
+        client.post("$XOBORO_API_PREFIX/media-items/$existingId/analyze") {
+          bearerAuth(fixture.adminToken)
+        }
+      val refreshed =
+        client.post("$XOBORO_API_PREFIX/media-items/$existingId/metadata-refresh") {
+          bearerAuth(fixture.adminToken)
+        }
+      val missingAnalyze =
+        client.post("$XOBORO_API_PREFIX/media-items/$MISSING_MEDIA_ITEM_ID/analyze") {
+          bearerAuth(fixture.adminToken)
+        }
+      val missingRefresh =
+        client.post("$XOBORO_API_PREFIX/media-items/$MISSING_MEDIA_ITEM_ID/metadata-refresh") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.Accepted, analyzed.status)
+      assertEquals(HttpStatusCode.Accepted, refreshed.status)
+      assertEquals(HttpStatusCode.NotFound, missingAnalyze.status)
+      assertEquals("media_item_not_found", missingAnalyze.body<XoboroApiError>().code)
+      assertEquals(HttpStatusCode.NotFound, missingRefresh.status)
+      assertEquals("media_item_not_found", missingRefresh.body<XoboroApiError>().code)
+      assertEquals(listOf(BookId(existingId)), fixture.catalogMaintenance.bookAnalyses)
+      assertEquals(listOf(BookId(existingId)), fixture.catalogMaintenance.bookMetadataRefreshes)
+    }
+
+  @Test
+  fun `queues series maintenance and reports not found for a missing series`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val analyzed =
+        client.post("$XOBORO_API_PREFIX/series/$EXISTING_SERIES_ID/analyze") {
+          bearerAuth(fixture.adminToken)
+        }
+      val refreshed =
+        client.post("$XOBORO_API_PREFIX/series/$EXISTING_SERIES_ID/metadata-refresh") {
+          bearerAuth(fixture.adminToken)
+        }
+      val missingAnalyze =
+        client.post("$XOBORO_API_PREFIX/series/$MISSING_SERIES_ID/analyze") {
+          bearerAuth(fixture.adminToken)
+        }
+
+      assertEquals(HttpStatusCode.Accepted, analyzed.status)
+      assertEquals(HttpStatusCode.Accepted, refreshed.status)
+      assertEquals(HttpStatusCode.NotFound, missingAnalyze.status)
+      assertEquals("series_not_found", missingAnalyze.body<XoboroApiError>().code)
+      assertEquals(listOf(SeriesId(EXISTING_SERIES_ID)), fixture.catalogMaintenance.seriesAnalyses)
+      assertEquals(
+        listOf(SeriesId(EXISTING_SERIES_ID)),
+        fixture.catalogMaintenance.seriesMetadataRefreshes,
+      )
+      assertEquals(0, fixture.catalogMaintenance.seriesAnalyses.count { it.value == MISSING_SERIES_ID })
+    }
+
   private class Fixture {
     private val users =
       InMemoryUserRepository(
@@ -610,6 +759,10 @@ class XoboroNativeOpsTest {
       )
     val history = RecordingHistoricalEventRepository()
     val tasks = RecordingTaskQueue()
+    val catalog = RecordingOpsCatalogReadRepository(existingSeriesIds = setOf(EXISTING_SERIES_ID))
+    val catalogMaintenance = RecordingOpsCatalogMaintenanceRequester(missingBookId = MISSING_MEDIA_ITEM_ID)
+    val backups = RecordingDatabaseBackupRequester()
+    val operationalMetrics = RecordingOperationalMetricsSnapshotProvider()
     val sessions =
       UserSessionLifecycle(
         users = users,
@@ -631,6 +784,10 @@ class XoboroNativeOpsTest {
       assertEquals(0, clientSettings.totalWrites)
       assertEquals(0, authenticationActivities.totalWrites)
       assertEquals(0, history.insertCalls)
+      assertEquals(0, catalog.findSeriesByIdOrNullCalls)
+      assertEquals(0, catalogMaintenance.totalCalls)
+      assertEquals(0, backups.totalCalls)
+      assertEquals(0, operationalMetrics.snapshotCalls)
     }
   }
 
@@ -889,6 +1046,162 @@ class XoboroNativeOpsTest {
     ): Boolean = error("fail is not used by the operations API")
   }
 
+  /** Only findSeriesByIdOrNull() is exercised; the rest of the catalog is not this API's concern. */
+  private class RecordingOpsCatalogReadRepository(
+    private val existingSeriesIds: Set<String>,
+  ) : CatalogReadRepository {
+    var findSeriesByIdOrNullCalls = 0
+      private set
+
+    override fun findBooks(
+      query: BookCatalogQuery,
+      access: CatalogAccess,
+      page: CatalogPageRequest,
+    ): CatalogPage<CatalogBook> = error("findBooks is not used by the operations API")
+
+    override fun findBookByIdOrNull(
+      id: BookId,
+      access: CatalogAccess,
+    ): CatalogBook? = error("findBookByIdOrNull is not used by the operations API")
+
+    override fun findPreviousBookOrNull(
+      id: BookId,
+      access: CatalogAccess,
+    ): CatalogBook? = error("findPreviousBookOrNull is not used by the operations API")
+
+    override fun findNextBookOrNull(
+      id: BookId,
+      access: CatalogAccess,
+    ): CatalogBook? = error("findNextBookOrNull is not used by the operations API")
+
+    override fun findSeries(
+      query: SeriesCatalogQuery,
+      access: CatalogAccess,
+      page: CatalogPageRequest,
+    ): CatalogPage<CatalogSeries> = error("findSeries is not used by the operations API")
+
+    override fun findSeriesByIdOrNull(
+      id: SeriesId,
+      access: CatalogAccess,
+    ): CatalogSeries? {
+      findSeriesByIdOrNullCalls += 1
+      if (id.value !in existingSeriesIds) return null
+      return CatalogSeries(
+        series =
+          Series(
+            id = id,
+            libraryId = LibraryId("library-synthetic"),
+            name = "Synthetic Series ${id.value}",
+            relativePath = "synthetic/${id.value}",
+            sourceItemId = "synthetic/${id.value}",
+            fileModifiedAtMillis = 1,
+            createdAtMillis = 1,
+          ),
+        metadata =
+          SeriesMetadata(seriesId = id, title = "Synthetic Series ${id.value}", createdAtMillis = 1),
+        booksMetadata = BookMetadataAggregation(createdAtMillis = 1, updatedAtMillis = 1),
+        readProgress = null,
+      )
+    }
+
+    override fun countSeriesByFirstCharacter(
+      query: SeriesCatalogQuery,
+      access: CatalogAccess,
+    ): List<io.xoboro.core.application.CatalogGroupCount> =
+      error("countSeriesByFirstCharacter is not used by the operations API")
+  }
+
+  /** Returns false for [missingBookId] to simulate a media item that no longer exists. */
+  private class RecordingOpsCatalogMaintenanceRequester(
+    private val missingBookId: String,
+  ) : CatalogMaintenanceRequester {
+    val bookAnalyses = mutableListOf<BookId>()
+    val bookMetadataRefreshes = mutableListOf<BookId>()
+    val seriesAnalyses = mutableListOf<SeriesId>()
+    val seriesMetadataRefreshes = mutableListOf<SeriesId>()
+    var clearUnclaimedCalls = 0
+      private set
+    val totalCalls: Int
+      get() =
+        bookAnalyses.size + bookMetadataRefreshes.size +
+          seriesAnalyses.size + seriesMetadataRefreshes.size + clearUnclaimedCalls
+
+    override fun analyzeBook(id: BookId): Boolean {
+      if (id.value == missingBookId) return false
+      bookAnalyses += id
+      return true
+    }
+
+    override fun analyzeSeries(id: SeriesId): Int {
+      seriesAnalyses += id
+      return 1
+    }
+
+    override fun refreshBookMetadata(id: BookId): Boolean {
+      if (id.value == missingBookId) return false
+      bookMetadataRefreshes += id
+      return true
+    }
+
+    override fun refreshSeriesMetadata(id: SeriesId): Int {
+      seriesMetadataRefreshes += id
+      return 1
+    }
+
+    override fun clearUnclaimedTasks(): Int {
+      clearUnclaimedCalls += 1
+      return 0
+    }
+  }
+
+  private class RecordingDatabaseBackupRequester : DatabaseBackupRequester {
+    private val created = mutableListOf<DatabaseBackupDescriptor>()
+    val deleted = mutableListOf<String>()
+    var listCalls = 0
+      private set
+    val totalCalls: Int
+      get() = created.size + deleted.size + listCalls
+
+    override fun list(): List<DatabaseBackupDescriptor> {
+      listCalls += 1
+      return created.toList()
+    }
+
+    override fun create(): DatabaseBackupDescriptor {
+      val descriptor =
+        DatabaseBackupDescriptor(
+          id = "backup-${created.size + 1}",
+          sizeBytes = 1_024,
+          createdAtMillis = 5_000,
+        )
+      created += descriptor
+      return descriptor
+    }
+
+    override fun delete(id: String): Boolean {
+      deleted += id
+      return created.removeIf { it.id == id }
+    }
+  }
+
+  private class RecordingOperationalMetricsSnapshotProvider : OperationalMetricsSnapshotProvider {
+    var snapshotCalls = 0
+      private set
+
+    override fun snapshot(): OperationalStatusSnapshot {
+      snapshotCalls += 1
+      return OperationalStatusSnapshot(
+        ready = true,
+        uptimeSeconds = 12.5,
+        activeRequests = 1,
+        totalRequests = 42,
+        requestsByStatusClass = mapOf("2xx" to 40L, "4xx" to 2L),
+        taskQueue = TaskCounts(pending = 3, running = 1, dead = 2),
+        taskWorkerCount = 4,
+      )
+    }
+  }
+
   private class RecordingHistoricalEventRepository : HistoricalEventRepository {
     private val values = mutableListOf<HistoricalEvent>()
     var findAllCalls = 0
@@ -987,12 +1300,45 @@ class XoboroNativeOpsTest {
     private const val ME_AUTHENTICATION_ACTIVITY_PATH =
       "$XOBORO_API_PREFIX/me/authentication-activity"
     private const val HISTORY_PATH = "$XOBORO_API_PREFIX/history"
+    private const val METRICS_PATH = "$XOBORO_API_PREFIX/metrics"
+    private const val BACKUPS_PATH = "$XOBORO_API_PREFIX/backups"
+    private const val EXISTING_SERIES_ID = "series-existing"
+    private const val MISSING_SERIES_ID = "series-missing"
+    private const val MISSING_MEDIA_ITEM_ID = "media-item-missing"
     private const val SYNTHETIC_REMEMBER_ME_SECRET =
       "synthetic-remember-me-secret-should-never-leak"
     private val ADMIN_USER_ID = UserId("admin-user")
     private val READER_USER_ID = UserId("reader-user")
     private val ADMINISTRATOR_ROUTES =
       listOf(
+        OperationsRoute(HttpMethod.Get, METRICS_PATH, "operational_metrics_forbidden"),
+        OperationsRoute(HttpMethod.Post, BACKUPS_PATH, "backup_administration_forbidden"),
+        OperationsRoute(HttpMethod.Get, BACKUPS_PATH, "backup_administration_forbidden"),
+        OperationsRoute(
+          HttpMethod.Delete,
+          "$BACKUPS_PATH/backup-placeholder",
+          "backup_administration_forbidden",
+        ),
+        OperationsRoute(
+          HttpMethod.Post,
+          "$XOBORO_API_PREFIX/media-items/media-item-placeholder/analyze",
+          "catalog_maintenance_forbidden",
+        ),
+        OperationsRoute(
+          HttpMethod.Post,
+          "$XOBORO_API_PREFIX/media-items/media-item-placeholder/metadata-refresh",
+          "catalog_maintenance_forbidden",
+        ),
+        OperationsRoute(
+          HttpMethod.Post,
+          "$XOBORO_API_PREFIX/series/$EXISTING_SERIES_ID/analyze",
+          "catalog_maintenance_forbidden",
+        ),
+        OperationsRoute(
+          HttpMethod.Post,
+          "$XOBORO_API_PREFIX/series/$EXISTING_SERIES_ID/metadata-refresh",
+          "catalog_maintenance_forbidden",
+        ),
         OperationsRoute(
           HttpMethod.Get,
           SERVER_SETTINGS_PATH,

@@ -12,6 +12,7 @@ import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogScanner
+import io.xoboro.core.application.DatabaseBackupRequester
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
@@ -69,6 +70,7 @@ import io.xoboro.server.media.LocalFontResourceCatalog
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.media.RarToCbzConverter
 import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.LocalDatabaseBackupRequester
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqAnnouncementReadRepository
@@ -198,6 +200,7 @@ class XoboroRuntime private constructor(
   val sseEventHub: KomgaSseEventHub,
   val sseTaskStatusProvider: KomgaTaskStatusProvider,
   val durableTaskQueue: DurableTaskQueue,
+  val databaseBackupRequester: DatabaseBackupRequester,
   val mediaItemRepository: MediaItemRepository,
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
@@ -800,6 +803,12 @@ class XoboroRuntime private constructor(
             },
           )
         workerPool = createdWorkerPool
+        val databaseBackupRequester =
+          LocalDatabaseBackupRequester(
+            backups = database.backups,
+            directory = config.backupsDirectory,
+            idFactory = { TsidCreator.getTsid256().toString() },
+          )
         val sseTaskStatusProvider =
           KomgaTaskStatusProvider {
             val counts = queue.countsByType()
@@ -853,6 +862,7 @@ class XoboroRuntime private constructor(
           sseEventHub = sseEvents,
           sseTaskStatusProvider = sseTaskStatusProvider,
           durableTaskQueue = queue,
+          databaseBackupRequester = databaseBackupRequester,
           mediaItemRepository = mediaItems,
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,

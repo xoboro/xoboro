@@ -39,6 +39,18 @@ internal class OperationalMetrics(
     activeRequests.decrementAndGet()
   }
 
+  fun activeRequestCount(): Long = activeRequests.get()
+
+  fun totalRequestCount(): Long = requests.values.sumOf { it.count.sum() }
+
+  fun requestCountsByStatusClass(): Map<String, Long> =
+    requests.entries
+      .groupBy({ it.key.status }, { it.value.count.sum() })
+      .mapValues { (_, counts) -> counts.sum() }
+
+  fun uptimeSeconds(): Double =
+    (nanoTime() - startedAtNanos).coerceAtLeast(0).toDouble() / NANOS_PER_SECOND
+
   fun scrape(
     ready: Boolean,
     taskQueueSize: Int,
@@ -46,7 +58,7 @@ internal class OperationalMetrics(
   ): String {
     require(taskQueueSize >= 0) { "Task queue size must not be negative" }
     require(workerCount >= 0) { "Worker count must not be negative" }
-    val uptimeSeconds = (nanoTime() - startedAtNanos).coerceAtLeast(0).toDouble() / NANOS_PER_SECOND
+    val uptimeSeconds = uptimeSeconds()
     return buildString {
       appendLine("# HELP xoboro_http_requests_total Completed HTTP requests.")
       appendLine("# TYPE xoboro_http_requests_total counter")
@@ -71,7 +83,7 @@ internal class OperationalMetrics(
       appendLine("# HELP xoboro_http_requests_active HTTP requests currently executing.")
       appendLine("# TYPE xoboro_http_requests_active gauge")
       append("xoboro_http_requests_active ")
-      appendLine(activeRequests.get())
+      appendLine(activeRequestCount())
       appendLine("# HELP xoboro_ready Whether the runtime can serve traffic.")
       appendLine("# TYPE xoboro_ready gauge")
       append("xoboro_ready ")

@@ -17,6 +17,7 @@ data class ServerConfig(
   val oauth2AccountCreation: Boolean = false,
   val oidcEmailVerification: Boolean = true,
   val fontsDirectory: Path = Path.of("config/fonts"),
+  val backupsDirectory: Path = Path.of("config/backups"),
   val corsAllowedOrigins: Set<String> = emptySet(),
   val trustedProxyHosts: Set<String> = emptySet(),
   val metricsToken: String? = null,
@@ -111,6 +112,12 @@ data class ServerConfig(
               ?.let(Path::of)
               ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
             ?: normalizedWorkingDirectory.resolve("config/fonts"),
+        backupsDirectory =
+          environment["XOBORO_BACKUPS_PATH"]
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
+            ?: normalizedWorkingDirectory.resolve("config/backups"),
         corsAllowedOrigins =
           environment["KOMGA_CORS_ALLOWEDORIGINS"]
             ?.split(',')
