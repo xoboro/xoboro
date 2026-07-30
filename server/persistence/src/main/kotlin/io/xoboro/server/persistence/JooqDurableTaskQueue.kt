@@ -84,6 +84,9 @@ class JooqDurableTaskQueue(
   ): ClaimedTask? {
     require(workerId.isNotBlank()) { "Worker ID must not be blank" }
     require(leaseToken.isNotBlank()) { "Lease token must not be blank" }
+    if (!hasActionableTask(nowMillis)) {
+      return null
+    }
     val leaseExpiresAtMillis = leaseExpiration(nowMillis, leaseDurationMillis)
 
     return database.transaction { transaction ->
@@ -182,6 +185,45 @@ class JooqDurableTaskQueue(
         record.requiredString("last_error").take(DEAD_LETTER_LOG_ERROR_LIMIT),
     )
   }
+
+  /**
+   * Decides whether [claimNext] has anything at all to do, so an idle poll costs a read instead of
+   * a write.
+   *
+   * Without this, every poll opens a write transaction unconditionally: the lease-recovery
+   * `UPDATE` runs before the claim query, and SQLite takes the WAL write lock when an `UPDATE`
+   * starts, whether or not it matches a row. At the production 500ms poll interval that is a
+   * permanent stream of no-op writes competing with real writers for the same lock.
+   *
+   * Two deliberate choices:
+   *
+   * 1. **Runs outside the write transaction, not as its first statement.** Opening the write
+   *    transaction with a `SELECT` would turn `claimNext` into the read-then-write shape that
+   *    fails with `SQLITE_BUSY_SNAPSHOT` when it later upgrades to a writer (see
+   *    [JooqBookMetadataAggregationRepository]). Keeping that transaction write-first preserves
+   *    its immunity.
+   * 2. **Issued on the autocommit connection, not inside [XoboroDatabase.transaction].** A pooled
+   *    connection may have been left in `IMMEDIATE` transaction mode by another repository, which
+   *    would make even a read-only `BEGIN` acquire the write lock - reintroducing the very cost
+   *    this probe exists to avoid. A single autocommit statement never begins a transaction.
+   *
+   * The predicate is intentionally looser than the claim query: it ignores group serialization, so
+   * it can admit a poll that goes on to claim nothing (same write as today), but it can never hide
+   * a claimable task.
+   */
+  private fun hasActionableTask(nowMillis: Long): Boolean =
+    database.dsl.fetchOne(
+      """
+      SELECT 1 AS actionable
+      WHERE EXISTS (
+        SELECT 1 FROM task WHERE state = 'RUNNING' AND lease_expires_at_ms <= ?
+      ) OR EXISTS (
+        SELECT 1 FROM task WHERE state = 'PENDING' AND available_at_ms <= ?
+      )
+      """.trimIndent(),
+      nowMillis,
+      nowMillis,
+    ) != null
 
   override fun renewLease(
     taskId: String,
