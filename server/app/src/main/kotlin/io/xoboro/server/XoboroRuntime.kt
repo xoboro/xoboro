@@ -792,7 +792,18 @@ class XoboroRuntime private constructor(
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
                 RefreshBookMetadataTaskHandler(
                   metadataRefreshLifecycle,
-                  afterRefresh = { localArtworkRefreshLifecycle.refreshBook(it) },
+                  afterRefresh = { bookId ->
+                    localArtworkRefreshLifecycle.refreshBook(bookId)
+                    // A book refresh can change values (e.g. title) that a series metadata
+                    // provider promotes from its books, most notably OneShotSeriesMetadataProvider.
+                    // If the series was refreshed before this book (see ADR 0077 discussion),
+                    // it may have promoted a stale value. Re-enqueueing here makes the series
+                    // self-heal once the book's metadata is known-good, instead of the wrong
+                    // value persisting forever.
+                    books.findByIdOrNull(bookId)?.let { book ->
+                      refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+                    }
+                  },
                 ),
                 RefreshSeriesMetadataTaskHandler(
                   metadataRefreshLifecycle,
