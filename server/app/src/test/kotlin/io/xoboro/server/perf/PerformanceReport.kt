@@ -100,6 +100,37 @@ class PerformanceReport {
     metrics += PerformanceMetric(key, 0, value.toString(), "index")
   }
 
+  /**
+   * Records the outcome of waiting for the durable task queue to drain before latency is measured.
+   *
+   * Three numbers, not one. [millis] alone would let a timeout look like a fast drain, and the whole
+   * reason this exists is that a latency number taken while background work is still running is not a
+   * latency number. [drained] is what tells a reader whether to trust the `api.*` metrics in the same
+   * run at all, and [remainingTasks] says how far off it was.
+   */
+  fun recordQueueDrain(
+    itemCount: Long,
+    millis: Double,
+    drained: Boolean,
+    remainingTasks: Long,
+  ) {
+    recordMillis("queue_drain.wall", itemCount, millis)
+    metrics +=
+      PerformanceMetric(
+        "queue_drain.drained",
+        itemCount,
+        drained.toString(),
+        "boolean",
+      )
+    metrics +=
+      PerformanceMetric(
+        "queue_drain.remaining_tasks",
+        itemCount,
+        remainingTasks.toString(),
+        "tasks",
+      )
+  }
+
   fun recordBytes(
     key: String,
     itemCount: Long,
