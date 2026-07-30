@@ -220,6 +220,29 @@ Komga server settings and Komga-specific synchronization snapshots are not
 copied; Xoboro server settings retain their deployment defaults and each sync
 adapter establishes new Xoboro snapshots after cutover.
 
+### Performance harness
+
+An opt-in harness generates a synthetic large library on disk (deterministic,
+seeded, no real titles or media) and drives it through the production scanner
+and analyzer, then measures native API latency against the resulting
+database. It is not part of `check` or `test`; run it explicitly:
+
+```shell
+mise exec -- ./gradlew :server:app:performanceHarness \
+  -Pxoboro.perf.seriesCount=300 \
+  -Pxoboro.perf.booksPerSeries=10 \
+  -Pxoboro.perf.oneShotCount=50
+```
+
+Omit the properties for a small, fast smoke run (20 series × 5 books + 5
+one-shots). Output is printed twice: stable `xoboro.perf.<metric>=<value>`
+lines for diffing across runs, and a markdown table. It reports numbers only
+and does not assert performance thresholds; see the harness class doc at
+`server/app/src/test/kotlin/io/xoboro/server/perf/PerformanceHarnessTest.kt`
+for exactly what it measures and what it deliberately does not (concurrent
+multi-user load, a cold OS page cache, real network transport, artwork
+generation).
+
 ## Feature status
 
 The auditable release ledger is maintained in
