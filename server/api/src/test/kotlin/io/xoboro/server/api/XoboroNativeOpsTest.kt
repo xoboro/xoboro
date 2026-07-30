@@ -537,15 +537,40 @@ class XoboroNativeOpsTest {
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.readerToken) }
       assertEquals(HttpStatusCode.Forbidden, forbidden.status)
       assertEquals("task_administration_forbidden", forbidden.body<XoboroApiError>().code)
-      assertEquals(0, fixture.tasks.clearCalls)
-      assertEquals(7, fixture.tasks.unclaimed)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
+      assertEquals(7, fixture.tasks.pending)
 
       val response =
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.adminToken) }
       assertEquals(HttpStatusCode.OK, response.status)
       assertEquals(7, response.body<XoboroClearedTasksResponse>().cleared)
-      assertEquals(1, fixture.tasks.clearCalls)
-      assertEquals(0, fixture.tasks.unclaimed)
+      assertEquals(1, fixture.tasks.clearPendingCalls)
+      assertEquals(0, fixture.tasks.pending)
+      // Only clearPending() was touched - a distinct operation from clearing dead tasks below.
+      assertEquals(0, fixture.tasks.clearDeadCalls)
+    }
+
+  @Test
+  fun `clearing dead tasks reports the removed count and refuses non-administrators`() =
+    testApplication {
+      val fixture = Fixture()
+      installOperations(fixture)
+
+      val forbidden =
+        client.delete("$XOBORO_API_PREFIX/tasks/dead") { bearerAuth(fixture.readerToken) }
+      assertEquals(HttpStatusCode.Forbidden, forbidden.status)
+      assertEquals("task_administration_forbidden", forbidden.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.clearDeadCalls)
+      assertEquals(7, fixture.tasks.dead)
+
+      val response =
+        client.delete("$XOBORO_API_PREFIX/tasks/dead") { bearerAuth(fixture.adminToken) }
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(7, response.body<XoboroClearedTasksResponse>().cleared)
+      assertEquals(1, fixture.tasks.clearDeadCalls)
+      assertEquals(0, fixture.tasks.dead)
+      // Only clearDead() was touched - a distinct operation from clearing pending work above.
+      assertEquals(0, fixture.tasks.clearPendingCalls)
     }
 
   @Test
@@ -562,8 +587,13 @@ class XoboroNativeOpsTest {
         HttpStatusCode.Unauthorized,
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed").status,
       )
+      assertEquals(
+        HttpStatusCode.Unauthorized,
+        client.delete("$XOBORO_API_PREFIX/tasks/dead").status,
+      )
       assertEquals(0, fixture.tasks.countsCalls)
-      assertEquals(0, fixture.tasks.clearCalls)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
+      assertEquals(0, fixture.tasks.clearDeadCalls)
     }
 
   @Test
@@ -572,17 +602,27 @@ class XoboroNativeOpsTest {
       val fixture = Fixture()
       installOperations(fixture)
 
-      val response =
+      val unclaimedResponse =
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") {
           cookie(XOBORO_SESSION_COOKIE, fixture.adminToken)
           header(HttpHeaders.Origin, "https://cross-site.example.invalid")
           header("Sec-Fetch-Site", "cross-site")
         }
+      assertEquals(HttpStatusCode.Forbidden, unclaimedResponse.status)
+      assertEquals("cross_site_request_rejected", unclaimedResponse.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
+      assertEquals(7, fixture.tasks.pending)
 
-      assertEquals(HttpStatusCode.Forbidden, response.status)
-      assertEquals("cross_site_request_rejected", response.body<XoboroApiError>().code)
-      assertEquals(0, fixture.tasks.clearCalls)
-      assertEquals(7, fixture.tasks.unclaimed)
+      val deadResponse =
+        client.delete("$XOBORO_API_PREFIX/tasks/dead") {
+          cookie(XOBORO_SESSION_COOKIE, fixture.adminToken)
+          header(HttpHeaders.Origin, "https://cross-site.example.invalid")
+          header("Sec-Fetch-Site", "cross-site")
+        }
+      assertEquals(HttpStatusCode.Forbidden, deadResponse.status)
+      assertEquals("cross_site_request_rejected", deadResponse.body<XoboroApiError>().code)
+      assertEquals(0, fixture.tasks.clearDeadCalls)
+      assertEquals(7, fixture.tasks.dead)
     }
 
   @Test
@@ -993,23 +1033,36 @@ class XoboroNativeOpsTest {
     }
   }
 
-  /** Only counts() and clearUnclaimed() are exercised; the rest of the queue is not this API's concern. */
+  /**
+   * Only counts(), clearPending(), and clearDead() are exercised; the rest of the queue is not
+   * this API's concern.
+   */
   private class RecordingTaskQueue : DurableTaskQueue {
     var countsCalls = 0
       private set
-    var clearCalls = 0
+    var clearPendingCalls = 0
       private set
-    var unclaimed = 7
+    var clearDeadCalls = 0
+      private set
+    var pending = 7
+    var dead = 7
 
     override fun counts(): TaskCounts {
       countsCalls += 1
       return TaskCounts(pending = 3, running = 1, dead = 2)
     }
 
-    override fun clearUnclaimed(): Int {
-      clearCalls += 1
-      val cleared = unclaimed
-      unclaimed = 0
+    override fun clearPending(): Int {
+      clearPendingCalls += 1
+      val cleared = pending
+      pending = 0
+      return cleared
+    }
+
+    override fun clearDead(): Int {
+      clearDeadCalls += 1
+      val cleared = dead
+      dead = 0
       return cleared
     }
 

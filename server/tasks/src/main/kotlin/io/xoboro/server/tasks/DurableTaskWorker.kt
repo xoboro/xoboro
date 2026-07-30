@@ -3,6 +3,8 @@ package io.xoboro.server.tasks
 import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTaskQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.logging.Level
+import java.util.logging.Logger
 
 data class TaskWorkerPolicy(
   val leaseDurationMillis: Long = 600_000,
@@ -120,19 +122,44 @@ class DurableTaskWorker(
       } else {
         retryTime(failureTimeMillis, claim.attempt)
       }
+    val taskError = failure.toTaskError()
     val failed =
       queue.fail(
         taskId = claim.task.id,
         leaseToken = claim.leaseToken,
-        error = failure.toTaskError(),
+        error = taskError,
         retryAtMillis = retryAtMillis,
         nowMillis = failureTimeMillis,
       )
+    if (failed && retryAtMillis == null) {
+      logDeadLetter(claim, taskError)
+    }
     return if (failed) {
       TaskRunResult.Failed(claim.task.id, willRetry = retryAtMillis != null)
     } else {
       TaskRunResult.LeaseLost(claim.task.id)
     }
+  }
+
+  /**
+   * The only signal an operator gets that [claim]'s task has been permanently abandoned, since a
+   * `DEAD` transition otherwise leaves no trace beyond the row itself. [error] is already the
+   * same, policy-truncated string persisted as `last_error`; it is capped again here (well below
+   * [TaskWorkerPolicy.maximumErrorLength]) purely to keep the log line itself short - task
+   * handler messages are typically a file path or a wrapped I/O error, not a secret, but an
+   * operator's log aggregator is not the place for an unbounded copy of one regardless. The raw
+   * [Throwable] is deliberately not attached: doing so would print its full, untruncated message
+   * via the stack trace and defeat that cap.
+   */
+  private fun logDeadLetter(
+    claim: ClaimedTask,
+    error: String,
+  ) {
+    logger.log(
+      Level.WARNING,
+      "Task ${claim.task.id} (${claim.task.type}) dead-lettered after " +
+        "${claim.attempt}/${claim.task.maxAttempts} attempts: ${error.take(DEAD_LETTER_LOG_ERROR_LIMIT)}",
+    )
   }
 
   private fun retryTime(
@@ -157,4 +184,9 @@ class DurableTaskWorker(
 
   private fun now(): Long =
     currentTimeMillis().also { require(it >= 0) { "Worker timestamp must not be negative" } }
+
+  private companion object {
+    private val logger = Logger.getLogger(DurableTaskWorker::class.java.name)
+    private const val DEAD_LETTER_LOG_ERROR_LIMIT = 500
+  }
 }
