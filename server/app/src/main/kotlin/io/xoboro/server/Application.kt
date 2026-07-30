@@ -93,6 +93,8 @@ import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
 import io.xoboro.server.api.xoboroNativeCollectionsRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
+import io.xoboro.server.api.XoboroNativeEventHub
+import io.xoboro.server.api.xoboroNativeEventRoutes
 import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeMetadataRoutes
 import io.xoboro.server.api.xoboroNativeOpsRoutes
@@ -247,6 +249,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     readProgressLifecycle = runtime.readProgressLifecycle,
     koreaderSyncLifecycle = runtime.koreaderSyncLifecycle,
     sseEventHub = runtime.sseEventHub,
+    nativeEventHub = runtime.nativeEventHub,
     sseTaskStatusProvider = runtime.sseTaskStatusProvider,
     durableTaskQueue = runtime.durableTaskQueue,
     databaseBackupRequester = runtime.databaseBackupRequester,
@@ -300,6 +303,7 @@ fun Application.xoboroModule(
   readProgressLifecycle: ReadProgressLifecycle? = null,
   koreaderSyncLifecycle: KoreaderSyncLifecycle? = null,
   sseEventHub: KomgaSseEventHub? = null,
+  nativeEventHub: XoboroNativeEventHub? = null,
   sseTaskStatusProvider: KomgaTaskStatusProvider? = null,
   durableTaskQueue: DurableTaskQueue? = null,
   databaseBackupRequester: DatabaseBackupRequester? = null,
@@ -499,6 +503,9 @@ fun Application.xoboroModule(
             xoboroNativeSelfServiceRoutes(it)
           } else {
             xoboroNativeSelfServiceRoutes(it, apiKeyLifecycle)
+          }
+          if (nativeEventHub != null) {
+            xoboroNativeEventRoutes(hub = nativeEventHub, sessions = sessions)
           }
           if (
             serverSettingsLifecycle != null &&
