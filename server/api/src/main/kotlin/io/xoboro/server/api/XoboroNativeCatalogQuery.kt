@@ -47,6 +47,38 @@ internal fun ApplicationCall.nativeMediaItemQuery(
  */
 private fun ApplicationCall.trashedFilter(): Boolean = optionalBoolean("trashed") ?: false
 
+/**
+ * Page request for a named discovery feed: the caller's paging, the feed's ordering.
+ *
+ * A `sort` parameter is **rejected** rather than honoured. The whole point of a named feed is that its
+ * ordering is part of its definition, so allowing an override would put back the disagreement the feed
+ * exists to remove - and doing it silently would be worse, because the caller would believe they had
+ * changed something.
+ */
+internal fun ApplicationCall.nativeFeedPageRequest(
+  feed: XoboroNativeDiscoveryFeed,
+): CatalogPageRequest {
+  if (request.queryParameters["sort"] != null) {
+    throw XoboroInvalidQueryException(
+      "sort is not accepted on a discovery feed; use the general listing to choose an order",
+    )
+  }
+  // Routed through the same helper the general listings use, so page and size bounds have one
+  // definition. The mapper is never reached: a `sort` parameter was rejected above.
+  return nativePageRequest(
+    sortMapper = { error("a discovery feed does not accept a sort") },
+    defaultSort = feed.toCatalogSort(),
+  )
+}
+
+/** Applies the feed's own filter, for the two feeds defined by more than an ordering. */
+internal fun BookCatalogQuery.withFeedFilter(feed: XoboroNativeDiscoveryFeed): BookCatalogQuery =
+  when (feed.filter) {
+    XoboroNativeDiscoveryFeed.Filter.ON_DECK -> copy(onDeck = true)
+    XoboroNativeDiscoveryFeed.Filter.KEEP_READING -> copy(keepReading = true)
+    null -> this
+  }
+
 internal fun ApplicationCall.nativeSeriesPageRequest(): CatalogPageRequest =
   nativePageRequest(String::toSeriesSort, NativeSeriesSort.TITLE.toCatalogSort())
 

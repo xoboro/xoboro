@@ -69,7 +69,7 @@ Statuses:
 | ISBN barcode detection | READY | Native configuration and diagnostics |
 | Manual metadata, field locks, and bulk updates | READY | Native UI |
 | Full-text search | READY | Native query contract |
-| Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | PARTIAL | Native core search/filter/sort/on-deck/keep-reading queries and facets are implemented; add named discovery feeds and uncommon combination/error cases |
+| Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | READY | Native search, filter, sort, on-deck and keep-reading queries, facets, and five named discovery feeds whose ordering is fixed server-side so clients cannot disagree about what "latest" means (ADR 0103). A feed rejects a `sort` override rather than ignoring it |
 | Collections and manual ordering | PARTIAL | Native UI and generated artwork |
 | Read lists, ComicRack CBL import, and ordering | READY | Native UI |
 | Historical activity | READY | Native administrator history paging and a configurable retention window with a six-hourly sweep (ADR 0095); `poster.changed` covers all four artwork owner kinds (ADR 0094), and native session outcomes are recorded as authentication activity |
