@@ -12,7 +12,9 @@ import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.MediaKind
-import io.xoboro.server.media.ArchiveFormatDetector
+import io.xoboro.core.domain.LibrarySettings
+import io.xoboro.server.media.MediaFileFormat
+import io.xoboro.server.media.MediaFileFormatDetector
 import io.xoboro.server.media.RarToCbzConverter
 import io.xoboro.server.media.SourceMediaAccess
 import java.nio.file.Files
@@ -41,7 +43,7 @@ class ArchiveMaintenanceTaskEmitter(
     return books
       .findAllByLibraryId(libraryId)
       .asSequence()
-      .filter { it.deletedAtMillis == null && it.mediaKind == MediaKind.COMIC_ARCHIVE }
+      .filter { it.deletedAtMillis == null && it.isMaintainable(repairExtensions) }
       .count { book ->
         queue.enqueue(
           DurableTask(
@@ -62,8 +64,18 @@ class ArchiveMaintenanceTaskEmitter(
       }
   }
 
+  /**
+   * Conversion only ever applies to a comic archive. Extension repair applies to every kind the
+   * catalog indexes, because a PDF named `.cbz` is exactly the file repair exists to fix - and while
+   * repair skipped everything but archives, it could not see one.
+   */
+  private fun Book.isMaintainable(repairExtensions: Boolean): Boolean =
+    mediaKind == MediaKind.COMIC_ARCHIVE || (repairExtensions && mediaKind in REPAIRABLE_KINDS)
+
   companion object {
     fun taskId(bookId: BookId): String = "MAINTAIN_ARCHIVE_${bookId.value}"
+
+    private val REPAIRABLE_KINDS = setOf(MediaKind.PDF, MediaKind.EPUB)
   }
 }
 
@@ -77,7 +89,7 @@ class ArchiveMaintenanceTaskHandler(
   private val analysisEmitter: AnalyzeBookTaskEmitter,
   private val scanEmitter: ScanLibraryTaskEmitter,
   private val currentTimeMillis: () -> Long,
-  private val detector: ArchiveFormatDetector = ArchiveFormatDetector(),
+  private val detector: MediaFileFormatDetector = MediaFileFormatDetector(),
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -110,7 +122,7 @@ class ArchiveMaintenanceTaskHandler(
     if (!repair && !convert) return
     val book =
       books.findByIdOrNull(bookId)
-        ?.takeIf { it.deletedAtMillis == null && it.mediaKind == MediaKind.COMIC_ARCHIVE }
+        ?.takeIf { it.deletedAtMillis == null }
         ?: return
     val library = libraries.findById(book.libraryId)
     val access =
@@ -123,7 +135,7 @@ class ArchiveMaintenanceTaskHandler(
       access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
         val format = detector.detect(materialized.path) ?: return
         when {
-          convert && format.isRar -> {
+          convert && format == MediaFileFormat.COMIC_RAR -> {
             val converted = Files.createTempFile("xoboro-rar-", ".cbz")
             try {
               converter.convert(materialized.path, converted)
@@ -136,12 +148,15 @@ class ArchiveMaintenanceTaskHandler(
                     extension = "cbz",
                   ),
                 contentChanged = true,
+                mediaKind = MediaFileFormat.COMIC_ZIP.mediaKind,
               )
             } finally {
               Files.deleteIfExists(converted)
             }
           }
-          repair && book.extension() != format.canonicalExtension ->
+          repair &&
+            book.extension() != format.canonicalExtension &&
+            library.settings.scans(format.mediaKind) ->
             MaintenanceOutcome(
               result =
                 mutation.renameExtension(
@@ -150,14 +165,17 @@ class ArchiveMaintenanceTaskHandler(
                   extension = format.canonicalExtension,
                 ),
               contentChanged = false,
+              mediaKind = format.mediaKind,
             )
           else -> null
         }
       } ?: return
     val now = currentTimeMillis()
     require(now >= 0) { "Archive maintenance timestamp must not be negative" }
+    val kindChanged = outcome.mediaKind != book.mediaKind
     books.update(book.withMutation(outcome, now))
-    if (outcome.contentChanged) media.deleteByBookId(book.id)
+    // Pages and a profile produced by another format's analyzer describe nothing about this file.
+    if (outcome.contentChanged || kindChanged) media.deleteByBookId(book.id)
     analysisEmitter.analyzeBook(book.id, TaskPriority.HIGH)
     scanEmitter.scanLibrary(book.libraryId, priority = TaskPriority.HIGH)
   }
@@ -171,6 +189,10 @@ class ArchiveMaintenanceTaskHandler(
     val newName = leaf.substringBeforeLast('.', missingDelimiterValue = leaf)
     return copy(
       name = newName,
+      // The scan derives media kind from the extension, and nothing re-analyzes a book after a scan.
+      // Recording the kind here is what makes the analysis that follows use the right analyzer; left
+      // to the scan, the book would keep whatever the previous format's analyzer produced.
+      mediaKind = outcome.mediaKind,
       relativePath = result.relativePath,
       sourceItemId = result.itemId,
       sourceIdentity = result.identity,
@@ -185,9 +207,25 @@ class ArchiveMaintenanceTaskHandler(
   private fun Book.extension(): String =
     relativePath.substringAfterLast('.', missingDelimiterValue = "").lowercase()
 
+  /**
+   * Whether the library would still index the file after the rename.
+   *
+   * Kind is derived from the extension, and a kind the library does not scan yields no candidate at
+   * all - so renaming a file into an unscanned kind removes the book from the catalog on the next
+   * scan. A repair that made a book disappear would be worse than the wrong extension it fixed, so a
+   * library with `scanPdf` off keeps its mislabelled PDF.
+   */
+  private fun LibrarySettings.scans(kind: MediaKind): Boolean =
+    when (kind) {
+      MediaKind.COMIC_ARCHIVE -> scanCbx
+      MediaKind.PDF -> scanPdf
+      MediaKind.EPUB -> scanEpub
+    }
+
   private data class MaintenanceOutcome(
     val result: SourceMutationResult,
     val contentChanged: Boolean,
+    val mediaKind: MediaKind,
   )
 
   companion object {
