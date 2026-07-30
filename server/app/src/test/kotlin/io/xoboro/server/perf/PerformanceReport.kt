@@ -4,12 +4,13 @@ import java.util.Locale
 import kotlin.math.ceil
 
 /**
- * Aggregated wall-clock latency samples for one measured operation. Reported as p50 and max
- * (not a mean) so noise and outliers stay visible instead of being averaged away.
+ * Aggregated wall-clock latency samples for one measured operation. Reported as p50 (median),
+ * min, and max (not a mean) so noise and outliers stay visible instead of being averaged away.
  */
 data class LatencyStats(
   val sampleCount: Int,
   val p50Millis: Double,
+  val minMillis: Double,
   val maxMillis: Double,
 ) {
   companion object {
@@ -20,6 +21,7 @@ data class LatencyStats(
       return LatencyStats(
         sampleCount = sortedMillis.size,
         p50Millis = sortedMillis[p50Index],
+        minMillis = sortedMillis.first(),
         maxMillis = sortedMillis.last(),
       )
     }
@@ -51,8 +53,8 @@ class PerformanceReport {
   }
 
   /**
-   * Records p50/max latency plus the sample counts. [retriedSamples] is the number of measured
-   * requests that needed a retry and were therefore excluded from [stats] (see
+   * Records p50 (median)/min/max latency plus the sample counts. [retriedSamples] is the number of
+   * measured requests that needed a retry and were therefore excluded from [stats] (see
    * `PerformanceHarnessTest.measureRepeated`) — always recorded, even when zero, so a reader never
    * has to guess whether retries happened.
    */
@@ -63,9 +65,27 @@ class PerformanceReport {
     retriedSamples: Int,
   ) {
     recordMillis("$key.p50", itemCount, stats.p50Millis)
+    recordMillis("$key.min", itemCount, stats.minMillis)
     recordMillis("$key.max", itemCount, stats.maxMillis)
     metrics += PerformanceMetric("$key.samples", itemCount, stats.sampleCount.toString(), "requests")
     metrics += PerformanceMetric("$key.retried_samples", itemCount, retriedSamples.toString(), "requests")
+  }
+
+  /**
+   * Records p50 (median)/min/max from repeated measurements of a locally repeatable operation —
+   * e.g. re-running a rescan against an already-warm runtime, as opposed to [recordLatency]'s HTTP
+   * calls. There is no retry concept here (nothing is failing and being retried), so unlike
+   * [recordLatency] this only reports the sample count, not a retried-sample count.
+   */
+  fun recordRepeatedMillis(
+    key: String,
+    itemCount: Long,
+    stats: LatencyStats,
+  ) {
+    recordMillis("$key.p50", itemCount, stats.p50Millis)
+    recordMillis("$key.min", itemCount, stats.minMillis)
+    recordMillis("$key.max", itemCount, stats.maxMillis)
+    metrics += PerformanceMetric("$key.samples", itemCount, stats.sampleCount.toString(), "runs")
   }
 
   fun recordBytes(

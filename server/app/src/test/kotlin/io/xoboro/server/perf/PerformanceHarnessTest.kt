@@ -71,6 +71,19 @@ import org.junit.jupiter.api.io.TempDir
  * network transport (native HTTP calls run in-process through Ktor's test host), and artwork
  * generation (no thumbnails are produced here).
  *
+ * A single run of `cold_scan`/`cold_analyze`/`cold_full_scan` cannot establish a regression or an
+ * improvement: repeated runs at the same size on the same machine varied by roughly ±25% (see
+ * `README.md`'s Performance harness section for the measured numbers and for how to get a number
+ * that can actually support a before/after comparison — a shell loop of separate Gradle
+ * invocations, not a change to this file). Those three metrics are deliberately NOT repeated
+ * in-process the way `unchanged_rescan`/`api.*` are: "cold" means the first
+ * request in a JVM's lifetime, before JIT compilation and class loading have caught up, so looping
+ * the scan+analyze sequence inside one JVM would make later iterations systematically faster —
+ * not noisier, but biased — which would silently stop measuring a cold start. `unchanged_rescan`
+ * has no such problem: a real deployment reruns it warm, every `scanInterval`, so repeating it
+ * in-process against the already-open database measures the real, repeatable thing, and is
+ * reported as p50 (median)/min/max like the API latency metrics below.
+ *
  * `api.first_series_read_after_scan` is a deliberate exception to the steady-state latency
  * metrics: it is a single observation of the first `/series` call after a scan, which absorbs a
  * one-time full-catalog aggregation-cache rebuild (see the retry-policy note below). It is a
@@ -167,8 +180,17 @@ class PerformanceHarnessTest {
         (coldScanElapsed + analyzeElapsed).inWholeMilliseconds.toDouble(),
       )
 
-      val rescanElapsed = measureTime { scanner.scan(library, deep = false) }
-      report.recordMillis("unchanged_rescan.wall", scannedBookCount, rescanElapsed.inWholeMilliseconds.toDouble())
+      // Unlike cold_scan/cold_analyze/cold_full_scan above, an unchanged rescan is NOT a one-time,
+      // JVM-cold event: a real deployment reruns this warm, every scanInterval, for as long as the
+      // library exists. So repeating it here — against the same already-open database and already
+      // JIT-warmed scanner — measures the real thing, unlike looping a "cold" measurement would
+      // (see the class doc's note on why the cold metrics are not repeated the same way). Report
+      // p50 (median)/min/max, the same shape used for the API latency metrics below.
+      val rescanElapsedNanos =
+        (1..RESCAN_REPEAT_COUNT).map {
+          measureTime { scanner.scan(library, deep = false) }.inWholeNanoseconds
+        }
+      report.recordRepeatedMillis("unchanged_rescan.wall", scannedBookCount, LatencyStats.of(rescanElapsedNanos))
     }
 
     val databaseSizeBytes = Files.size(databasePath)
@@ -449,6 +471,7 @@ class PerformanceHarnessTest {
     const val DEFAULT_SERIES_COUNT = 20
     const val DEFAULT_BOOKS_PER_SERIES = 5
     const val DEFAULT_ONE_SHOT_COUNT = 5
+    const val RESCAN_REPEAT_COUNT = 5
     const val WARMUP_REQUESTS = 5
     const val MEASURED_REQUESTS = 50
     const val KEEP_READING_SAMPLE_SIZE = 200
