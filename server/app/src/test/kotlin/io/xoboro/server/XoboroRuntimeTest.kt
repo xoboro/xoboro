@@ -17,6 +17,7 @@ import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -121,6 +122,66 @@ class XoboroRuntimeTest {
           email = "ADMIN@example.invalid",
           rawPassword = "synthetic-password",
         ) != null,
+      )
+    }
+  }
+
+  @Test
+  fun `claims the configured initial administrator once and never re-claims it`() {
+    val databasePath = tempDirectory.resolve("provisioned-runtime.sqlite")
+    val config =
+      ServerConfig(
+        port = 25_600,
+        databasePath = databasePath,
+        workerCount = 1,
+        taskPollMillis = 10,
+        taskFailurePollMillis = 10,
+        taskLeaseMillis = 1_000,
+        shutdownTimeoutMillis = 2_000,
+        initialAdministrator =
+          InitialAdministrator("provisioned@example.invalid", "synthetic-provisioned-password"),
+      )
+
+    XoboroRuntime.open(config).use { runtime ->
+      // Claimed at startup, without anyone making the setup call. A deployment brought up from a
+      // manifest has nobody to make it, so the alternative is a server sitting unclaimed and reachable
+      // by whoever finds it first.
+      assertTrue(runtime.userLifecycle.isClaimed())
+      assertTrue(
+        runtime.userLifecycle.authenticate(
+          email = "provisioned@example.invalid",
+          rawPassword = "synthetic-provisioned-password",
+        ) != null,
+      )
+      // The administrator changes their password, as they should after provisioning.
+      val claimed =
+        requireNotNull(
+          runtime.userLifecycle.authenticate(
+            email = "provisioned@example.invalid",
+            rawPassword = "synthetic-provisioned-password",
+          ),
+        )
+      runtime.userLifecycle.updatePassword(claimed.id, "chosen-by-the-administrator")
+    }
+
+    // Restarted with the same variables still set - which is the normal case, since they live in the
+    // manifest.
+    XoboroRuntime.open(config).use { runtime ->
+      assertTrue(runtime.userLifecycle.isClaimed())
+      // The chosen password still works, and the provisioning password no longer does. If startup
+      // re-claimed, anyone able to edit the environment could take the account over by restarting -
+      // turning a provisioning convenience into a back door.
+      assertTrue(
+        runtime.userLifecycle.authenticate(
+          email = "provisioned@example.invalid",
+          rawPassword = "chosen-by-the-administrator",
+        ) != null,
+      )
+      assertNull(
+        runtime.userLifecycle.authenticate(
+          email = "provisioned@example.invalid",
+          rawPassword = "synthetic-provisioned-password",
+        ),
       )
     }
   }

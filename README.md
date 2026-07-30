@@ -131,9 +131,38 @@ editing source:
 | `KOMGA_OAUTH2_ACCOUNT_CREATION` | `false` |
 | `KOMGA_OIDC_EMAIL_VERIFICATION` | `true` |
 | `XOBORO_OAUTH2_ACCOUNT_LINKING` | `VERIFIED_EMAIL` |
+| `XOBORO_INITIAL_ADMIN_EMAIL` | unset |
+| `XOBORO_INITIAL_ADMIN_PASSWORD_FILE` | unset |
+| `XOBORO_INITIAL_ADMIN_PASSWORD` | unset |
 
 Malformed or out-of-range overrides fail startup instead of silently falling
 back to another value.
+
+### Provisioning the first administrator
+
+Set `XOBORO_INITIAL_ADMIN_EMAIL` together with one of the password variables and
+the first administrator is created at startup, so a deployment brought up from a
+Compose file or a manifest never sits unclaimed and reachable by whoever finds it
+first.
+
+**Prefer `XOBORO_INITIAL_ADMIN_PASSWORD_FILE`.** A password in the process
+environment is readable from `/proc/<pid>/environ`, appears in `docker inspect`, and
+gets committed in the Compose file that sets it. A file can carry restrictive
+permissions and is what Docker and Kubernetes secrets already mount. Only the
+trailing newline is stripped, so a password may contain leading or inner whitespace.
+`XOBORO_INITIAL_ADMIN_PASSWORD` exists because it is what people reach for first,
+not because it is the right one; when both are set, the file wins.
+
+The claim happens **only while the server is unclaimed**. Restarting with the
+variables still set does not reset the password — otherwise anyone able to edit the
+environment could take the account over by restarting, which would make a
+provisioning convenience into a back door. Change the password after provisioning;
+the provisioning value stops working the moment you do.
+
+Setting one half without the other **fails startup** rather than coming up
+unclaimed, and a password file that is missing or empty is an error too: a secret
+mount that failed is not the same as no secret configured, and treating them alike
+would turn a broken deployment into an open one.
 
 `XOBORO_OAUTH2_ACCOUNT_LINKING` decides whether an external OAuth2/OIDC identity
 may sign in as an **existing** local account whose email it matches:
