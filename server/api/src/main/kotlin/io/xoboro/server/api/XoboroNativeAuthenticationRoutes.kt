@@ -62,9 +62,10 @@ fun Route.xoboroNativeAuthenticationRoutes(
         }
         val user = users.authenticate(request.email, request.password)
         if (user == null) {
-          call.respond(
+          call.respondNativeError(
             HttpStatusCode.Unauthorized,
-            XoboroApiError("invalid_credentials", "Invalid email or password"),
+            "invalid_credentials",
+            "Invalid email or password",
           )
           return@post
         }

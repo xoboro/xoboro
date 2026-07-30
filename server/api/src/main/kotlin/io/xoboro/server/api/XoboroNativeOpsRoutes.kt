@@ -304,42 +304,34 @@ fun Route.xoboroNativeOpsRoutes(
 }
 
 private suspend fun ApplicationCall.respondTaskAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "task_administration_forbidden",
-      "Task administration requires an administrator",
-    ),
+    "task_administration_forbidden",
+    "Task administration requires an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondOperationalMetricsForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "operational_metrics_forbidden",
-      "Operational metrics require an administrator",
-    ),
+    "operational_metrics_forbidden",
+    "Operational metrics require an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondBackupAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "backup_administration_forbidden",
-      "Backup administration requires an administrator",
-    ),
+    "backup_administration_forbidden",
+    "Backup administration requires an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondCatalogMaintenanceForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "catalog_maintenance_forbidden",
-      "Catalog maintenance requires an administrator",
-    ),
+    "catalog_maintenance_forbidden",
+    "Catalog maintenance requires an administrator",
   )
 }
 
@@ -605,42 +597,34 @@ private fun HistoricalEvent.toNativeResponse(): XoboroHistoricalEventResponse =
   )
 
 private suspend fun ApplicationCall.respondServerSettingsForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "server_settings_forbidden",
-      "Server settings require an administrator",
-    ),
+    "server_settings_forbidden",
+    "Server settings require an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondClientSettingsForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "client_settings_forbidden",
-      "Global client settings require an administrator",
-    ),
+    "client_settings_forbidden",
+    "Global client settings require an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondAuthenticationActivityForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "authentication_activity_forbidden",
-      "Authentication activity requires an administrator",
-    ),
+    "authentication_activity_forbidden",
+    "Authentication activity requires an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondHistoryForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "history_forbidden",
-      "History requires an administrator",
-    ),
+    "history_forbidden",
+    "History requires an administrator",
   )
 }
 

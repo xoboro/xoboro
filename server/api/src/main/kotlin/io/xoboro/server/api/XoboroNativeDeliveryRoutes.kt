@@ -310,22 +310,18 @@ private fun ApplicationCall.nativePageImageRequest(): PageImageRequest {
 }
 
 private suspend fun ApplicationCall.respondPageStreamingForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "page_streaming_forbidden",
-      "Page streaming permission is required",
-    ),
+    "page_streaming_forbidden",
+    "Page streaming permission is required",
   )
 }
 
 private suspend fun ApplicationCall.respondFileDownloadForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "file_download_forbidden",
-      "File download permission is required",
-    ),
+    "file_download_forbidden",
+    "File download permission is required",
   )
 }
 
