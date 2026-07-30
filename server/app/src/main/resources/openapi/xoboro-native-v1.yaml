@@ -1,0 +1,3277 @@
+# OpenAPI description of the Xoboro native API.
+#
+# Path and method parity with the running server is enforced by
+# XoboroNativeOpenApiContractTest, which walks Ktor's routing tree and compares it with
+# this file. A route added without an entry here fails that test, and an entry here with
+# no route fails it too - so this description cannot quietly drift, which is the usual
+# fate of a hand-maintained spec.
+#
+# Prose descriptions of request and response bodies, error codes and cache semantics live
+# in docs/api/native-v1.md. This file is the machine-readable surface: paths, methods,
+# parameters, authentication and status codes.
+openapi: 3.1.0
+info:
+  title: Xoboro native API
+  version: v1
+  description: >-
+    The native Xoboro HTTP API. Distinct from the Komga compatibility surface under
+    /api/v1, which exists for transition and may be removed - see ADR 0082.
+servers:
+  - url: /
+    description: The Xoboro server itself.
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+  - apiKeyAuth: []
+tags:
+  - name: Authentication activity
+  - name: Client settings
+  - name: Collections
+  - name: Documentation
+  - name: Events
+  - name: Facets
+  - name: History
+  - name: Libraries
+  - name: Media items
+  - name: Operations
+  - name: Read lists
+  - name: Self service
+  - name: Series
+  - name: Server settings
+  - name: Session
+  - name: Setup
+  - name: User administration
+paths:
+  /api/xoboro/v1/authentication-activity:
+    get:
+      tags: [Authentication activity]
+      operationId: get_authentication_activity
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/backups:
+    get:
+      tags: [Operations]
+      operationId: get_backups
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Operations]
+      operationId: post_backups
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/backups/{backupId}:
+    parameters:
+      - name: backupId
+        in: path
+        required: true
+        description: Backup identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Operations]
+      operationId: delete_backups_backupId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/client-settings:
+    get:
+      tags: [Client settings]
+      operationId: get_client_settings
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Client settings]
+      operationId: put_client_settings
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/client-settings/global:
+    delete:
+      tags: [Client settings]
+      operationId: delete_client_settings_global
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Client settings]
+      operationId: get_client_settings_global
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Client settings]
+      operationId: put_client_settings_global
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/collections:
+    get:
+      tags: [Collections]
+      operationId: get_collections
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Collections]
+      operationId: post_collections
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/collections/{collectionId}:
+    parameters:
+      - name: collectionId
+        in: path
+        required: true
+        description: Collection identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Collections]
+      operationId: delete_collections_collectionId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Collections]
+      operationId: get_collections_collectionId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Collections]
+      operationId: put_collections_collectionId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/collections/{collectionId}/series:
+    parameters:
+      - name: collectionId
+        in: path
+        required: true
+        description: Collection identifier.
+        schema:
+          type: string
+    get:
+      tags: [Collections]
+      operationId: get_collections_collectionId_series
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/docs:
+    get:
+      tags: [Documentation]
+      operationId: get_docs
+      summary: Browser documentation rendered from the description
+      security: []
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/docs/xoboro-native-v1.yaml:
+    get:
+      tags: [Documentation]
+      operationId: get_docs_xoboro_native_v1_yaml
+      security: []
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/events:
+    get:
+      tags: [Events]
+      operationId: get_events
+      summary: Subscribe to the server-sent event stream
+      responses:
+        "200":
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/facets:
+    get:
+      tags: [Facets]
+      operationId: get_facets
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/facets/authors:
+    get:
+      tags: [Facets]
+      operationId: get_facets_authors
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/history:
+    get:
+      tags: [History]
+      operationId: get_history
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries:
+    get:
+      tags: [Libraries]
+      operationId: get_libraries
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Libraries]
+      operationId: post_libraries
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Libraries]
+      operationId: delete_libraries_libraryId
+      summary: Delete a library; refused with 409 library_unavailable unless force=true
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: >-
+            Delete even while the storage is unavailable. A value other than true or false returns 400 invalid_query.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Libraries]
+      operationId: get_libraries_libraryId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Libraries]
+      operationId: put_libraries_libraryId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/analyze:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      operationId: post_libraries_libraryId_analyze
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/availability:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      operationId: post_libraries_libraryId_availability
+      summary: Re-check whether the library storage is reachable
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/empty-trash:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      operationId: post_libraries_libraryId_empty_trash
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/metadata-refresh:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      operationId: post_libraries_libraryId_metadata_refresh
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/scan:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      operationId: post_libraries_libraryId_scan
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/me:
+    get:
+      tags: [Self service]
+      operationId: get_me
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/me/api-keys:
+    get:
+      tags: [Self service]
+      operationId: get_me_api_keys
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Self service]
+      operationId: post_me_api_keys
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/me/api-keys/{apiKeyId}:
+    parameters:
+      - name: apiKeyId
+        in: path
+        required: true
+        description: API-key identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Self service]
+      operationId: delete_me_api_keys_apiKeyId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/me/authentication-activity:
+    get:
+      tags: [Self service]
+      operationId: get_me_authentication_activity
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/me/password:
+    put:
+      tags: [Self service]
+      operationId: put_me_password
+      responses:
+        "204":
+          description: Applied.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items:
+    get:
+      tags: [Media items]
+      operationId: get_media_items
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+        - name: trashed
+          in: query
+          required: false
+          description: >-
+            Select trashed entries instead of live ones.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/metadata:
+    patch:
+      tags: [Media items]
+      operationId: patch_media_items_metadata
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/analyze:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    post:
+      tags: [Media items]
+      operationId: post_media_items_mediaItemId_analyze
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/artwork:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_artwork
+      responses:
+        "200":
+          description: Binary content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/artworks:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_artworks
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Media items]
+      operationId: post_media_items_mediaItemId_artworks
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/artworks/{artworkId}:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+      - name: artworkId
+        in: path
+        required: true
+        description: Artwork identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Media items]
+      operationId: delete_media_items_mediaItemId_artworks_artworkId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_artworks_artworkId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/artworks/{artworkId}/selected:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+      - name: artworkId
+        in: path
+        required: true
+        description: Artwork identifier.
+        schema:
+          type: string
+    put:
+      tags: [Media items]
+      operationId: put_media_items_mediaItemId_artworks_artworkId_selected
+      responses:
+        "204":
+          description: Applied.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/file:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_file
+      responses:
+        "200":
+          description: Binary content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/metadata:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    patch:
+      tags: [Media items]
+      operationId: patch_media_items_mediaItemId_metadata
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/metadata-refresh:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    post:
+      tags: [Media items]
+      operationId: post_media_items_mediaItemId_metadata_refresh
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/next:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_next
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/pages:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_pages
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/pages/{pageNumber}:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+      - name: pageNumber
+        in: path
+        required: true
+        description: One-based page number within the media item.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_pages_pageNumber
+      responses:
+        "200":
+          description: Binary content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/previous:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_previous
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/progress:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    put:
+      tags: [Media items]
+      operationId: put_media_items_mediaItemId_progress
+      responses:
+        "204":
+          description: Applied.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/read-lists:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_read_lists
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/resources:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_resources
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/resources/{resource}:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+      - name: resource
+        in: path
+        required: true
+        description: Resource path inside the media item; may contain slashes.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_resources_resource
+      responses:
+        "200":
+          description: Binary content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/metrics:
+    get:
+      tags: [Operations]
+      operationId: get_metrics
+      summary: Report operational metrics
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/openapi.yaml:
+    get:
+      tags: [Documentation]
+      operationId: get_openapi_yaml
+      summary: This description, served verbatim from the repository
+      security: []
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/read-lists:
+    get:
+      tags: [Read lists]
+      operationId: get_read_lists
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Read lists]
+      operationId: post_read_lists
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/read-lists/{readListId}:
+    parameters:
+      - name: readListId
+        in: path
+        required: true
+        description: Read-list identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Read lists]
+      operationId: delete_read_lists_readListId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Read lists]
+      operationId: get_read_lists_readListId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Read lists]
+      operationId: put_read_lists_readListId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/read-lists/{readListId}/media-items:
+    parameters:
+      - name: readListId
+        in: path
+        required: true
+        description: Read-list identifier.
+        schema:
+          type: string
+    get:
+      tags: [Read lists]
+      operationId: get_read_lists_readListId_media_items
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series:
+    get:
+      tags: [Series]
+      operationId: get_series
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+        - name: trashed
+          in: query
+          required: false
+          description: >-
+            Select trashed entries instead of live ones.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/analyze:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    post:
+      tags: [Series]
+      operationId: post_series_seriesId_analyze
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/artwork:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_artwork
+      responses:
+        "200":
+          description: Binary content.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/artworks:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_artworks
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Series]
+      operationId: post_series_seriesId_artworks
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/artworks/{artworkId}:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+      - name: artworkId
+        in: path
+        required: true
+        description: Artwork identifier.
+        schema:
+          type: string
+    delete:
+      tags: [Series]
+      operationId: delete_series_seriesId_artworks_artworkId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_artworks_artworkId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/artworks/{artworkId}/selected:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+      - name: artworkId
+        in: path
+        required: true
+        description: Artwork identifier.
+        schema:
+          type: string
+    put:
+      tags: [Series]
+      operationId: put_series_seriesId_artworks_artworkId_selected
+      responses:
+        "204":
+          description: Applied.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/collections:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_collections
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/media-items:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_media_items
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: >-
+            Zero-based page index.
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: >-
+            Page size, between 1 and 200.
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Repeatable `field[,asc|desc]`. An unknown field returns 400 invalid_query rather than being silently coerced.
+          schema:
+            type: string
+        - name: trashed
+          in: query
+          required: false
+          description: >-
+            Select trashed entries instead of live ones.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/metadata:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    patch:
+      tags: [Series]
+      operationId: patch_series_seriesId_metadata
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/metadata-refresh:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    post:
+      tags: [Series]
+      operationId: post_series_seriesId_metadata_refresh
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/server-settings:
+    get:
+      tags: [Server settings]
+      operationId: get_server_settings
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [Server settings]
+      operationId: put_server_settings
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/session:
+    delete:
+      tags: [Session]
+      operationId: delete_session
+      summary: Sign out and revoke the presented session
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    get:
+      tags: [Session]
+      operationId: get_session
+      summary: Inspect the current session
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Session]
+      operationId: post_session
+      summary: Sign in
+      security: []
+      responses:
+        "200":
+          description: Session created; the access token is returned once.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/setup:
+    get:
+      tags: [Setup]
+      operationId: get_setup
+      summary: Report whether the server still needs first-run setup
+      security: []
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [Setup]
+      operationId: post_setup
+      summary: Create the first administrator and open a session
+      security: []
+      responses:
+        "201":
+          description: Session created; the access token is returned once.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/tasks:
+    get:
+      tags: [Operations]
+      operationId: get_tasks
+      summary: Report queued task counts by type
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/tasks/dead:
+    delete:
+      tags: [Operations]
+      operationId: delete_tasks_dead
+      summary: Discard dead-lettered tasks
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/tasks/unclaimed:
+    delete:
+      tags: [Operations]
+      operationId: delete_tasks_unclaimed
+      summary: Discard queued work no worker has claimed
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/users:
+    get:
+      tags: [User administration]
+      operationId: get_users
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    post:
+      tags: [User administration]
+      operationId: post_users
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/users/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        description: User identifier.
+        schema:
+          type: string
+    delete:
+      tags: [User administration]
+      operationId: delete_users_userId
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    put:
+      tags: [User administration]
+      operationId: put_users_userId
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/users/{userId}/password:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        description: User identifier.
+        schema:
+          type: string
+    put:
+      tags: [User administration]
+      operationId: put_users_userId_password
+      responses:
+        "204":
+          description: Applied.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Access token returned by POST /setup or POST /session.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: XOBORO-SESSION
+      description: >-
+        Session cookie. Cookie-authenticated mutations additionally require the
+        cross-site request protection described in docs/api/native-v1.md.
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key issued through the self-service endpoints.
+  schemas:
+    XoboroApiError:
+      type: object
+      required: [code, message]
+      description: >-
+        The single error shape for the native API. `code` is a stable, specific identifier
+        - it is deliberately not flattened to a generic not_found or forbidden, so a client
+        can distinguish, for example, library_unavailable from library_not_found.
+      properties:
+        code:
+          type: string
+          examples: [library_unavailable, series_not_found, invalid_query]
+        message:
+          type: string
+    XoboroPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages, hasPrevious, hasNext]
+      description: The envelope every paged catalog collection returns.
+      properties:
+        items:
+          type: array
+          items: { type: object }
+        page: { type: integer, description: Zero-based. }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        hasPrevious: { type: boolean }
+        hasNext: { type: boolean }
