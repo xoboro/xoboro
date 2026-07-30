@@ -42,7 +42,7 @@ Statuses:
 | Add, change, move, delete, trash, and empty-trash reconciliation | READY | Native API/UI; no artificial restore API requirement |
 | File import, upgrade, deletion, and transient preview | READY | Native API/UI |
 | Duplicate file detection | READY | Native API/UI |
-| Duplicate-page detection and removal | PARTIAL | Native API/UI and optional automatic policy execution |
+| Duplicate-page detection and removal | PARTIAL | Detection and a native administrator API for reviewing candidates, listing the media items that carry a hash, and recording a decision are implemented (ADR 0100). `IGNORE` takes effect; **removal itself is deliberately unimplemented** because it rewrites an archive on disk, so `DELETE_AUTO`/`DELETE_MANUAL` are stored as stated intent and `deleteCount` is always 0. Remaining: the removal executor, an automatic policy that runs it, and the administrator UI |
 | Incorrect-extension repair | READY | ZIP, RAR, PDF, and EPUB are identified by content and repaired, including across media kinds; a rename into a kind the library does not scan is declined so the repair cannot delete the book |
 | RAR-to-CBZ conversion | READY | Native API/UI |
 
