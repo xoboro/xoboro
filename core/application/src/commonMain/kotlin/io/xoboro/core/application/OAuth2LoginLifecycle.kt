@@ -86,6 +86,16 @@ data class OAuth2Provider(
   val registrationId: String,
 )
 
+/**
+ * The three settings that together decide what an external identity may become. Carries no
+ * credential and no endpoint, so it is safe to return over the API to an administrator.
+ */
+data class OAuth2LoginPolicy(
+  val accountCreationEnabled: Boolean,
+  val oidcEmailVerificationRequired: Boolean,
+  val accountLinking: OAuth2AccountLinking,
+)
+
 data class OAuth2PendingAuthorization(
   val state: String,
   val registrationId: String,
@@ -141,6 +151,7 @@ class OAuth2LoginLifecycle(
   private val identityGateway: OAuth2IdentityGateway,
   private val accountCreationEnabled: Boolean,
   private val oidcEmailVerificationEnabled: Boolean,
+  private val accountLinking: OAuth2AccountLinking = OAuth2AccountLinking.VERIFIED_EMAIL,
   private val randomPasswordFactory: () -> String,
   private val stateFactory: () -> String,
   private val browserBindingFactory: () -> String,
@@ -159,6 +170,20 @@ class OAuth2LoginLifecycle(
 
   fun providers(): List<OAuth2Provider> =
     registrations.values.map { OAuth2Provider(it.clientName, it.registrationId) }
+
+  /**
+   * The effective login policy, for an administrator to read back.
+   *
+   * Exposed because these three flags decide who may enter an existing account, and until now the
+   * only way to know how a running deployment was configured was to read its environment on the
+   * host. Nothing here is a secret: no client id, no client secret, no endpoint.
+   */
+  fun policy(): OAuth2LoginPolicy =
+    OAuth2LoginPolicy(
+      accountCreationEnabled = accountCreationEnabled,
+      oidcEmailVerificationRequired = oidcEmailVerificationEnabled,
+      accountLinking = accountLinking,
+    )
 
   suspend fun begin(
     registrationId: String,
@@ -252,7 +277,18 @@ class OAuth2LoginLifecycle(
         true -> Unit
       }
     }
-    users.findByEmailIgnoreCaseOrNull(email)?.let { return it }
+    users.findByEmailIgnoreCaseOrNull(email)?.let { existing ->
+      // Entering an existing account is a policy decision, not a lookup result. See
+      // OAuth2AccountLinking for why the default refuses an unverified assertion.
+      if (accountLinking.permitsLinking(identity.emailVerified)) return existing
+      throw OAuth2LoginException(
+        if (accountLinking == OAuth2AccountLinking.NEVER) {
+          ACCOUNT_LINKING_DISABLED
+        } else {
+          ACCOUNT_LINKING_REQUIRES_VERIFIED_EMAIL
+        },
+      )
+    }
     if (!accountCreationEnabled) throw OAuth2LoginException(ACCOUNT_CREATION_DISABLED)
     return users.createUser(
       email = email,
@@ -301,6 +337,8 @@ class OAuth2LoginLifecycle(
     const val INVALID_AUTHORIZATION_STATE = "invalid_state"
     const val INVALID_AUTHORIZATION_RESPONSE = "invalid_authorization_response"
     const val UNKNOWN_REGISTRATION = "unknown_registration"
+    const val ACCOUNT_LINKING_DISABLED = "account_linking_disabled"
+    const val ACCOUNT_LINKING_REQUIRES_VERIFIED_EMAIL = "account_linking_requires_verified_email"
     const val MAX_TOKEN_GENERATION_ATTEMPTS = 10
   }
 }

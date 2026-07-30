@@ -466,6 +466,7 @@ class XoboroRuntime private constructor(
             identityGateway = HttpOAuth2IdentityGateway(createdOAuthHttpClient),
             accountCreationEnabled = config.oauth2AccountCreation,
             oidcEmailVerificationEnabled = config.oidcEmailVerification,
+            accountLinking = config.oauth2AccountLinking,
             randomPasswordFactory = { secureRandom.urlToken(24) },
             stateFactory = { secureRandom.urlToken(32) },
             browserBindingFactory = { secureRandom.urlToken(32) },

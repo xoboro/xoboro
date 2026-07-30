@@ -130,9 +130,26 @@ editing source:
 | `XOBORO_METRICS_TOKEN` | unset |
 | `KOMGA_OAUTH2_ACCOUNT_CREATION` | `false` |
 | `KOMGA_OIDC_EMAIL_VERIFICATION` | `true` |
+| `XOBORO_OAUTH2_ACCOUNT_LINKING` | `VERIFIED_EMAIL` |
 
 Malformed or out-of-range overrides fail startup instead of silently falling
 back to another value.
+
+`XOBORO_OAUTH2_ACCOUNT_LINKING` decides whether an external OAuth2/OIDC identity
+may sign in as an **existing** local account whose email it matches:
+
+| Value | Behaviour |
+| --- | --- |
+| `VERIFIED_EMAIL` | Default. Links only when the provider asserted it verified the email. A plain OAuth2 provider makes no such assertion, so it can never link — only create a new account, and only if `KOMGA_OAUTH2_ACCOUNT_CREATION` allows it. |
+| `EMAIL` | Links on an email match whatever the provider verified. This is Komga's behaviour. |
+| `NEVER` | Never links. A matching email is refused rather than signed in or duplicated. |
+
+The default is the safe value rather than Komga's, because with a plain OAuth2
+provider — or OIDC with `KOMGA_OIDC_EMAIL_VERIFICATION=false` — `EMAIL` means
+whoever can register an address at the provider can enter the matching local
+account. Set `EMAIL` explicitly if you are migrating a deployment that relied on
+it. Administrators can read the resolved policy back from
+`GET /api/xoboro/v1/authentication/oauth2`; see ADR 0093.
 
 Set `KOMGA_CORS_ALLOWEDORIGINS` to a comma-separated list of exact browser
 origins, including scheme and port. Xoboro then matches Komga's credentialed
