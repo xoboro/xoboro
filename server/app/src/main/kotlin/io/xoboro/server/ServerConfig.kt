@@ -23,6 +23,14 @@ data class ServerConfig(
   val corsAllowedOrigins: Set<String> = emptySet(),
   val trustedProxyHosts: Set<String> = emptySet(),
   val metricsToken: String? = null,
+  /**
+   * Provisions the first administrator at startup when the server is still unclaimed.
+   *
+   * Held here rather than resolved at the point of use so that a malformed or unreadable secret fails
+   * during configuration - loudly, before the port is bound - instead of halfway through opening the
+   * runtime.
+   */
+  val initialAdministrator: InitialAdministrator? = null,
 ) {
   init {
     require(port in 1..65_535) { "Server port must be between 1 and 65535" }
@@ -152,6 +160,7 @@ data class ServerConfig(
         metricsToken =
           environment["XOBORO_METRICS_TOKEN"]
             ?.takeIf(String::isNotBlank),
+        initialAdministrator = InitialAdministrator.fromEnvironment(environment),
       )
     }
 
