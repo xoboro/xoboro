@@ -1047,18 +1047,19 @@ ported to the native surface yet: they are tracked separately under artwork
 and duplicate-detection work in `docs/feature-coverage.md` rather than as
 general "maintenance" commands.
 
-> **Known caveat:** `Application.kt` installs a global `StatusPages
-> status(HttpStatusCode.NotFound, HttpStatusCode.Forbidden)` handler that
-> rewrites every native 404/403 body to a generic `{"code":"not_found"}` or
-> `{"code":"forbidden"}`, discarding the specific code a route already set
-> (`backup_not_found`, `media_item_not_found`, `series_not_found`, and every
-> other existing native `*_not_found`/`*_forbidden` code, including
-> pre-existing routes such as the metadata PATCH endpoints). This was verified
-> against the real production wiring while adding this section and is a
-> pre-existing defect that predates this change; it is not fixed here because
-> correcting it touches the shared error-handling pipeline for the entire
-> native API. Route-level tests intentionally exercise routes directly and
-> therefore still assert the specific codes documented above.
+Route-specific `*_not_found` and `*_forbidden` codes survive the production
+pipeline. `Application.kt` installs a global `StatusPages
+status(HttpStatusCode.Forbidden, HttpStatusCode.NotFound)` handler that would
+otherwise flatten them to a generic `{"code":"forbidden"}` or
+`{"code":"not_found"}`; it is guarded by the `XoboroNativeErrorBodyWritten`
+attribute, so a route that already wrote its own code is left alone and the
+generic body is only used when no route claimed the status.
+
+This is pinned through the real production module rather than through a route in
+isolation, because route-level tests install their own minimal `StatusPages`
+without the flattening handler and so cannot catch the defect class:
+`XoboroNativeErrorContractApplicationTest` for `*_forbidden` and
+`XoboroNativeOpsApplicationTest` for `*_not_found`.
 
 ## Events
 

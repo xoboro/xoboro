@@ -23,3 +23,6 @@ out/
 /media/
 /cache/
 /config/
+
+# Plugin/tool state, not project source. Untracked and easy to sweep into a `git add -A`.
+/.omc/
