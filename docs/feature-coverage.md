@@ -64,7 +64,7 @@ Statuses:
 |---|---|---|
 | ComicInfo.xml import | READY | Native metadata diagnostics |
 | EPUB package metadata | READY | Creator and contributor credits resolve through one path whether the role is a relator code, an English relator name, an already-canonical vocabulary name, or undeclared; an unresolvable role reaches the catalog verbatim rather than being dropped |
-| `series.json`/Mylar metadata | PARTIAL | Complete supported schema and validation diagnostics |
+| `series.json`/Mylar metadata | READY | Reads `name`, `volume`/`year`, `status`, both description forms, `publisher`, `age_rating`, `total_issues`, `booktype` and `imprint`; `comicid`, `collects`, `publication_run`, `comic_image` and `type` are documented as deliberately unread with a reason each. A malformed, non-Mylar, nameless, or drifted file is reported as a diagnostic instead of behaving like a directory with no sidecar (ADR 0099) |
 | One-shot detection and aggregation | READY | Native configuration and diagnostics |
 | ISBN barcode detection | READY | Native configuration and diagnostics |
 | Manual metadata, field locks, and bulk updates | READY | Native UI |
