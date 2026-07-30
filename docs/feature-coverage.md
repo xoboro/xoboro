@@ -50,10 +50,10 @@ Statuses:
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| CBZ/ZIP analysis, pages, original download, and thumbnails | READY | Encrypted archives should return a stable native error |
-| CBR/RAR/RAR5 analysis and pages | PARTIAL | Encrypted and multipart archives |
-| PDF analysis, rendering, pages, and download | PARTIAL | Encrypted-document policy and remaining metadata extraction |
-| EPUB 2/3, fixed layout, DiViNa, resources, and positions | PARTIAL | Complete metadata vocabulary and reader acceptance |
+| CBZ/ZIP analysis, pages, original download, and thumbnails | READY | Encrypted archives report `UNSUPPORTED` with `ERR_1101`, read from the central directory rather than from a JDK message (ADR 0089) |
+| CBR/RAR/RAR5 analysis and pages | PARTIAL | Encrypted archives report `UNSUPPORTED` with `ERR_1101`; multipart sets map a missing volume to `ERR_1102`, but that path is unverified against a real volume set because no dependency or assumed tool can write one, and suppressing trailing volumes at inventory is still missing |
+| PDF analysis, rendering, pages, and download | PARTIAL | Encryption policy is settled (user-password documents are `UNSUPPORTED`, owner-password-only documents are served; ADR 0089); remaining metadata extraction |
+| EPUB 2/3, fixed layout, DiViNa, resources, and positions | PARTIAL | DRM-protected publications no longer index as `READY` (ADR 0089); complete metadata vocabulary and reader acceptance |
 | Natural ordering, dimensions, content detection, and hashes | READY | Add only formats required by new sources |
 | Book, series, and read-list downloads | READY | Native API/UI |
 | Artwork upload, discovery, selection, generation, and caching | PARTIAL | Bundled WebP sidecars and generated collection/read-list artwork |

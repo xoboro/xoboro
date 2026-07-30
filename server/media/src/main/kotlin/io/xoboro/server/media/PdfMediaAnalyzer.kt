@@ -10,7 +10,18 @@ import java.io.IOException
 import java.nio.file.Path
 import kotlin.math.roundToInt
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException
 
+/**
+ * Analyzes PDF documents.
+ *
+ * Encryption policy: a document that requires a user password to open is [MediaStatus.UNSUPPORTED],
+ * because Xoboro holds no credential for it and never will until the file is replaced. A document
+ * encrypted with only an owner password opens on the empty user password - that empty password is
+ * the credential its author chose to grant - so it is analyzed and served like any other document.
+ * Owner restrictions describe what a conforming viewer should offer (printing, copying); they are
+ * not an access barrier, and treating them as one would hide readable books from their owner.
+ */
 class PdfMediaAnalyzer {
   fun analyze(
     bookId: BookId,
@@ -45,7 +56,7 @@ class PdfMediaAnalyzer {
             status = MediaStatus.ERROR,
             mediaType = PDF_MEDIA_TYPE,
             profile = MediaProfile.PDF,
-            comment = ERROR_NO_PAGES,
+            comment = MediaAnalysisComment.NO_PAGES,
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
           )
@@ -61,6 +72,8 @@ class PdfMediaAnalyzer {
           )
         }
       }
+    } catch (_: InvalidPasswordException) {
+      media(bookId, MediaStatus.UNSUPPORTED, MediaAnalysisComment.ENCRYPTED, createdAtMillis, updatedAtMillis)
     } catch (_: IOException) {
       errorMedia(bookId, createdAtMillis, updatedAtMillis)
     } catch (_: SecurityException) {
@@ -71,19 +84,31 @@ class PdfMediaAnalyzer {
     bookId: BookId,
     createdAtMillis: Long,
     updatedAtMillis: Long,
+  ) = media(
+    bookId,
+    MediaStatus.ERROR,
+    MediaAnalysisComment.UNREADABLE_CONTAINER,
+    createdAtMillis,
+    updatedAtMillis,
+  )
+
+  private fun media(
+    bookId: BookId,
+    status: MediaStatus,
+    comment: String,
+    createdAtMillis: Long,
+    updatedAtMillis: Long,
   ) = BookMedia(
     bookId = bookId,
-    status = MediaStatus.ERROR,
+    status = status,
     mediaType = PDF_MEDIA_TYPE,
     profile = MediaProfile.PDF,
-    comment = ERROR_DOCUMENT,
+    comment = comment,
     createdAtMillis = createdAtMillis,
     updatedAtMillis = updatedAtMillis,
   )
 
   companion object {
     const val PDF_MEDIA_TYPE: String = "application/pdf"
-    const val ERROR_DOCUMENT: String = "ERR_1008"
-    const val ERROR_NO_PAGES: String = "ERR_1006"
   }
 }

@@ -16,7 +16,10 @@ out/
 *.sqlite
 *.sqlite3
 
-data/
-media/
-cache/
-config/
+# Runtime directories a local deployment creates. Anchored to the repository root on purpose: an
+# unanchored `media/` also matches the `io/xoboro/server/media` source package, so every new file
+# added there was silently absent from `git status`.
+/data/
+/media/
+/cache/
+/config/
