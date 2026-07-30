@@ -6,6 +6,8 @@ import io.xoboro.core.domain.ApiKeyHashAlreadyExistsException
 import io.xoboro.core.domain.ApiKeyId
 import io.xoboro.core.domain.ApiKeyRepository
 import io.xoboro.core.domain.UserId
+import io.xoboro.core.domain.UserRole
+import org.jooq.DSLContext
 import org.jooq.Record
 import org.jooq.exception.DataAccessException
 
@@ -17,13 +19,14 @@ class JooqApiKeyRepository(
       .fetch("$SELECT_API_KEY WHERE key_hash = ?", keyHash)
       .map { it.toApiKey() }
       .singleOrNull()
+      ?.withScopes()
 
   override fun findAllByUserId(userId: UserId): List<ApiKey> =
     database.dsl
       .fetch(
         "$SELECT_API_KEY WHERE user_id = ? ORDER BY created_at_ms, id",
         userId.value,
-      ).map { it.toApiKey() }
+      ).map { it.toApiKey().withScopes() }
 
   override fun existsByCommentIgnoreCase(
     userId: UserId,
@@ -38,19 +41,31 @@ class JooqApiKeyRepository(
 
   override fun insert(apiKey: ApiKey) {
     try {
-      database.dsl.execute(
-        """
-        INSERT INTO user_api_key (
-          id, user_id, key_hash, comment, created_at_ms, updated_at_ms
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """.trimIndent(),
-        apiKey.id.value,
-        apiKey.userId.value,
-        apiKey.keyHash,
-        apiKey.comment,
-        apiKey.createdAtMillis,
-        apiKey.updatedAtMillis,
-      )
+      // One transaction: a key that exists without the scopes it was created with would authorize
+      // more than it was meant to, which is the wrong way for a partial write to fail.
+      database.transaction { transaction ->
+        transaction.execute(
+          """
+          INSERT INTO user_api_key (
+            id, user_id, key_hash, comment, expires_at_ms, created_at_ms, updated_at_ms
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          """.trimIndent(),
+          apiKey.id.value,
+          apiKey.userId.value,
+          apiKey.keyHash,
+          apiKey.comment,
+          apiKey.expiresAtMillis,
+          apiKey.createdAtMillis,
+          apiKey.updatedAtMillis,
+        )
+        apiKey.scopes.forEach { scope ->
+          transaction.execute(
+            "INSERT INTO user_api_key_scope (api_key_id, scope) VALUES (?, ?)",
+            apiKey.id.value,
+            scope.name,
+          )
+        }
+      }
     } catch (failure: DataAccessException) {
       if (existsByCommentIgnoreCase(apiKey.userId, apiKey.comment)) {
         throw ApiKeyCommentAlreadyExistsException(apiKey.comment)
@@ -78,8 +93,27 @@ class JooqApiKeyRepository(
       userId = UserId(requiredString("user_id")),
       keyHash = requiredString("key_hash"),
       comment = requiredString("comment"),
+      expiresAtMillis = get("expires_at_ms_64", String::class.java)?.toLong(),
       createdAtMillis = requiredLongText("created_at_ms_64"),
       updatedAtMillis = requiredLongText("updated_at_ms_64"),
+    )
+
+  /**
+   * Scopes are fetched per key rather than joined into [SELECT_API_KEY]. A join would fan the key row
+   * out across its scopes and make the single-row read a grouping problem; keys per user are few and
+   * the authentication path reads exactly one.
+   */
+  private fun ApiKey.withScopes(): ApiKey =
+    copy(
+      scopes =
+        database.dsl
+          .fetch("SELECT scope FROM user_api_key_scope WHERE api_key_id = ?", id.value)
+          .mapNotNull { record ->
+            val name = record.requiredString("scope")
+            // An unknown scope must never widen the key. Dropping it narrows, which is the safe
+            // direction if a future release removes a role that a stored key still names.
+            UserRole.entries.firstOrNull { it.name == name }
+          }.toSet(),
     )
 
   private fun Record.requiredString(field: String): String =
@@ -94,7 +128,8 @@ class JooqApiKeyRepository(
       """
       SELECT user_api_key.*,
         CAST(created_at_ms AS TEXT) AS created_at_ms_64,
-        CAST(updated_at_ms AS TEXT) AS updated_at_ms_64
+        CAST(updated_at_ms AS TEXT) AS updated_at_ms_64,
+        CAST(expires_at_ms AS TEXT) AS expires_at_ms_64
       FROM user_api_key
       """
   }

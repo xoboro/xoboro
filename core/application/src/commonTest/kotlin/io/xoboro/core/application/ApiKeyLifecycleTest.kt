@@ -9,6 +9,7 @@ import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserRepository
+import io.xoboro.core.domain.UserRole
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -69,9 +70,87 @@ class ApiKeyLifecycleTest {
     assertEquals(ApiKeyLifecycle.MAX_GENERATION_ATTEMPTS, generated.size)
   }
 
+  @Test
+  fun `narrows the authenticated caller to the key's scopes`() {
+    val users = InMemoryUsers()
+    val user = users.addUser()
+    val apiKeys = InMemoryApiKeys()
+    val lifecycle = lifecycle(users, apiKeys)
+
+    lifecycle.create(user.id, "Streaming only", scopes = setOf(UserRole.PAGE_STREAMING))
+
+    // The owner holds FILE_DOWNLOAD as well; the key must not carry it. Every downstream role check
+    // and every catalogAccess() projection reads this User, so narrowing here is what enforces the
+    // scope everywhere.
+    val principal = requireNotNull(lifecycle.authenticate("plain-1"))
+    assertEquals(setOf(UserRole.PAGE_STREAMING), principal.user.roles)
+    assertEquals(setOf(UserRole.PAGE_STREAMING), principal.apiKey.scopes)
+  }
+
+  @Test
+  fun `an unscoped key authenticates with the owner's full capabilities`() {
+    val users = InMemoryUsers()
+    val user = users.addUser()
+    val lifecycle = lifecycle(users, InMemoryApiKeys())
+
+    lifecycle.create(user.id, "Everything")
+
+    // Keys created before scoping existed read back with no scopes and must keep working unchanged.
+    assertEquals(user.roles, requireNotNull(lifecycle.authenticate("plain-1")).user.roles)
+  }
+
+  @Test
+  fun `rejects a scope the owner does not hold`() {
+    val users = InMemoryUsers()
+    val user = users.addUser()
+    val lifecycle = lifecycle(users, InMemoryApiKeys())
+
+    // At creation an unsatisfiable scope is a caller mistake worth reporting, unlike at
+    // authentication where a reduced owner role set is expected and is silently narrowed.
+    assertFailsWith<IllegalArgumentException> {
+      lifecycle.create(user.id, "Escalation", scopes = setOf(UserRole.ADMIN))
+    }
+  }
+
+  @Test
+  fun `refuses to authenticate a key once its expiry passes`() {
+    val users = InMemoryUsers()
+    val user = users.addUser()
+    var now = 100L
+    val lifecycle = lifecycle(users, InMemoryApiKeys(), currentTimeMillis = { now })
+
+    lifecycle.create(user.id, "Expiring", expiresAtMillis = 200)
+
+    now = 199
+    assertEquals(user.id, lifecycle.authenticate("plain-1")?.user?.id)
+    now = 200
+    assertNull(lifecycle.authenticate("plain-1"))
+    now = 10_000
+    assertNull(lifecycle.authenticate("plain-1"))
+
+    // Expiry is a read-time decision, not a sweep: the row is still listed so its owner can see the
+    // key that stopped working and delete it deliberately.
+    assertEquals(1, lifecycle.findAll(user.id).size)
+  }
+
+  @Test
+  fun `rejects an expiry that has already passed`() {
+    val users = InMemoryUsers()
+    val user = users.addUser()
+    val lifecycle = lifecycle(users, InMemoryApiKeys())
+
+    assertFailsWith<IllegalArgumentException> {
+      lifecycle.create(user.id, "Already dead", expiresAtMillis = 100)
+    }
+    assertFailsWith<IllegalArgumentException> {
+      lifecycle.create(user.id, "Born dead", expiresAtMillis = 99)
+    }
+  }
+
   private fun lifecycle(
     users: InMemoryUsers,
     apiKeys: InMemoryApiKeys,
+    currentTimeMillis: () -> Long = { 100 },
   ): ApiKeyLifecycle {
     var sequence = 0
     return ApiKeyLifecycle(
@@ -83,7 +162,7 @@ class ApiKeyLifecycleTest {
         sequence += 1
         "plain-$sequence"
       },
-      currentTimeMillis = { 100 },
+      currentTimeMillis = currentTimeMillis,
     )
   }
 
