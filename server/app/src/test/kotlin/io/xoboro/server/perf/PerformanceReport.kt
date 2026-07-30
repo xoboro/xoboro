@@ -77,20 +77,38 @@ class PerformanceReport {
   }
 
   /**
-   * Records a single, one-time cold-read observation: the full elapsed wall time of the call
-   * (including any retries it needed) plus the attempt count it took. Unlike [recordLatency], this
-   * is not a steady-state statistic to be averaged — it is one sample of a cost that only happens
-   * once, so [attempts] is reported alongside it rather than excluding a retried result from the
-   * number. See `PerformanceHarnessTest`'s `api.first_series_read_after_scan` call site.
+   * Records a single, one-time cold-read observation as three separate numbers, not one, because
+   * they answer different questions:
+   * - [successfulAttemptMillis]: the isolated duration of the one call that actually succeeded —
+   *   the real, server-side cost, unpolluted by any prior failed attempt or backoff sleep.
+   * - [harnessWallMillis]: the full wall-clock time of the whole retry loop, including every
+   *   failed attempt and every backoff sleep. This is harness time, not server time, and is
+   *   labeled `.harness_wall` so it is never mistaken for a server latency — a total dominated by
+   *   jittered backoff sleep across several failures is mostly measuring the harness's own retry
+   *   loop, and reporting it as *the* number would repeat the exact "polluted max" mistake this
+   *   harness was built to avoid.
+   * - [attempts] and [lastFailureType] (null when the first attempt succeeded) describe how many
+   *   tries it took and what the last failure looked like, so a reader can tell "the call itself is
+   *   slow" apart from "the call is fast but got blocked repeatedly" — different problems with
+   *   different fixes.
+   *
+   * Unlike [recordLatency], none of this is a steady-state statistic to be averaged — it is one
+   * sample of a cost that only happens once. See `PerformanceHarnessTest`'s
+   * `api.first_series_read_after_scan` call site.
    */
   fun recordColdRead(
     key: String,
     itemCount: Long,
-    millis: Double,
+    successfulAttemptMillis: Double,
+    harnessWallMillis: Double,
     attempts: Int,
+    lastFailureType: String?,
   ) {
-    recordMillis(key, itemCount, millis)
+    recordMillis("$key.successful_attempt", itemCount, successfulAttemptMillis)
+    recordMillis("$key.harness_wall", itemCount, harnessWallMillis)
     metrics += PerformanceMetric("$key.attempts", itemCount, attempts.toString(), "requests")
+    metrics += PerformanceMetric("$key.failed_attempts", itemCount, (attempts - 1).toString(), "requests")
+    metrics += PerformanceMetric("$key.last_failure_type", itemCount, lastFailureType ?: "none", "label")
   }
 
   fun toMachineReadableLines(): List<String> =

@@ -76,18 +76,28 @@ import org.junit.jupiter.api.io.TempDir
  * one-time full-catalog aggregation-cache rebuild (see the retry-policy note below). It is a
  * cold-cache, one-time cost, not steady-state `/series` latency — do not compare it against
  * `api.series_listing`, and do not average it across runs the way `api.series_listing.p50` is
- * meant to be read.
+ * meant to be read. It is reported as four separate values (see [PerformanceReport.recordColdRead]),
+ * not one: `.successful_attempt` (the isolated duration of the call that actually succeeded),
+ * `.harness_wall` (the full retry loop including every failed attempt and backoff sleep, labeled as
+ * harness time because it is NOT a server cost), `.attempts`/`.failed_attempts`, and
+ * `.last_failure_type`. A single total that folds backoff sleep into a "cold read" number would
+ * measure the harness's retry loop, not the server — the same mistake as a polluted max, just in a
+ * new shape.
  *
  * Retry policy for native API calls (see [attemptWithRetries]): up to 5 attempts total (1 initial
- * + 4 retries) on a 5xx response or a thrown exception, with a fixed 150 ms backoff between
- * attempts. This exists to smooth over a rarely observed transient `SQLITE_BUSY_SNAPSHOT` from
- * background scheduler/worker threads racing a request-triggered cache refresh — a pre-existing
- * concurrency detail of the read path, reported here rather than fixed. If all attempts for a call
- * fail, the harness fails outright rather than recording a sample for it. Within
- * [measureRepeated], any measured request that needed more than one attempt is excluded from that
- * endpoint's p50/max — a retried call's latency includes backoff sleep and would misrepresent the
- * read path — and is instead counted separately as `<key>.retried_samples` so it stays visible
- * rather than being silently dropped.
+ * + 4 retries) on a 5xx response or a thrown exception, with a full-jittered backoff (uniformly
+ * random between 1 ms and the configured backoff) between attempts — not a fixed delay, because a
+ * fixed backoff can stay phase-locked with the competing background writer's own steady poll
+ * cadence (observed in practice: a fixed 300 ms backoff against the largest library size here
+ * failed all 10 attempts in a row for the first read; jitter let it succeed on attempt 9 of 10).
+ * This retry policy exists to smooth over a rarely observed transient
+ * `SQLITE_BUSY`/`SQLITE_BUSY_SNAPSHOT` from background scheduler/worker threads racing a
+ * request-triggered cache refresh — a pre-existing concurrency detail of the read path, reported
+ * here rather than fixed. If all attempts for a call fail, the harness fails outright rather than
+ * recording a sample for it. Within [measureRepeated], any measured request that needed more than
+ * one attempt is excluded from that endpoint's p50/max — a retried call's latency includes backoff
+ * sleep and would misrepresent the read path — and is instead counted separately as
+ * `<key>.retried_samples` so it stays visible rather than being silently dropped.
  */
 @Tag("performance")
 class PerformanceHarnessTest {
@@ -226,13 +236,14 @@ class PerformanceHarnessTest {
         // marked dirty since the scan. That is a real, user-visible cost — "how long does the
         // first browse take after scanning a library" — not an error to retry past and discard.
         // So this call keeps its generously larger retry budget (it can otherwise collide with
-        // the idle worker's periodic queue poll and exhaust a steady-state budget), but the timed
-        // value recorded below is the FULL elapsed wall time of this call including whatever it
-        // absorbed, plus the attempt count it took — unlike measureRepeated, a retried result here
-        // is the number, not something excluded from it. This is a single, one-time observation:
-        // it is not averaged, and nothing later in this run should need the same budget, since no
-        // other request here dirties a series after the cache is warm.
-        val firstSeriesReadMark = TimeSource.Monotonic.markNow()
+        // the idle worker's periodic queue poll and exhaust a steady-state budget), but see
+        // recordColdRead below: the successful attempt's own duration, the retry/backoff time, and
+        // the failure count/type are reported as three separate numbers, not folded into one. A
+        // total that includes jittered backoff sleep across several failed attempts is mostly
+        // measuring the harness's own retry loop, not the server — reporting it alone would repeat
+        // exactly the "polluted max" mistake this harness was built to avoid. This is a single,
+        // one-time observation: it is not averaged, and nothing later in this run should need the
+        // same budget, since no other request here dirties a series after the cache is warm.
         val firstSeriesReadOutcome =
           attemptWithRetries(
             attempts = CACHE_WARMUP_RETRY_ATTEMPTS,
@@ -242,12 +253,13 @@ class PerformanceHarnessTest {
               bearerAuth(token)
             }
           }
-        val firstSeriesReadElapsedMillis = firstSeriesReadMark.elapsedNow().inWholeMilliseconds.toDouble()
         report.recordColdRead(
-          "api.first_series_read_after_scan",
-          scannedBookCount,
-          firstSeriesReadElapsedMillis,
-          firstSeriesReadOutcome.attempts,
+          key = "api.first_series_read_after_scan",
+          itemCount = scannedBookCount,
+          successfulAttemptMillis = firstSeriesReadOutcome.successfulAttemptElapsedNanos / 1_000_000.0,
+          harnessWallMillis = firstSeriesReadOutcome.harnessWallElapsedNanos / 1_000_000.0,
+          attempts = firstSeriesReadOutcome.attempts,
+          lastFailureType = firstSeriesReadOutcome.lastFailureType,
         )
         val topSeries =
           firstSeriesReadOutcome.response
@@ -366,13 +378,26 @@ class PerformanceHarnessTest {
     backoffMillis: Long = TRANSIENT_RETRY_BACKOFF_MILLIS,
     request: suspend () -> HttpResponse,
   ): RetryOutcome {
+    val loopMark = TimeSource.Monotonic.markNow()
     var lastFailure: Throwable? = null
+    var lastFailureType: String? = null
     repeat(attempts) { attempt ->
+      val attemptMark = TimeSource.Monotonic.markNow()
       try {
         val response = request()
-        if (response.status.value < 500) return RetryOutcome(response, attempts = attempt + 1)
+        if (response.status.value < 500) {
+          return RetryOutcome(
+            response = response,
+            attempts = attempt + 1,
+            successfulAttemptElapsedNanos = attemptMark.elapsedNow().inWholeNanoseconds,
+            harnessWallElapsedNanos = loopMark.elapsedNow().inWholeNanoseconds,
+            lastFailureType = lastFailureType,
+          )
+        }
+        lastFailureType = "http_${response.status.value}"
         lastFailure = IllegalStateException("Transient server error: HTTP ${response.status}")
       } catch (failure: Exception) {
+        lastFailureType = "exception_${failure::class.simpleName}"
         lastFailure = failure
       }
       // Full jitter, not a fixed delay: a fixed backoff can stay phase-locked with the competing
@@ -399,10 +424,25 @@ class PerformanceHarnessTest {
     val retriedSamples: Int,
   )
 
-  /** Outcome of [attemptWithRetries]: the successful response and how many attempts it took. */
+  /**
+   * Outcome of [attemptWithRetries]. Three distinct timings are kept separate rather than folded
+   * into one number, because they answer different questions:
+   * - [successfulAttemptElapsedNanos]: how long the one call that actually succeeded took, on its
+   *   own — this is the real, isolated server-side cost.
+   * - [harnessWallElapsedNanos]: the full wall-clock time of the whole retry loop, including every
+   *   failed attempt and every backoff sleep — this is harness time, not server time, and is
+   *   reported as such rather than presented as a server latency.
+   * - [attempts] and [lastFailureType] describe how many tries it took and what the last failure
+   *   looked like (an HTTP status or an exception class), so a reader can tell "fast but blocked
+   *   repeatedly" apart from "the call itself is slow" — two different problems with different
+   *   fixes.
+   */
   private data class RetryOutcome(
     val response: HttpResponse,
     val attempts: Int,
+    val successfulAttemptElapsedNanos: Long,
+    val harnessWallElapsedNanos: Long,
+    val lastFailureType: String?,
   )
 
   private companion object {

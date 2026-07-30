@@ -248,7 +248,15 @@ observation of the first `/series` call after a scan, not steady-state
 latency: that call absorbs a one-time full-catalog metadata-aggregation
 rebuild covering every series scanned so far, and can be considerably
 slower than the `api.series_listing` steady-state numbers reported
-alongside it. Do not quote it as `/series` performance.
+alongside it. Do not quote it as `/series` performance. It is reported
+as four separate values rather than one: `.successful_attempt` (the
+isolated duration of the call that actually succeeded), `.harness_wall`
+(the retry loop's full wall-clock time including every failed attempt
+and backoff sleep — this is harness time, not a server cost, and is
+labeled as such), `.attempts`/`.failed_attempts`, and
+`.last_failure_type`. A single number that folded backoff sleep into a
+"cold read" latency would measure the harness's own retry loop instead
+of the server.
 
 ## Feature status
 
