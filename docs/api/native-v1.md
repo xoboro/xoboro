@@ -6,8 +6,8 @@ not reproduce Komga DTOs or endpoint shapes.
 
 This document covers authentication, catalog discovery, page and resource
 discovery, page and resource delivery, original file download, and read progress
-mutation, settings, authentication activity, and history. OpenAPI contracts
-remain pending.
+mutation, settings, authentication activity, history, and the native event
+stream. OpenAPI contracts remain pending.
 
 ## Errors
 
@@ -786,3 +786,136 @@ general "maintenance" commands.
 > correcting it touches the shared error-handling pipeline for the entire
 > native API. Route-level tests intentionally exercise routes directly and
 > therefore still assert the specific codes documented above.
+
+## Events
+
+`GET /api/xoboro/v1/events` opens a native Server-Sent Events stream scoped to
+the authenticated caller's current library grants and content restrictions.
+It supports both session transports described in
+[Session transports](#session-transports): cookie and bearer. Because a
+cookie-authenticated `EventSource` cannot set an `Authorization` header but
+does send ambient same-origin cookies, cookie transport on this endpoint
+requires the same same-origin provenance (an exact `Origin` match or
+`Sec-Fetch-Site: same-origin`) as a cookie-authenticated mutation; a request
+without it is rejected before the stream opens. Bearer transport carries no
+ambient cookie and is exempt, exactly like mutations are.
+
+### Resuming with `Last-Event-ID`
+
+Every frame carries a resumable `id`. Reconnecting with the `Last-Event-ID`
+header set to the last `id` the client observed drives one of these outcomes:
+
+- No `Last-Event-ID` at all: a fresh connection, `stream.ready
+  {"resumed":false}`.
+- An `id` from a previous server process, an unparseable `id`, or an `id`
+  older than the server's replay buffer: `stream.resync-required
+  {"reason":"gap","seq":<current>}`, with no replay.
+- An `id` already caught up to the current position: `stream.ready
+  {"seq":<current>,"resumed":true}`.
+- An `id` still inside the replay buffer: every event the caller is currently
+  authorized to see that was published after that `id`, followed by
+  `stream.ready {"seq":<current>,"resumed":true}`.
+
+**Freshness guarantee:** a client that has received `stream.ready
+{"resumed":true}` and has not, since that frame, received a
+`stream.resync-required` frame has provably missed nothing it was entitled to
+see. A `stream.resync-required` frame is the only way the server ever tells a
+client its view may be stale; anything else — including a gap in `seq` — is
+not evidence of loss.
+
+### Control events
+
+- `stream.ready` — `{"seq": <number, optional>, "resumed": <boolean>}`. `seq`
+  is present only when `resumed` is `true`.
+- `stream.resync-required` — `{"reason": "gap"|"overflow"|"superseded",
+  "seq": <number, optional>}`. `reason: "gap"` means the client's
+  `Last-Event-ID` could not be resumed (see above) and carries the server's
+  current `seq`. `reason: "overflow"` means the client's own delivery queue on
+  the server fell behind and was discarded to avoid delivering a truncated
+  burst as if it were complete; reconnect without assuming anything about
+  what was missed. `reason: "superseded"` means this specific connection was
+  closed to make room under the per-user stream limit (a client opening a
+  fifth stream evicts its own oldest); it is not an authorization or capacity
+  problem with the *new* connection. `overflow` and `superseded` frames carry
+  no `seq`, because neither promises a resumable position — only that the
+  stream is continuing (`overflow`) or ending (`superseded`) from here. A
+  stream that is re-authenticated away because the subscriber's authorization
+  changed (role, library grants, restrictions, or email) also arrives as
+  `stream.resync-required {"reason":"revoked"}`, with the connection closing
+  immediately after.
+
+🔴 **Do not infer loss from gaps in `seq`.** `seq` is a shared counter
+incremented once per event *published*, before any per-subscriber filtering —
+not once per event *delivered*. A subscriber whose grants exclude some
+libraries will legitimately observe `seq` values like 1837 then 1904 for two
+consecutive events it receives, because 66 other subscribers' events were
+published in between and correctly filtered out before reaching it. That is
+normal, not loss. The only trustworthy loss signal is a `stream.resync-required`
+frame.
+
+**Clients must ignore unknown event names.** This is what allows the server to
+add a new event name in a later release without that addition being a
+breaking change: a client that fails, disconnects, or otherwise reacts
+specially to a name it does not recognize turns every future additive change
+into a breaking one for that client.
+
+### Domain events
+
+Every domain event payload carries identifiers only — never an entity
+snapshot — so a client must re-fetch the current state through the regular
+catalog routes rather than trust anything beyond the identifiers on the
+event. `ids` is always a JSON array, even for a single identifier. **A client
+that receives a large batch of `ids` should invalidate the affected view and
+re-query it, not fetch each id individually** — the event is an invalidation
+signal, not a change log to replay item by item.
+
+| Event | Payload | Scope |
+| --- | --- | --- |
+| `library.added` / `library.changed` / `library.removed` | `{"ids":[libraryId]}` | The library itself |
+| `media-item.added` / `media-item.changed` / `media-item.removed` | `{"ids":[mediaItemId],"libraryId":libraryId,"seriesId":seriesId}` | Its library, then the item itself for restricted subscribers |
+| `series.added` / `series.changed` / `series.removed` | `{"ids":[seriesId],"libraryId":libraryId}` | Its library, then the series itself for restricted subscribers |
+| `collection.added` / `collection.changed` / `collection.removed` | `{"ids":[seriesId, ...]}` (the collection's member series) | Visible if at least one member series is visible |
+| `read-list.added` / `read-list.changed` / `read-list.removed` | `{"ids":[mediaItemId, ...]}` (the read list's member items) | Visible if at least one member item is visible |
+| `read-progress.changed` / `read-progress.removed` | `{"ids":[mediaItemId]}` | The subscriber that owns the progress, only |
+| `series-progress.changed` / `series-progress.removed` | `{"ids":[seriesId]}` | The subscriber that owns the progress, only |
+| `poster.changed` | `{"ids":[ownerId],"ownerKind":"MEDIA_ITEM"\|"SERIES"}` | The owning media item or series |
+
+**The `*.removed` rule:** a removal is scoped by library grant only — the
+per-item restriction recheck that gates `*.added`/`*.changed` for a
+content-restricted subscriber is skipped for `*.removed`, because the row is
+already gone by the time the removal is published and a "still visible"
+recheck would find nothing and deliver the removal to nobody. A subscriber
+who can access the library therefore learns that *something* it could not
+necessarily see was removed; this is bounded to the same disclosure as an
+item that was added and removed while the subscriber was away, and it is what
+lets every client drop a phantom catalog entry instead of holding it forever.
+
+**`poster.changed` is not emitted when the artwork's owner is a collection or
+a read list.** Both owner kinds would need their member series or media items
+resolved to scope the event honestly, and the event does not carry that
+membership. A client that shows a collection or read-list cover will
+therefore show a stale one until it refetches for an unrelated reason (e.g.
+paging back to that view); this is a known, deliberate gap, not an omission
+to route around client-side.
+
+### Connection limits and reverse-proxy requirements
+
+- Each user may hold at most 4 concurrent streams by default; opening a fifth
+  closes the oldest with `stream.resync-required {"reason":"superseded"}`
+  rather than rejecting the new connection.
+- The server accepts at most 256 concurrent streams in total by default. A
+  connection attempt past that limit receives `503 event_stream_capacity` with
+  a `Retry-After` header rather than being queued.
+- Each stream has a maximum lifetime (1 hour by default). The server simply
+  ends the connection once it is reached, without a `stream.resync-required`
+  frame — this is an ordinary disconnect, not a revocation, and the client's
+  normal reconnect-with-`Last-Event-ID` logic resumes it (cleanly if the
+  reconnect happens within the replay buffer window, or with `reason: "gap"`
+  otherwise).
+- The server sends a heartbeat as an SSE comment (no `event` or `data`) every
+  15 seconds by default. A reverse proxy in front of this endpoint **must
+  not** buffer or gzip the stream (the response already sends
+  `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no` to say
+  so) and **must** set its idle/read timeout above the heartbeat interval —
+  for nginx, `proxy_read_timeout` must exceed 15 seconds, or the proxy will
+  close idle-looking connections the application considers healthy.

@@ -67,7 +67,7 @@ class XoboroNativeEventHub(
   private val subscriberCapacity: Int = DEFAULT_SUBSCRIBER_CAPACITY,
   private val maxStreamsPerUser: Int = DEFAULT_MAX_STREAMS_PER_USER,
   private val maxTotalStreams: Int = DEFAULT_MAX_TOTAL_STREAMS,
-) {
+) : AutoCloseable {
   private val epoch: String = UUID.randomUUID().toString()
   private val sequence = AtomicLong(0)
   private val nextSubscriptionId = AtomicLong(0)
@@ -173,6 +173,19 @@ class XoboroNativeEventHub(
         subscriptionsByUser.remove(subscription.user.id)
       }
     }
+  }
+
+  /**
+   * Ends every live subscription with a final `stream.resync-required {reason: superseded}`
+   * frame, mirroring the per-server-shutdown behaviour of the Komga-compatible hub: a client
+   * reconnects into a fresh process rather than hanging on a connection the server is tearing
+   * down. [XoboroNativeEventSubscription.supersede] only closes the subscriber's channel — it
+   * does not call [unregister] — so this can safely iterate a snapshot of every subscription
+   * without racing [subscribe] or [unregister] for the same map.
+   */
+  override fun close() {
+    val subscriptions = lock.withLock { subscriptionsByUser.values.flatten() }
+    subscriptions.forEach { it.supersede() }
   }
 
   /**

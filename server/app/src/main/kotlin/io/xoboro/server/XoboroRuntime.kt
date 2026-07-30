@@ -62,6 +62,8 @@ import io.xoboro.compatibility.komga.api.KomgaSseEventBridge
 import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskQueueSseDto
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
+import io.xoboro.server.api.XoboroNativeEventBridge
+import io.xoboro.server.api.XoboroNativeEventHub
 import io.xoboro.server.media.AnalyzeBook
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.BookContentService
@@ -198,6 +200,7 @@ class XoboroRuntime private constructor(
   val readProgressLifecycle: ReadProgressLifecycle,
   val koreaderSyncLifecycle: KoreaderSyncLifecycle,
   val sseEventHub: KomgaSseEventHub,
+  val nativeEventHub: XoboroNativeEventHub,
   val sseTaskStatusProvider: KomgaTaskStatusProvider,
   val durableTaskQueue: DurableTaskQueue,
   val databaseBackupRequester: DatabaseBackupRequester,
@@ -225,6 +228,7 @@ class XoboroRuntime private constructor(
       heartbeat,
       oauthHttpClient,
       sseEventHub,
+      nativeEventHub,
       database,
     ).forEach { resource ->
       try {
@@ -257,6 +261,7 @@ class XoboroRuntime private constructor(
       var libraryScanScheduler: LibraryScanScheduler? = null
       var oauthHttpClient: HttpClient? = null
       var sseEventHub: KomgaSseEventHub? = null
+      var nativeEventHub: XoboroNativeEventHub? = null
       try {
         val libraries = JooqLibraryRepository(database)
         val books = JooqBookRepository(database)
@@ -273,25 +278,10 @@ class XoboroRuntime private constructor(
           KomgaSseEventBridge(sseEvents) { bookId ->
             books.findByIdOrNull(bookId)?.seriesId
           }
-        val artworkLifecycle =
-          ArtworkLifecycle(
-            artwork = JooqArtworkRepository(database),
-            processor = SafeJpegArtworkProcessor(),
-            idFactory = { TsidCreator.getTsid256().toString() },
-            currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = sseBridge::publish,
-          )
-        val organizationLifecycle =
-          OrganizationLifecycle(
-            collections = collections,
-            readLists = readLists,
-            series = series,
-            books = books,
-            collectionIdFactory = { TsidCreator.getTsid256().toString() },
-            readListIdFactory = { TsidCreator.getTsid256().toString() },
-            currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = sseBridge::publish,
-          )
+        // Constructed ahead of its original position (immediately before `metadataEditing`) so
+        // the native hub below can depend on it: JooqCatalogReadRepository only needs repository
+        // references that already exist at this point, so moving it earlier changes nothing
+        // about its behaviour.
         val catalogReads =
           JooqCatalogReadRepository(
             database = database,
@@ -302,6 +292,32 @@ class XoboroRuntime private constructor(
             media = media,
             readProgress = readProgresses,
           )
+        val nativeEvents = XoboroNativeEventHub(catalog = catalogReads).also { nativeEventHub = it }
+        val artworkLifecycle =
+          ArtworkLifecycle(
+            artwork = JooqArtworkRepository(database),
+            processor = SafeJpegArtworkProcessor(),
+            idFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              XoboroNativeEventBridge.map(event)?.let(nativeEvents::publish)
+            },
+          )
+        val organizationLifecycle =
+          OrganizationLifecycle(
+            collections = collections,
+            readLists = readLists,
+            series = series,
+            books = books,
+            collectionIdFactory = { TsidCreator.getTsid256().toString() },
+            readListIdFactory = { TsidCreator.getTsid256().toString() },
+            currentTimeMillis = System::currentTimeMillis,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
+          )
         val metadataEditing =
           MetadataEditingLifecycle(
             books = books,
@@ -309,7 +325,10 @@ class XoboroRuntime private constructor(
             bookMetadata = bookMetadata,
             seriesMetadata = seriesMetadata,
             currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = sseBridge::publish,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
           )
         val metadataFacets = JooqMetadataFacetRepository(database)
         val pageHashes = JooqPageHashRepository(database)
@@ -325,7 +344,10 @@ class XoboroRuntime private constructor(
             media = media,
             progresses = readProgresses,
             currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = sseBridge::publish,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
           )
         val koreaderSyncLifecycle =
           KoreaderSyncLifecycle(
@@ -386,7 +408,15 @@ class XoboroRuntime private constructor(
             userIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
             invalidateUserSessions = { sessionRepository.deleteByUserId(it) },
-            eventPublisher = sseBridge::publish,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              // XoboroNativeEventBridge.map(UserEvent) is always null (see its doc comment: the
+              // stream re-authenticates itself on every request, so this event would be
+              // redundant rather than useful) — routed through the bridge anyway so that
+              // decision stays in one place instead of being duplicated as a second, silent skip
+              // here.
+              XoboroNativeEventBridge.map(event)?.let(nativeEvents::publish)
+            },
           )
         val apiKeyLifecycle =
           ApiKeyLifecycle(
@@ -461,7 +491,10 @@ class XoboroRuntime private constructor(
             reconciliationStore =
               JooqCatalogReconciliationStore(
                 database = database,
-                eventPublisher = sseBridge::publish,
+                eventPublisher = { event ->
+                  sseBridge.publish(event)
+                  nativeEvents.publish(XoboroNativeEventBridge.map(event))
+                },
               ),
             currentTimeMillis = System::currentTimeMillis,
           )
@@ -472,6 +505,7 @@ class XoboroRuntime private constructor(
             eventPublisher =
               LibraryEventPublisher { event ->
                 sseBridge.publish(event)
+                nativeEvents.publish(XoboroNativeEventBridge.map(event))
               },
           )
         val scanEmitter =
@@ -551,6 +585,7 @@ class XoboroRuntime private constructor(
                 maintenanceQueue = libraryMaintenanceQueue,
                 eventPublisher = { event ->
                   sseBridge.publish(event)
+                  nativeEvents.publish(XoboroNativeEventBridge.map(event))
                   when (event) {
                     is LibraryEvent.Added ->
                       createdLibraryScanScheduler.schedule(event.library)
@@ -626,14 +661,20 @@ class XoboroRuntime private constructor(
                 OneShotSeriesMetadataProvider(bookMetadata),
               ),
             currentTimeMillis = System::currentTimeMillis,
-            eventPublisher = sseBridge::publish,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
             organizationWriter =
               JooqMetadataOrganizationWriter(
                 database = database,
                 collectionIdFactory = { TsidCreator.getTsid256().toString() },
                 readListIdFactory = { TsidCreator.getTsid256().toString() },
                 currentTimeMillis = System::currentTimeMillis,
-                eventPublisher = sseBridge::publish,
+                eventPublisher = { event ->
+                  sseBridge.publish(event)
+                  nativeEvents.publish(XoboroNativeEventBridge.map(event))
+                },
               ),
           )
         val localArtworkRefreshLifecycle =
@@ -709,6 +750,10 @@ class XoboroRuntime private constructor(
             history = historicalEvents,
             historyIdFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
+            // Deliberately not fanned out to nativeEvents: XoboroNativeEventBridge.map(
+            // CatalogImportEvent) always returns null (there is no native import endpoint, and
+            // its sourceFile is an absolute server path), so there is nothing for the native hub
+            // to publish here.
             importEventPublisher = sseBridge::publish,
           )
         val createdHeartbeat = ScheduledLeaseHeartbeat()
@@ -860,6 +905,7 @@ class XoboroRuntime private constructor(
           readProgressLifecycle = readProgressLifecycle,
           koreaderSyncLifecycle = koreaderSyncLifecycle,
           sseEventHub = sseEvents,
+          nativeEventHub = nativeEvents,
           sseTaskStatusProvider = sseTaskStatusProvider,
           durableTaskQueue = queue,
           databaseBackupRequester = databaseBackupRequester,
@@ -880,6 +926,7 @@ class XoboroRuntime private constructor(
         runCatching { heartbeat?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { oauthHttpClient?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { sseEventHub?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+        runCatching { nativeEventHub?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { database.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         throw failure
       }
