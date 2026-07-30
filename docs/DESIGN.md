@@ -58,7 +58,8 @@ web/
   src/
     main.js
     App.svelte            # session gate + shell selection only
-    lib/                  # api client, session, sse, formatting — no components
+    lib/                  # http transport, errors, session, sse, i18n — no components
+    lib/messages/         # one catalog per locale, identical key sets
     styles/tokens.css     # the single source of design tokens
     styles/global.css
     reader/               # reader shell, routes, components
@@ -377,10 +378,31 @@ Consequences the client must honour:
   must not defeat it by pointing at an absolute cross-origin URL.
 - `BEARER` exists for non-browser clients and is not used by this UI.
 
-### One client module, no ad-hoc `fetch`
+### One transport, no ad-hoc `fetch`
 
-`lib/api.js` owns every request. Screens never call `fetch`. This is what makes
-error handling, `401` handling and the base path single-sourced.
+`lib/http.js` owns every request. Screens never call `fetch`, and neither does
+any endpoint module: they take a path and go through `request()`. That is what
+keeps the base path, the credentials mode, the error envelope and the
+lost-session signal single-sourced.
+
+Endpoint groups live beside it as thin modules (`lib/session.js`, and one per
+route group as its screens arrive) rather than in one growing file. The rule is
+about there being a single **transport**, not a single file — a 2,000-line module
+listing every endpoint would satisfy the letter of "one file" and none of its
+point.
+
+Two properties are enforced by test rather than by convention, because both fail
+silently:
+
+- **Paths are validated as arguments, not as results.** Prefixing the API root
+  always yields a same-origin string, so checking the concatenated URL is a guard
+  that can never fire. What the check actually catches is a full or
+  protocol-relative URL arriving in server data and being mangled into a path
+  that fetches the wrong thing.
+- **Array parameters repeat their key.** The native listings take repeated
+  `libraryId`, `genre` and `tag` filters; joining an array into one
+  comma-separated value would silently filter by an identifier that does not
+  exist, and the screen would look like it worked.
 
 ### Errors branch on `code`
 
@@ -485,7 +507,7 @@ Design constraints that change places if this is done wrong:
   rule, which is the usual way an SPA route quietly shadows an API route.
 - Static asset serving must not shadow `/api/**`.
 - If an application-level base path is added later, the API client's base URL
-  must come from one place, which is why `lib/api.js` owns every request.
+  must come from one place, which is why `lib/http.js` owns every request.
 
 ## Deliberately not designed
 
@@ -518,3 +540,9 @@ starting.
    artifact is what makes the Compose deployment work with no extra moving part.
 2. **Whether the console needs a light theme in the first release.**
    Recommendation: no — ship dark, keep the token seam.
+3. **`lucide-svelte` is deprecated in favour of `@lucide/svelte`.** The base uses
+   the old package name and it installs and works, but starting a new project on a
+   package whose own maintainer says to use something else is a poor default.
+   Swapping it is a dependency change, so it is not made unilaterally.
+   Recommendation: switch — it is the same project under its current name, and the
+   import sites are mechanical.
