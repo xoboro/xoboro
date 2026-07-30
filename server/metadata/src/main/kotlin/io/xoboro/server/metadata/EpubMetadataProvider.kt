@@ -8,6 +8,7 @@ import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.ReadingDirection
 import io.xoboro.core.domain.Series
 import io.xoboro.server.media.SourceMediaAccess
 import io.xoboro.server.media.UnknownSourceMediaAccessException
@@ -22,6 +23,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
+import org.jsoup.select.Elements
 
 class EpubMetadataProvider(
   accesses: Collection<SourceMediaAccess>,
@@ -69,8 +71,9 @@ class EpubMetadataProvider(
         ?: return null
     return SeriesMetadataPatch(
       title = metadata.seriesTitle,
-      titleSort = metadata.seriesTitle,
+      titleSort = metadata.seriesTitleSort ?: metadata.seriesTitle,
       summary = metadata.description,
+      readingDirection = metadata.readingDirection,
       publisher = metadata.publisher,
       language = metadata.language,
       genres = metadata.subjects.ifEmpty { null },
@@ -141,6 +144,11 @@ class EpubMetadataProvider(
         ?.text()
         ?.trim()
         ?.ifBlank { null }
+
+    // EPUB 3 states a sort form as a `file-as` refinement; EPUB 2 used an `opf:file-as` attribute.
+    // Both mean the same thing and publications in the wild use either, so both are read.
+    fun Element.sortForm(): String? =
+      refinement(FILE_AS_PROPERTY) ?: attr("opf:file-as").trim().ifBlank { null }
     val titles = metadata.select("*|title")
     val title =
       titles
@@ -212,17 +220,58 @@ class EpubMetadataProvider(
     return EpubMetadata(
       title = title,
       description = metadata.selectFirst("*|description")?.textValue(),
-      releaseDate = metadata.select("*|date").firstNotNullOfOrNull { it.textValue()?.isoDate() },
+      releaseDate = metadata.select("*|date").publicationDate(),
       authors = authors,
       subjects = metadata.select("*|subject").mapNotNull { it.textValue() }.toSet(),
       isbn = isbn,
       links = links,
       seriesTitle = seriesTitle,
+      seriesTitleSort = seriesMeta?.sortForm(),
       seriesPosition = seriesPosition,
       publisher = metadata.selectFirst("*|publisher")?.textValue(),
       language = metadata.selectFirst("*|language")?.textValue()?.normalizedLanguage(),
+      readingDirection =
+        selectFirst("*|spine[page-progression-direction]")
+          ?.attr("page-progression-direction")
+          ?.readingDirection(),
     )
   }
+
+  /**
+   * Picks the date that means "published".
+   *
+   * EPUB 2 distinguished several kinds of `dc:date` through an `opf:event` attribute, so a
+   * publication holding both a creation and a publication date lists them in arbitrary order. Taking
+   * the first parseable one made the release date depend on how the file happened to be written.
+   * EPUB 3 dropped `opf:event` and allows a single `dc:date`, which the untagged fallback covers.
+   */
+  private fun Elements.publicationDate(): String? {
+    fun dateFor(event: String?): String? =
+      asSequence()
+        .filter { element ->
+          val declared = element.attr("opf:event").trim().ifBlank { null }
+          if (event == null) declared == null else declared.equals(event, ignoreCase = true)
+        }.firstNotNullOfOrNull { it.textValue()?.isoDate() }
+    return dateFor("publication")
+      ?: dateFor("original-publication")
+      ?: dateFor(null)
+      ?: firstNotNullOfOrNull { it.textValue()?.isoDate() }
+  }
+
+  /**
+   * Maps the EPUB spine's reading order onto the catalog's.
+   *
+   * `page-progression-direction` is how an EPUB says it reads right to left - the manga case - and
+   * nothing read it before, so every imported publication inherited the default. `default` means the
+   * publication declines to state a direction, which is not the same as claiming left to right, so it
+   * leaves the field alone rather than overwriting a value an operator set.
+   */
+  private fun String.readingDirection(): ReadingDirection? =
+    when (trim().lowercase()) {
+      "rtl" -> ReadingDirection.RIGHT_TO_LEFT
+      "ltr" -> ReadingDirection.LEFT_TO_RIGHT
+      else -> null
+    }
 
   private fun Element.textValue(): String? = text().trim().ifBlank { null }
 
@@ -281,9 +330,11 @@ class EpubMetadataProvider(
     val isbn: String?,
     val links: List<io.xoboro.core.domain.WebLink>,
     val seriesTitle: String?,
+    val seriesTitleSort: String?,
     val seriesPosition: String?,
     val publisher: String?,
     val language: String?,
+    val readingDirection: ReadingDirection?,
   )
 
   private companion object {
@@ -292,15 +343,39 @@ class EpubMetadataProvider(
     const val CONTAINER_PATH = "META-INF/container.xml"
     const val MAXIMUM_MIMETYPE_BYTES = 128
     const val MAXIMUM_METADATA_BYTES = 4 * 1_024 * 1_024
+    const val FILE_AS_PROPERTY = "file-as"
     val YEAR = Regex("""\b\d{4}\b""")
+
+    /**
+     * MARC relator codes mapped onto the role vocabulary `ComicInfoMetadataProvider` produces, so one
+     * concept does not reach the catalog under two names depending on which file it came from.
+     *
+     * An unmapped code passes through verbatim, which is why the map matters: before it was extended,
+     * a publication crediting `art` or `clr` surfaced the bare relator code as the author's role.
+     *
+     * `inker` and `letterer` have no counterpart here on purpose - MARC defines no relator for
+     * either, and `ltr` is Lithographer, not letterer. Those two roles only arrive from ComicInfo.
+     */
     val ROLE_NAMES =
       mapOf(
         "aut" to "writer",
+        "cre" to "writer",
+        "art" to "penciller",
         "ill" to "penciller",
+        "clr" to "colorist",
+        "cov" to "cover",
+        "pht" to "photographer",
+        "dsr" to "designer",
         "trl" to "translator",
         "edt" to "editor",
+        "adp" to "adapter",
+        "com" to "compiler",
+        "ann" to "annotator",
+        "aui" to "introduction",
+        "aft" to "afterword",
         "nrt" to "narrator",
         "pbl" to "publisher",
+        "ctb" to "contributor",
       )
   }
 }
