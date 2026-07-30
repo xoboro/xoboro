@@ -88,6 +88,18 @@ class PerformanceReport {
     metrics += PerformanceMetric("$key.samples", itemCount, stats.sampleCount.toString(), "runs")
   }
 
+  /**
+   * Records a plain count that is context for another metric rather than a measurement of its own -
+   * e.g. which page index a deep-page latency was taken at, without which that latency says nothing
+   * about how deep "deep" was.
+   */
+  fun recordCount(
+    key: String,
+    value: Int,
+  ) {
+    metrics += PerformanceMetric(key, 0, value.toString(), "index")
+  }
+
   fun recordBytes(
     key: String,
     itemCount: Long,
