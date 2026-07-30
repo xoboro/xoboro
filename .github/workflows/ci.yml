@@ -1,10 +1,22 @@
 name: CI
 
+# Automatic triggers are paused: this is a private repository, so every Actions minute is
+# billed, and the account hit its Actions spending limit. GitHub refuses to start the jobs at
+# all in that state, which turns every check into a red cross that says nothing about the code.
+#
+# The workflow is unchanged otherwise and still runs on demand:
+#
+#   gh workflow run "CI" --ref <branch>
+#
+# To restore automatic runs, put the trigger block below back (see git history for this file):
+#
+#   push:
+#     branches:
+#       - main
+#   pull_request:
+
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
