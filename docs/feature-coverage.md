@@ -53,7 +53,7 @@ Statuses:
 | CBZ/ZIP analysis, pages, original download, and thumbnails | READY | Encrypted archives report `UNSUPPORTED` with `ERR_1101`, read from the central directory rather than from a JDK message (ADR 0089) |
 | CBR/RAR/RAR5 analysis and pages | PARTIAL | Encrypted archives report `UNSUPPORTED` with `ERR_1101`; multipart sets map a missing volume to `ERR_1102`, though that path stays unverified against a real volume set because no dependency or assumed tool can write one. Continuation volumes of a `.partN.rar` set are suppressed at scan when their first volume is present beside them (ADR 0096), so one set yields one media item |
 | PDF analysis, rendering, pages, and download | READY | Encryption policy is settled (user-password documents are `UNSUPPORTED`, owner-password-only documents are served; ADR 0089); both the document information dictionary and the XMP packet are imported under the `importPdfBook` library setting, with per-field precedence (ADR 0097) — XMP wins for authors and tags because it carries them as structured lists, the dictionary wins elsewhere and XMP fills gaps |
-| EPUB 2/3, fixed layout, DiViNa, resources, and positions | PARTIAL | DRM-protected publications no longer index as `READY` (ADR 0089); metadata reads the spine reading direction, `opf:event`-tagged dates, `file-as` sort forms, and a broadened MARC relator map; `inker` and `letterer` have no MARC relator and still arrive only from ComicInfo; reader acceptance remains |
+| EPUB 2/3, fixed layout, DiViNa, resources, and positions | PARTIAL | DRM-protected publications no longer index as `READY` (ADR 0089); metadata reads the spine reading direction, `opf:event`-tagged dates, `file-as` sort forms, 39 MARC relator codes, and their English display names for producers that write `role="Illustrator"` instead of `role="ill"`; `inker` and `letterer` have no MARC relator and arrive only from ComicInfo, and `ltr` stays deliberately unmapped because it looks like "letterer" but is not it. Reader acceptance remains |
 | Natural ordering, dimensions, content detection, and hashes | READY | Add only formats required by new sources |
 | Book, series, and read-list downloads | READY | Native API/UI |
 | Artwork upload, discovery, selection, generation, and caching | PARTIAL | Collections and read lists derive a cover from their first member with one, swept by the thumbnail-regeneration command; a tiled composite of several member covers and WebP output from the generator are not implemented, and generation is not re-triggered when membership changes |
@@ -63,7 +63,7 @@ Statuses:
 | Capability | Status | Remaining work |
 |---|---|---|
 | ComicInfo.xml import | READY | Native metadata diagnostics |
-| EPUB package metadata | PARTIAL | Remaining creator/refinement vocabulary |
+| EPUB package metadata | READY | Creator and contributor credits resolve through one path whether the role is a relator code, an English relator name, an already-canonical vocabulary name, or undeclared; an unresolvable role reaches the catalog verbatim rather than being dropped |
 | `series.json`/Mylar metadata | PARTIAL | Complete supported schema and validation diagnostics |
 | One-shot detection and aggregation | READY | Native configuration and diagnostics |
 | ISBN barcode detection | READY | Native configuration and diagnostics |

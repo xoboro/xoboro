@@ -135,6 +135,98 @@ class EpubMetadataProviderTest {
   }
 
   @Test
+  fun `gives an undeclared creator the same role as a declared one`() {
+    val epub =
+      createEpub(
+        name = "undeclared.epub",
+        extraCreators =
+          """
+          <dc:creator>Undeclared Hand</dc:creator>
+          <dc:contributor>Undeclared Helper</dc:contributor>
+          """.trimIndent(),
+      )
+
+    val authors =
+      provider(epub).provide(library(), book())?.authors?.associate { it.name to it.role }
+
+    // The fixture's own `Primary Author` declares `aut` and resolves to "writer". An undeclared
+    // creator used to fall back to the literal "author", so the same concept reached the catalog under
+    // two names depending on whether the publication bothered to state the relator.
+    assertEquals("writer", authors?.get("Primary Author"))
+    assertEquals("writer", authors?.get("Undeclared Hand"))
+    assertEquals("contributor", authors?.get("Undeclared Helper"))
+  }
+
+  @Test
+  fun `resolves relator display names to the same role as their codes`() {
+    val epub =
+      createEpub(
+        name = "display-names.epub",
+        extraCreators =
+          """
+          <dc:contributor opf:role="Illustrator" xmlns:opf="http://www.idpf.org/2007/opf">Named Artist</dc:contributor>
+          <dc:contributor opf:role="ill" xmlns:opf="http://www.idpf.org/2007/opf">Coded Artist</dc:contributor>
+          <dc:contributor opf:role="Cover Artist" xmlns:opf="http://www.idpf.org/2007/opf">Named Cover</dc:contributor>
+          <dc:contributor opf:role="colourist" xmlns:opf="http://www.idpf.org/2007/opf">British Colour</dc:contributor>
+          """.trimIndent(),
+      )
+
+    val authors =
+      provider(epub).provide(library(), book())?.authors?.associate { it.name to it.role }
+
+    // EPUB 3 says `role` carries a code, but producers write the display name often enough that
+    // treating it as unmapped would surface "Illustrator" beside "penciller" for the same credit.
+    assertEquals("penciller", authors?.get("Named Artist"))
+    assertEquals("penciller", authors?.get("Coded Artist"))
+    assertEquals("cover", authors?.get("Named Cover"))
+    assertEquals("colorist", authors?.get("British Colour"))
+  }
+
+  @Test
+  fun `maps lithographer and leaves the letterer lookalike unmapped`() {
+    val epub =
+      createEpub(
+        name = "lithography.epub",
+        extraCreators =
+          """
+          <dc:contributor opf:role="ltg" xmlns:opf="http://www.idpf.org/2007/opf">Stone Hand</dc:contributor>
+          <dc:contributor opf:role="ltr" xmlns:opf="http://www.idpf.org/2007/opf">Lookalike Hand</dc:contributor>
+          """.trimIndent(),
+      )
+
+    val authors =
+      provider(epub).provide(library(), book())?.authors?.associate { it.name to it.role }
+
+    // `ltg` is the MARC code for Lithographer.
+    assertEquals("lithographer", authors?.get("Stone Hand"))
+    // `ltr` looks like an abbreviation of "letterer" and mapping it there is the obvious mistake.
+    // MARC has no relator for letterer at all, so guessing would mislabel whatever `ltr` credits.
+    // This pins the absence so a later reader does not "fix" it.
+    assertEquals("ltr", authors?.get("Lookalike Hand"))
+  }
+
+  @Test
+  fun `keeps a role it cannot resolve rather than dropping the credit`() {
+    val epub =
+      createEpub(
+        name = "unresolvable.epub",
+        extraCreators =
+          """
+          <dc:contributor opf:role="zzz" xmlns:opf="http://www.idpf.org/2007/opf">Unknown Hand</dc:contributor>
+          <dc:contributor opf:role="writer" xmlns:opf="http://www.idpf.org/2007/opf">Already Named</dc:contributor>
+          """.trimIndent(),
+      )
+
+    val authors =
+      provider(epub).provide(library(), book())?.authors?.associate { it.name to it.role }
+
+    // A role nobody mapped is still something the publication asserted; losing it would be worse than
+    // showing it raw. A value that is already a vocabulary name passes through as itself.
+    assertEquals("zzz", authors?.get("Unknown Hand"))
+    assertEquals("writer", authors?.get("Already Named"))
+  }
+
+  @Test
   fun `uses the collection sort form for the series title sort`() {
     val epub = createEpub(name = "sorted.epub", seriesSortForm = "Synthetic saga, The")
 
