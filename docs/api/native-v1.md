@@ -120,6 +120,23 @@ the current user and omits the access token.
 The server immediately revokes the presented session. Cookie responses also
 expire `XOBORO-SESSION`. Successful logout returns `204 No Content`.
 
+## Machine-readable description
+
+`GET /api/xoboro/v1/openapi.yaml` serves an OpenAPI 3.1 description of every native
+endpoint, and `GET /api/xoboro/v1/docs` renders it for a browser. Both are
+unauthenticated: they contain no catalog data and no configuration, and requiring a
+session to discover how to create one would be circular.
+
+The description is served verbatim from the file committed at
+`server/app/src/main/resources/openapi/xoboro-native-v1.yaml`, so what a client reads is
+exactly what is reviewed in the repository. Its path and method coverage cannot drift:
+`XoboroNativeOpenApiContractTest` walks Ktor's routing tree and fails if a route has no
+entry, or an entry has no route.
+
+It is the machine-readable surface - paths, methods, parameters, authentication and status
+codes. Request and response bodies, error-code meanings and cache semantics are described
+in prose here, in this document.
+
 ## Pagination and sorting
 
 Catalog collections return:

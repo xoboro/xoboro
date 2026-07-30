@@ -488,6 +488,7 @@ fun Application.xoboroModule(
       get("/health") {
         call.respond(HealthResponse())
       }
+      xoboroOpenApiRoutes()
       metricsToken?.let { token ->
         operationalMetricsRoute(
           token = token,
