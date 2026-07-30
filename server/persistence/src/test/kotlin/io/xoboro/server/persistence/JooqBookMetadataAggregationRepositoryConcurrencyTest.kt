@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import org.junit.jupiter.api.io.TempDir
 
 /**
@@ -31,7 +32,9 @@ import org.junit.jupiter.api.io.TempDir
  * SQLite refused to silently upgrade the now-stale read snapshot to a writer and raised
  * SQLITE_BUSY_SNAPSHOT. Forcing the transaction to open with `BEGIN IMMEDIATE` (see
  * [JooqBookMetadataAggregationRepository.forceImmediateWriteLock]) eliminates the reader-then-writer
- * upgrade entirely, so this test hammers both sides concurrently and asserts zero failures.
+ * upgrade entirely, so the first test hammers both sides concurrently and asserts zero failures.
+ * The second test pins that leaving a pooled connection's transaction mode set to IMMEDIATE
+ * afterward - rather than resetting it - does not affect unrelated write-first repositories.
  */
 class JooqBookMetadataAggregationRepositoryConcurrencyTest {
   @TempDir
@@ -164,6 +167,145 @@ class JooqBookMetadataAggregationRepositoryConcurrencyTest {
       executor.shutdown()
 
       assertEquals(0, failures.get(), "Unexpected refreshDirty failures: $failureMessages")
+    }
+  }
+
+  /**
+   * [JooqBookMetadataAggregationRepository.forceImmediateWriteLock] deliberately leaves a pooled
+   * connection's SQLite transaction mode set to IMMEDIATE rather than resetting it, on the premise
+   * that every *other* `database.transaction { }` call site in this persistence module starts with
+   * a write as its first statement and is therefore unaffected either way. This test pins that
+   * premise: force a single-connection pool into IMMEDIATE mode via refreshDirty, then exercise a
+   * handful of unrelated write-first repositories on that same (only) connection and confirm they
+   * still persist correctly.
+   *
+   * A `finally`-scoped reset was tried instead and rejected: it reintroduced the exact
+   * SQLITE_BUSY_SNAPSHOT/SQLITE_BUSY failures this fix removes, at a much higher rate under load
+   * than leaving the mode set (144 failures per 4000 calls at 8 readers + 4 writers, vs. 0).
+   */
+  @Test
+  fun `leaving a connection in IMMEDIATE mode does not affect other write-first repositories`() {
+    val databasePath = tempDirectory.resolve("aggregation-immediate-mode-leak.sqlite")
+    XoboroDatabase.open(DatabaseConfig(databasePath, maximumPoolSize = 1)).use { database ->
+      val libraryRepository = JooqLibraryRepository(database)
+      val seriesRepository = JooqSeriesRepository(database)
+      val bookRepository = JooqBookRepository(database)
+      val bookMetadataRepository = JooqBookMetadataRepository(database)
+      val aggregations = JooqBookMetadataAggregationRepository(database)
+
+      val libraryId = LibraryId("leak-library")
+      val seriesId = SeriesId("leak-series")
+      val bookId = BookId("leak-book-1")
+      libraryRepository.insert(
+        Library(
+          id = libraryId,
+          name = "Leak library",
+          root = SourceLocation("local", "file:///leak"),
+          createdAtMillis = 1,
+        ),
+      )
+      seriesRepository.insert(
+        Series(
+          id = seriesId,
+          libraryId = libraryId,
+          name = "Leak series",
+          relativePath = "Leak series",
+          sourceItemId = "file:///leak/series",
+          fileModifiedAtMillis = 2,
+          bookCount = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      bookRepository.insert(
+        Book(
+          id = bookId,
+          libraryId = libraryId,
+          seriesId = seriesId,
+          name = "Leak issue.cbz",
+          relativePath = "Leak series/Leak issue.cbz",
+          sourceItemId = "file:///leak/series/issue.cbz",
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+          fileModifiedAtMillis = 2,
+          fileSize = 100,
+          number = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      bookMetadataRepository.upsert(
+        BookMetadata(
+          bookId = bookId,
+          title = "Leak issue",
+          number = "1",
+          numberSort = 1F,
+          summary = "Synthetic summary",
+          createdAtMillis = 1,
+        ),
+      )
+
+      // With a single pooled connection, this leaves that one connection's transaction mode set
+      // to IMMEDIATE and never resets it - exactly the state under test.
+      aggregations.refreshDirty(listOf(seriesId))
+
+      // A handful of unrelated write-first operations, all forced onto the same connection.
+      val otherLibraryId = LibraryId("leak-library-2")
+      val otherSeriesId = SeriesId("leak-series-2")
+      val otherBookId = BookId("leak-book-2")
+      libraryRepository.insert(
+        Library(
+          id = otherLibraryId,
+          name = "Second leak library",
+          root = SourceLocation("local", "file:///leak2"),
+          createdAtMillis = 1,
+        ),
+      )
+      seriesRepository.insert(
+        Series(
+          id = otherSeriesId,
+          libraryId = otherLibraryId,
+          name = "Second leak series",
+          relativePath = "Second leak series",
+          sourceItemId = "file:///leak2/series",
+          fileModifiedAtMillis = 2,
+          bookCount = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      bookRepository.insert(
+        Book(
+          id = otherBookId,
+          libraryId = otherLibraryId,
+          seriesId = otherSeriesId,
+          name = "Second leak issue.cbz",
+          relativePath = "Second leak series/Second leak issue.cbz",
+          sourceItemId = "file:///leak2/series/issue.cbz",
+          mediaKind = MediaKind.COMIC_ARCHIVE,
+          fileModifiedAtMillis = 2,
+          fileSize = 100,
+          number = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      bookMetadataRepository.upsert(
+        BookMetadata(
+          bookId = otherBookId,
+          title = "Second leak issue",
+          number = "1",
+          numberSort = 1F,
+          summary = "Second synthetic summary",
+          createdAtMillis = 1,
+        ),
+      )
+      seriesRepository.update(
+        requireNotNull(seriesRepository.findByIdOrNull(otherSeriesId)).copy(bookCount = 2),
+      )
+
+      val persisted = assertNotNull(seriesRepository.findByIdOrNull(otherSeriesId))
+      assertEquals(2, persisted.bookCount)
+      assertNotNull(bookRepository.findByIdOrNull(otherBookId))
+      assertEquals(
+        "Second leak issue",
+        bookMetadataRepository.findByBookIdOrNull(otherBookId)?.title,
+      )
     }
   }
 

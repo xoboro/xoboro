@@ -144,9 +144,16 @@ internal class JooqBookMetadataAggregationRepository(
    * This setting is intentionally left in place afterward rather than reset - every other
    * `database.transaction { }` call site in this module starts with a write as its first
    * statement, so it already needs to escalate to a writer immediately regardless of
-   * deferred/immediate mode. Leaving it set is a no-op for those, and is a strict improvement for
-   * the few call sites elsewhere that share this same read-then-write shape (e.g.
-   * JooqServerSettingRepository.findOrCreate, JooqMetadataOrganizationWriter).
+   * deferred/immediate mode. Leaving it set is a no-op for those (pinned by
+   * JooqBookMetadataAggregationRepositoryConcurrencyTest's
+   * `leaving a connection in IMMEDIATE mode does not affect other write-first repositories`), and
+   * is a strict improvement for the few call sites elsewhere that share this same read-then-write
+   * shape (e.g. JooqServerSettingRepository.findOrCreate, JooqMetadataOrganizationWriter).
+   *
+   * A `finally`-scoped reset back to DEFERRED was tried and rejected: it reintroduced this exact
+   * failure class at a far higher rate than leaving the mode set (144 SQLITE_BUSY_SNAPSHOT/
+   * SQLITE_BUSY failures per 4000 calls at 8 concurrent readers + 4 writers, vs. 0 without the
+   * reset). Do not reintroduce a reset without re-measuring at that concurrency first.
    */
   private fun DSLContext.forceImmediateWriteLock() {
     connection { connection ->
