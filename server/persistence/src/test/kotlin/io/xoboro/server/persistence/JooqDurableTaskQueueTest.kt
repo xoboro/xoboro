@@ -461,6 +461,42 @@ class JooqDurableTaskQueueTest {
     }
   }
 
+  @Test
+  fun `polling an idle queue does not contend for the write lock`() {
+    withQueue("idle-poll") { queue, database ->
+      val writeLockHeld = CountDownLatch(1)
+      val releaseWriteLock = CountDownLatch(1)
+      val executor = Executors.newSingleThreadExecutor()
+      try {
+        val holder =
+          executor.submit {
+            database.transaction { transaction ->
+              // Any write claims the WAL write lock for the rest of this transaction.
+              transaction.execute(
+                "INSERT INTO server_setting (setting_key, setting_value) VALUES (?, ?)",
+                "idle-poll-write-lock",
+                "held",
+              )
+              writeLockHeld.countDown()
+              releaseWriteLock.await(LOCK_HANDOFF_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            }
+          }
+        assertTrue(writeLockHeld.await(LOCK_HANDOFF_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+
+        // Nothing to recover and nothing to claim, so this poll needs no write at all. Before the
+        // read probe it opened a write transaction regardless, blocked here until the busy timeout
+        // expired, and then failed with SQLITE_BUSY.
+        assertNull(queue.claim("worker", "lease", nowMillis = 10L))
+
+        releaseWriteLock.countDown()
+        holder.get(LOCK_HANDOFF_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+      } finally {
+        releaseWriteLock.countDown()
+        executor.shutdownNow()
+      }
+    }
+  }
+
   private fun withQueue(
     name: String,
     block: (JooqDurableTaskQueue, XoboroDatabase) -> Unit,
@@ -526,4 +562,13 @@ class JooqDurableTaskQueueTest {
       availableAtMillis = availableAtMillis,
       maxAttempts = maxAttempts,
     )
+
+  private companion object {
+    /**
+     * Upper bound on handing the write lock between threads. Generous on purpose: it only has to
+     * exceed real handoff latency, and it must stay above the 10s SQLite busy timeout so a
+     * regression surfaces as this assertion failing rather than as a timeout race.
+     */
+    const val LOCK_HANDOFF_TIMEOUT_SECONDS = 30L
+  }
 }
