@@ -109,9 +109,35 @@ class ZipMediaAnalyzerTest {
       ZipMediaAnalyzer().analyze(BookId("book-corrupt"), corrupt, false, createdAtMillis = 1)
 
     assertEquals(MediaStatus.ERROR, emptyMedia.status)
-    assertEquals(ZipMediaAnalyzer.ERROR_NO_PAGES, emptyMedia.comment)
+    assertEquals(MediaAnalysisComment.NO_PAGES, emptyMedia.comment)
     assertEquals(MediaStatus.ERROR, corruptMedia.status)
-    assertEquals(ZipMediaAnalyzer.ERROR_ARCHIVE, corruptMedia.comment)
+    assertEquals(MediaAnalysisComment.UNREADABLE_CONTAINER, corruptMedia.comment)
+  }
+
+  @Test
+  fun `reports an encrypted archive as unsupported rather than damaged`() {
+    val archive =
+      writeSyntheticZip(
+        tempDirectory.resolve("locked.cbz"),
+        mapOf("001.jpg" to "ciphertext".encodeToByteArray()),
+        encrypted = true,
+      )
+    val truncated = tempDirectory.resolve("truncated.cbz")
+    Files.write(truncated, Files.readAllBytes(archive).copyOfRange(0, 30))
+
+    val locked =
+      ZipMediaAnalyzer().analyze(BookId("book-locked"), archive, false, createdAtMillis = 1)
+    val damaged =
+      ZipMediaAnalyzer().analyze(BookId("book-truncated"), truncated, false, createdAtMillis = 1)
+
+    // Both used to be ERROR with the container code, leaving an operator no way to tell "replace this
+    // file" from "the storage hiccuped, try again". The pair is asserted together because the value
+    // is in the difference, not in either verdict alone.
+    assertEquals(MediaStatus.UNSUPPORTED, locked.status)
+    assertEquals(MediaAnalysisComment.ENCRYPTED, locked.comment)
+    assertEquals(MediaProfile.DIVINA, locked.profile)
+    assertEquals(MediaStatus.ERROR, damaged.status)
+    assertEquals(MediaAnalysisComment.UNREADABLE_CONTAINER, damaged.comment)
   }
 
   private fun createZip(

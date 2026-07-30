@@ -88,15 +88,95 @@ class EpubMediaAnalyzerTest {
       )
 
     assertEquals(MediaStatus.ERROR, media.status)
-    assertEquals(EpubMediaAnalyzer.ERROR_DOCUMENT, media.comment)
+    assertEquals(MediaAnalysisComment.UNREADABLE_CONTAINER, media.comment)
+  }
+
+  @Test
+  fun `reports a publication whose text is encrypted as unsupported`() {
+    val path = tempDirectory.resolve("drm.epub")
+    writeEpub(path, fixedLayout = false, encryptedResource = "OEBPS/chapter1.xhtml" to AES_ALGORITHM)
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-drm"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    // Without this the publication indexed as READY: the container and package are plaintext, so
+    // analysis succeeded and produced a catalog entry whose text no reader can render.
+    assertEquals(MediaStatus.UNSUPPORTED, media.status)
+    assertEquals(MediaAnalysisComment.ENCRYPTED, media.comment)
+  }
+
+  /**
+   * `META-INF/encryption.xml` is not a DRM marker. Isolates the algorithm half of the rule: the same
+   * spine resource, declared under the obfuscation algorithm, stays readable.
+   */
+  @Test
+  fun `keeps a publication with obfuscated resources readable`() {
+    val path = tempDirectory.resolve("obfuscated.epub")
+    writeEpub(
+      path,
+      fixedLayout = false,
+      encryptedResource = "OEBPS/chapter1.xhtml" to OBFUSCATION_ALGORITHM,
+    )
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-obfuscated"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    assertEquals(MediaStatus.READY, media.status)
+  }
+
+  /** Isolates the other half: real encryption, but on a resource no reader has to render. */
+  @Test
+  fun `keeps a publication with an encrypted non-spine resource readable`() {
+    val path = tempDirectory.resolve("encrypted-font.epub")
+    writeEpub(
+      path,
+      fixedLayout = false,
+      encryptedResource = "OEBPS/fonts/synthetic.otf" to AES_ALGORITHM,
+    )
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-encrypted-font"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    assertEquals(MediaStatus.READY, media.status)
   }
 
   private fun writeEpub(
     path: Path,
     fixedLayout: Boolean,
+    encryptedResource: Pair<String, String>? = null,
   ) {
     ZipOutputStream(Files.newOutputStream(path)).use { archive ->
       archive.entry("mimetype", EpubMediaAnalyzer.EPUB_MEDIA_TYPE.encodeToByteArray())
+      encryptedResource?.let { (resource, algorithm) ->
+        archive.entry(
+          "META-INF/encryption.xml",
+          """
+          <?xml version="1.0"?>
+          <encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container"
+                      xmlns:enc="http://www.w3.org/2001/04/xmlenc#">
+            <enc:EncryptedData>
+              <enc:EncryptionMethod Algorithm="$algorithm"/>
+              <enc:CipherData><enc:CipherReference URI="$resource"/></enc:CipherData>
+            </enc:EncryptedData>
+          </encryption>
+          """.trimIndent().encodeToByteArray(),
+        )
+      }
       archive.entry(
         "META-INF/container.xml",
         """
@@ -185,6 +265,11 @@ class EpubMediaAnalyzerTest {
     putNextEntry(ZipEntry(name))
     write(bytes)
     closeEntry()
+  }
+
+  private companion object {
+    const val AES_ALGORITHM = "http://www.w3.org/2001/04/xmlenc#aes128-cbc"
+    const val OBFUSCATION_ALGORITHM = "http://www.idpf.org/2008/embedding"
   }
 }
 

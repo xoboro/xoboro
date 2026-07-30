@@ -16,6 +16,7 @@ import java.net.URLDecoder
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.zip.ZipEntry
+import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import javax.imageio.ImageIO
 import kotlin.math.ceil
@@ -28,6 +29,7 @@ class EpubMediaAnalyzer(
   private val hasher: Xxh3ContentHasher = Xxh3ContentHasher(),
   private val pageHashing: Int = ZipMediaAnalyzer.DEFAULT_PAGE_HASHING,
   private val divinaLetterCountThreshold: Int = DEFAULT_DIVINA_LETTER_COUNT_THRESHOLD,
+  private val encryptionProbe: ZipEncryptionProbe = ZipEncryptionProbe(),
 ) {
   init {
     require(pageHashing >= 0) { "Page hashing count must not be negative" }
@@ -75,6 +77,10 @@ class EpubMediaAnalyzer(
             .select("*|spine > *|itemref[idref]")
             .mapNotNull { manifest[it.attr("idref")] }
         if (spine.isEmpty()) throw IOException("EPUB spine is empty")
+        val encryptedResources = archive.readEncryptedResourcePaths()
+        if (spine.any { it.path in encryptedResources }) {
+          return@use encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
+        }
 
         val files =
           manifest.values.map { item ->
@@ -150,9 +156,53 @@ class EpubMediaAnalyzer(
           updatedAtMillis = updatedAtMillis,
         )
       }
+    } catch (_: ZipException) {
+      if (encryptionProbe.declaresEncryptedEntries(path)) {
+        encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
+      } else {
+        errorMedia(bookId, createdAtMillis, updatedAtMillis)
+      }
     } catch (_: Exception) {
       errorMedia(bookId, createdAtMillis, updatedAtMillis)
     }
+
+  /**
+   * Paths of resources that `META-INF/encryption.xml` declares as genuinely encrypted.
+   *
+   * That file is not a DRM marker on its own: the same mechanism carries EPUB font obfuscation,
+   * which leaves the text perfectly readable. Only algorithms other than the two standard
+   * obfuscation ones count, and the caller looks at spine resources alone, so an obfuscated font
+   * can never make a readable book unsupported.
+   */
+  private fun ZipFile.readEncryptedResourcePaths(): Set<String> {
+    val declaration = readXmlOrNull(ENCRYPTION_PATH) ?: return emptySet()
+    return declaration
+      .select("*|EncryptedData")
+      .mapNotNullTo(mutableSetOf()) { data ->
+        val algorithm =
+          data.selectFirst("*|EncryptionMethod[Algorithm]")?.attr("Algorithm")
+            ?: return@mapNotNullTo null
+        if (algorithm in OBFUSCATION_ALGORITHMS) return@mapNotNullTo null
+        data
+          .selectFirst("*|CipherReference[URI]")
+          ?.attr("URI")
+          ?.let { runCatching { resolveArchivePath("", it) }.getOrNull() }
+      }
+  }
+
+  private fun encryptedMedia(
+    bookId: BookId,
+    createdAtMillis: Long,
+    updatedAtMillis: Long,
+  ) = BookMedia(
+    bookId = bookId,
+    status = MediaStatus.UNSUPPORTED,
+    mediaType = EPUB_MEDIA_TYPE,
+    profile = MediaProfile.EPUB,
+    comment = MediaAnalysisComment.ENCRYPTED,
+    createdAtMillis = createdAtMillis,
+    updatedAtMillis = updatedAtMillis,
+  )
 
   private fun findDivinaPages(
     archive: ZipFile,
@@ -430,7 +480,7 @@ class EpubMediaAnalyzer(
     status = MediaStatus.ERROR,
     mediaType = EPUB_MEDIA_TYPE,
     profile = MediaProfile.EPUB,
-    comment = ERROR_DOCUMENT,
+    comment = MediaAnalysisComment.UNREADABLE_CONTAINER,
     createdAtMillis = createdAtMillis,
     updatedAtMillis = updatedAtMillis,
   )
@@ -458,10 +508,20 @@ class EpubMediaAnalyzer(
 
   companion object {
     const val EPUB_MEDIA_TYPE: String = "application/epub+zip"
-    const val ERROR_DOCUMENT: String = "ERR_1008"
     const val ERROR_MISSING_RESOURCE: String = "ERR_1033"
     const val DEFAULT_DIVINA_LETTER_COUNT_THRESHOLD: Int = 15
     private const val CONTAINER_PATH = "META-INF/container.xml"
+    private const val ENCRYPTION_PATH = "META-INF/encryption.xml"
+
+    /**
+     * The two algorithms that mangle embedded fonts rather than protect content: the EPUB 3
+     * resource-obfuscation method and Adobe's older equivalent. Neither stops a reader.
+     */
+    private val OBFUSCATION_ALGORITHMS =
+      setOf(
+        "http://www.idpf.org/2008/embedding",
+        "http://ns.adobe.com/pdf/enc#RC",
+      )
     private const val MIMETYPE_PATH = "mimetype"
     private const val NCX_MEDIA_TYPE = "application/x-dtbncx+xml"
     private const val POSITION_BYTES = 1_024L

@@ -10,6 +10,7 @@ import io.xoboro.core.domain.MediaStatus
 import java.io.IOException
 import java.nio.file.Path
 import java.util.zip.ZipEntry
+import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import javax.imageio.ImageIO
 import net.greypanther.natsort.CaseInsensitiveSimpleNaturalComparator
@@ -19,6 +20,7 @@ class ZipMediaAnalyzer(
   private val tika: Tika = Tika(),
   private val hasher: Xxh3ContentHasher = Xxh3ContentHasher(),
   private val pageHashing: Int = DEFAULT_PAGE_HASHING,
+  private val encryptionProbe: ZipEncryptionProbe = ZipEncryptionProbe(),
 ) {
   init {
     require(pageHashing >= 0) { "Page hashing count must not be negative" }
@@ -91,7 +93,7 @@ class ZipMediaAnalyzer(
           pages.isEmpty() ->
             errorMedia(
               bookId = bookId,
-              comment = ERROR_NO_PAGES,
+              comment = MediaAnalysisComment.NO_PAGES,
               createdAtMillis = createdAtMillis,
               updatedAtMillis = updatedAtMillis,
               files = files,
@@ -107,16 +109,27 @@ class ZipMediaAnalyzer(
               comment =
                 unreadableNames
                   .takeIf { it.isNotEmpty() }
-                  ?.joinToString(prefix = "$ERROR_ENTRY [", postfix = "]"),
+                  ?.joinToString(
+                    prefix = "${MediaAnalysisComment.UNREADABLE_ENTRY} [",
+                    postfix = "]",
+                  ),
               createdAtMillis = createdAtMillis,
               updatedAtMillis = updatedAtMillis,
             )
         }
       }
+    } catch (_: ZipException) {
+      // The JDK refuses an encrypted archive when it is opened, so encryption has to be diagnosed
+      // from the file format rather than from a successfully opened archive.
+      if (encryptionProbe.declaresEncryptedEntries(path)) {
+        encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
+      } else {
+        errorMedia(bookId, MediaAnalysisComment.UNREADABLE_CONTAINER, createdAtMillis, updatedAtMillis)
+      }
     } catch (_: IOException) {
-      errorMedia(bookId, ERROR_ARCHIVE, createdAtMillis, updatedAtMillis)
+      errorMedia(bookId, MediaAnalysisComment.UNREADABLE_CONTAINER, createdAtMillis, updatedAtMillis)
     } catch (_: SecurityException) {
-      errorMedia(bookId, ERROR_ARCHIVE, createdAtMillis, updatedAtMillis)
+      errorMedia(bookId, MediaAnalysisComment.UNREADABLE_CONTAINER, createdAtMillis, updatedAtMillis)
     }
 
   private fun analyzeEntry(
@@ -181,6 +194,21 @@ class ZipMediaAnalyzer(
       updatedAtMillis = updatedAtMillis,
     )
 
+  private fun encryptedMedia(
+    bookId: BookId,
+    createdAtMillis: Long,
+    updatedAtMillis: Long,
+  ): BookMedia =
+    BookMedia(
+      bookId = bookId,
+      status = MediaStatus.UNSUPPORTED,
+      mediaType = ZIP_MEDIA_TYPE,
+      profile = MediaProfile.DIVINA,
+      comment = MediaAnalysisComment.ENCRYPTED,
+      createdAtMillis = createdAtMillis,
+      updatedAtMillis = updatedAtMillis,
+    )
+
   private data class ArchiveEntry(
     val name: String,
     val mediaType: String? = null,
@@ -191,9 +219,6 @@ class ZipMediaAnalyzer(
 
   companion object {
     const val ZIP_MEDIA_TYPE: String = "application/zip"
-    const val ERROR_ARCHIVE: String = "ERR_1008"
-    const val ERROR_NO_PAGES: String = "ERR_1006"
-    const val ERROR_ENTRY: String = "ERR_1007"
     private const val IMAGE_TYPE_PREFIX = "image/"
     const val DEFAULT_PAGE_HASHING: Int = 3
   }

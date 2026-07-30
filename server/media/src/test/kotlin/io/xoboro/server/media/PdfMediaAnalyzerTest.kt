@@ -10,6 +10,8 @@ import kotlin.test.assertEquals
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.common.PDRectangle
+import org.apache.pdfbox.pdmodel.encryption.AccessPermission
+import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.junit.jupiter.api.io.TempDir
 
 class PdfMediaAnalyzerTest {
@@ -54,6 +56,65 @@ class PdfMediaAnalyzerTest {
       )
 
     assertEquals(MediaStatus.ERROR, media.status)
-    assertEquals(PdfMediaAnalyzer.ERROR_DOCUMENT, media.comment)
+    assertEquals(MediaAnalysisComment.UNREADABLE_CONTAINER, media.comment)
+  }
+
+  @Test
+  fun `reports a document needing a user password as unsupported`() {
+    val path = encryptedPdf("user-locked.pdf", userPassword = "synthetic-user")
+
+    val media =
+      PdfMediaAnalyzer().analyze(
+        bookId = BookId("book-user-locked"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 3,
+      )
+
+    assertEquals(MediaStatus.UNSUPPORTED, media.status)
+    assertEquals(MediaAnalysisComment.ENCRYPTED, media.comment)
+  }
+
+  /**
+   * The other half of the encryption policy, and the half that would be quietly wrong if the analyzer
+   * simply refused anything encrypted: an owner-password document opens on the empty user password,
+   * so its owner can still read their own book.
+   */
+  @Test
+  fun `analyzes a document restricted only by an owner password`() {
+    val path = encryptedPdf("owner-restricted.pdf", userPassword = "")
+
+    val media =
+      PdfMediaAnalyzer().analyze(
+        bookId = BookId("book-owner-restricted"),
+        path = path,
+        analyzeDimensions = true,
+        createdAtMillis = 4,
+      )
+
+    assertEquals(MediaStatus.READY, media.status)
+    assertEquals(1, media.pageCount)
+  }
+
+  private fun encryptedPdf(
+    name: String,
+    userPassword: String,
+  ): Path {
+    val path = tempDirectory.resolve(name)
+    PDDocument().use { document ->
+      document.addPage(PDPage(PDRectangle(320F, 640F)))
+      document.protect(
+        StandardProtectionPolicy(
+          "synthetic-owner",
+          userPassword,
+          AccessPermission().apply {
+            setCanExtractContent(false)
+            setCanPrint(false)
+          },
+        ),
+      )
+      document.save(path.toFile())
+    }
+    return path
   }
 }
