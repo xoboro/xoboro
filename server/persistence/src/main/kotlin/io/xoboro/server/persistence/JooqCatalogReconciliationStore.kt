@@ -6,6 +6,7 @@ import io.xoboro.core.application.CatalogMutationEventPublisher
 import io.xoboro.core.application.CatalogMutationKind
 import io.xoboro.core.application.CatalogReconciliationResult
 import io.xoboro.core.application.CatalogReconciliationStore
+import io.xoboro.core.application.RarVolumeNames
 import io.xoboro.core.application.ScanSessionId
 import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.BookId
@@ -71,6 +72,49 @@ class JooqCatalogReconciliationStore(
           }
           .toTypedArray(),
       ).execute()
+    }
+  }
+
+  /**
+   * Narrows to rows whose name could be a volume, leaving the decision to [RarVolumeNames].
+   *
+   * The `LIKE` is deliberately looser than the parser: it must not miss a name the parser would
+   * accept, and over-selecting only costs a few extra strings to parse. Encoding the naming rule here
+   * would put it in two places that could disagree.
+   */
+  override fun stagedVolumeCandidatePaths(sessionId: ScanSessionId): List<String> =
+    database.dsl
+      .fetch(
+        """
+        SELECT relative_path
+        FROM catalog_scan_candidate
+        WHERE session_id = ?
+          AND media_kind = 'COMIC_ARCHIVE'
+          AND lower(relative_path) LIKE '%.part%'
+        ORDER BY relative_path
+        """.trimIndent(),
+        sessionId.value,
+      ).map { record ->
+        requireNotNull(record.get("relative_path", String::class.java)) {
+          "Database field 'relative_path' must not be null"
+        }
+      }
+
+  override fun unstage(
+    sessionId: ScanSessionId,
+    relativePaths: Collection<String>,
+  ): Int {
+    if (relativePaths.isEmpty()) return 0
+    requireSessionIsStaging(sessionId)
+    // One statement per path rather than an IN list: the count is small - one per suppressed volume -
+    // and a batch keeps the statement plan fixed regardless of how many volumes a set has.
+    return database.transaction { transaction ->
+      transaction
+        .batch(
+          "DELETE FROM catalog_scan_candidate WHERE session_id = ? AND relative_path = ?",
+          *relativePaths.map { path -> arrayOf<Any?>(sessionId.value, path) }.toTypedArray(),
+        ).execute()
+        .sum()
     }
   }
 

@@ -275,6 +275,15 @@ class ScanLibraryTaskTest {
               candidates: List<io.xoboro.core.application.CatalogCandidate>,
             ) = error("not used")
 
+            override fun stagedVolumeCandidatePaths(
+              sessionId: io.xoboro.core.application.ScanSessionId,
+            ) = error("not used")
+
+            override fun unstage(
+              sessionId: io.xoboro.core.application.ScanSessionId,
+              relativePaths: Collection<String>,
+            ) = error("not used")
+
             override fun complete(
               sessionId: io.xoboro.core.application.ScanSessionId,
               failedEntries: Long,
