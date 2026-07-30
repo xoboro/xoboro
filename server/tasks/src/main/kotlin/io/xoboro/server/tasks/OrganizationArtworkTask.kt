@@ -15,6 +15,7 @@ import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SeriesId
+import io.xoboro.server.media.TiledArtworkComposer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -29,9 +30,16 @@ import kotlinx.serialization.json.put
  * the native API, the compatibility API, and metadata import, and a cover derived from members is not
  * worth wiring into all three. This mirrors `FIND_BOOK_ARTWORK`, which sweeps for the same reason.
  *
- * Groups that already carry generated artwork are skipped, so re-running the sweep is cheap. A group
- * whose members changed keeps its old derived cover until the artwork is deleted - stated here
- * because it is a real limitation, not an oversight.
+ * A group is enqueued when it has no generated artwork, **or** when its `updatedAtMillis` is newer
+ * than the generated artwork it already has. Membership changes bump that timestamp, so the sweep
+ * re-derives a stale cover without any of the three mutation paths having to know this task exists.
+ * Comparing two timestamps the domain already keeps beats recording which members a cover came from:
+ * that would be new state to migrate, keep consistent, and get wrong.
+ *
+ * The comparison is `>`, not `>=`. A grouping created and covered within the same millisecond must
+ * not re-enqueue forever, and a real membership change always lands after the cover it invalidates.
+ *
+ * Groups that are neither uncovered nor stale are skipped, so re-running the sweep is cheap.
  */
 class OrganizationArtworkTaskEmitter(
   private val collections: SeriesCollectionRepository,
@@ -44,10 +52,15 @@ class OrganizationArtworkTaskEmitter(
     val now = currentTimeMillis()
     require(now >= 0) { "Organization artwork timestamp must not be negative" }
     val owners =
-      collections.findAll().map { ArtworkOwner(ArtworkOwnerKind.COLLECTION, it.id.value) } +
-        readLists.findAll().map { ArtworkOwner(ArtworkOwnerKind.READ_LIST, it.id.value) }
+      collections.findAll().map {
+        ArtworkOwner(ArtworkOwnerKind.COLLECTION, it.id.value) to it.updatedAtMillis
+      } +
+        readLists.findAll().map {
+          ArtworkOwner(ArtworkOwnerKind.READ_LIST, it.id.value) to it.updatedAtMillis
+        }
     return owners
-      .filter { owner -> artwork.findAll(owner).none { it.type == ArtworkType.GENERATED } }
+      .filter { (owner, updatedAtMillis) -> needsArtwork(owner, updatedAtMillis) }
+      .map { (owner, _) -> owner }
       .count { owner ->
         queue.enqueue(
           DurableTask(
@@ -65,14 +78,26 @@ class OrganizationArtworkTaskEmitter(
         )
       }
   }
+
+  private fun needsArtwork(
+    owner: ArtworkOwner,
+    updatedAtMillis: Long,
+  ): Boolean {
+    val generated = artwork.findAll(owner).filter { it.type == ArtworkType.GENERATED }
+    if (generated.isEmpty()) return true
+    // Newest, not oldest: a regeneration replaces the previous generated artwork, so the newest one is
+    // the cover currently in use and the only one whose age says anything.
+    return updatedAtMillis > generated.maxOf { it.createdAtMillis }
+  }
 }
 
 /**
- * Gives a collection or read list a cover derived from the first member that has one.
+ * Gives a collection or read list a cover derived from its members.
  *
- * This is not Komga's composite: it reuses one member's cover rather than tiling several. A single
- * borrowed cover is what closes the visible gap - a group with no cover at all - and a mosaic is a
- * visual refinement on top of it. Calling this a mosaic in the coverage doc would be the mistake.
+ * Collects up to [TiledArtworkComposer.TILE_COUNT] member covers and hands them to the composer, which
+ * tiles a 2×2 mosaic when it has that many and returns a single cover otherwise. Collecting stops at
+ * the tile count rather than reading every member: a group can hold thousands, and the covers past the
+ * fourth cannot appear in the result.
  *
  * Members are walked in their stored order, and for a collection a series that has no artwork falls
  * through to its own first media item, because series artwork comes only from disk sidecars and is
@@ -84,6 +109,7 @@ class OrganizationArtworkTaskHandler(
   private val books: BookRepository,
   private val artwork: ArtworkRepository,
   private val lifecycle: ArtworkLifecycle,
+  private val composer: TiledArtworkComposer = TiledArtworkComposer(),
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -103,30 +129,38 @@ class OrganizationArtworkTaskHandler(
         ?.contentOrNull
         ?.takeIf(String::isNotBlank)
         ?: error("Organization artwork task must contain an owner ID")
-    val cover =
+    val covers =
       when (kind) {
-        ArtworkOwnerKind.COLLECTION -> collectionCover(CollectionId(ownerId))
-        ArtworkOwnerKind.READ_LIST -> readListCover(ReadListId(ownerId))
+        ArtworkOwnerKind.COLLECTION -> collectionCovers(CollectionId(ownerId))
+        ArtworkOwnerKind.READ_LIST -> readListCovers(ReadListId(ownerId))
         ArtworkOwnerKind.MEDIA_ITEM, ArtworkOwnerKind.SERIES ->
           error("Media item and series artwork is generated by GENERATE_BOOK_ARTWORK")
-      } ?: return
+      }
+    val cover = composer.compose(covers) ?: return
     lifecycle.replaceGenerated(ArtworkOwner(kind, ownerId), cover)
   }
 
-  private fun collectionCover(id: CollectionId): ByteArray? =
+  private fun collectionCovers(id: CollectionId): List<ByteArray> =
     collections
       .findByIdOrNull(id)
       ?.seriesIds
-      ?.firstNotNullOfOrNull { seriesId ->
+      ?.asSequence()
+      ?.mapNotNull { seriesId ->
         selectedContent(ArtworkOwner(ArtworkOwnerKind.SERIES, seriesId.value))
           ?: firstBookCover(seriesId)
-      }
+      }?.take(TiledArtworkComposer.TILE_COUNT)
+      ?.toList()
+      .orEmpty()
 
-  private fun readListCover(id: ReadListId): ByteArray? =
+  private fun readListCovers(id: ReadListId): List<ByteArray> =
     readLists
       .findByIdOrNull(id)
       ?.bookIds
-      ?.firstNotNullOfOrNull(::bookCover)
+      ?.asSequence()
+      ?.mapNotNull(::bookCover)
+      ?.take(TiledArtworkComposer.TILE_COUNT)
+      ?.toList()
+      .orEmpty()
 
   private fun firstBookCover(seriesId: SeriesId): ByteArray? =
     books

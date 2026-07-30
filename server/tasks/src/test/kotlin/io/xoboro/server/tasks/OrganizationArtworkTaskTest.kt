@@ -101,6 +101,38 @@ class OrganizationArtworkTaskTest {
     }
   }
 
+  @Test
+  fun `re-enqueues a group whose membership changed after its cover was derived`() {
+    withFixture("stale") { fixture ->
+      fixture.giveBookArtwork(BookId("book-1"))
+      fixture.handler.handle(collectionTask())
+      // Covered now, so the sweep leaves it alone. The read list is still uncovered, hence 1.
+      assertEquals(1, fixture.emitter.generateMissing())
+
+      // A membership change bumps updatedAtMillis past the cover's createdAtMillis of 20. None of the
+      // three mutation paths has to know this task exists - the sweep notices on its own.
+      val collection = requireNotNull(fixture.collections.findByIdOrNull(CollectionId("collection-1")))
+      fixture.collections.update(collection.copy(updatedAtMillis = 100))
+
+      assertEquals(2, fixture.emitter.generateMissing())
+    }
+  }
+
+  @Test
+  fun `does not re-enqueue a group covered in the same millisecond it changed`() {
+    withFixture("same-instant") { fixture ->
+      fixture.giveBookArtwork(BookId("book-1"))
+      fixture.handler.handle(collectionTask())
+      val collection = requireNotNull(fixture.collections.findByIdOrNull(CollectionId("collection-1")))
+
+      // Equal timestamps, not newer. The comparison is `>` so a group created and covered within one
+      // millisecond does not re-enqueue forever; a real membership change always lands afterwards.
+      fixture.collections.update(collection.copy(updatedAtMillis = 20))
+
+      assertEquals(1, fixture.emitter.generateMissing())
+    }
+  }
+
   private fun collectionTask(): DurableTask =
     DurableTask(
       id = "generate-collection",
@@ -187,6 +219,7 @@ class OrganizationArtworkTaskTest {
       block(
         Fixture(
           artwork = artwork,
+          collections = collections,
           lifecycle = lifecycle,
           emitter =
             OrganizationArtworkTaskEmitter(
@@ -211,6 +244,7 @@ class OrganizationArtworkTaskTest {
 
   private class Fixture(
     val artwork: JooqArtworkRepository,
+    val collections: JooqSeriesCollectionRepository,
     private val lifecycle: ArtworkLifecycle,
     val emitter: OrganizationArtworkTaskEmitter,
     val handler: OrganizationArtworkTaskHandler,
