@@ -221,12 +221,10 @@ private fun User.toNativeUserAdministrationResponse(): XoboroUserAdministrationR
   )
 
 private suspend fun ApplicationCall.respondUserAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "user_administration_forbidden",
-      "User administration permission is required",
-    ),
+    "user_administration_forbidden",
+    "User administration permission is required",
   )
 }
 

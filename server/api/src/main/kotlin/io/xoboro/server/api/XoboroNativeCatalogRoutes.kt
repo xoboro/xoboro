@@ -169,5 +169,5 @@ internal suspend fun io.ktor.server.application.ApplicationCall.respondNativeNot
   code: String,
   message: String,
 ) {
-  respond(HttpStatusCode.NotFound, XoboroApiError(code, message))
+  respondNativeError(HttpStatusCode.NotFound, code, message)
 }

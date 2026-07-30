@@ -88,6 +88,7 @@ import io.xoboro.server.api.CrossSiteRequestRejectedException
 import io.xoboro.server.api.XOBORO_API_PREFIX
 import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroInvalidQueryException
+import io.xoboro.server.api.XoboroNativeErrorBodyWritten
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
@@ -353,6 +354,9 @@ fun Application.xoboroModule(
   }
   install(StatusPages) {
     status(HttpStatusCode.Forbidden, HttpStatusCode.NotFound) { call, status ->
+      if (call.attributes.contains(XoboroNativeErrorBodyWritten)) {
+        return@status
+      }
       if (call.request.path().isXoboroNativeApiPath()) {
         call.respond(
           status,
@@ -372,6 +376,9 @@ fun Application.xoboroModule(
       }
     }
     status(HttpStatusCode.Unauthorized, HttpStatusCode.TooManyRequests) { call, status ->
+      if (call.attributes.contains(XoboroNativeErrorBodyWritten)) {
+        return@status
+      }
       if (call.request.path().isXoboroNativeApiPath()) {
         call.respond(
           status,

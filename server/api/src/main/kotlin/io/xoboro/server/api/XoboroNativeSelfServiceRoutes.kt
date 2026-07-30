@@ -50,9 +50,10 @@ private fun Route.mountXoboroNativeSelfServiceRoutes(
           val request = call.receive<XoboroOwnPasswordUpdateRequest>()
           val authenticated = users.authenticate(caller.email, request.currentPassword)
           if (authenticated?.id != caller.id) {
-            call.respond(
+            call.respondNativeError(
               HttpStatusCode.Forbidden,
-              XoboroApiError("invalid_credentials", "Current password is invalid"),
+              "invalid_credentials",
+              "Current password is invalid",
             )
             return@put
           }

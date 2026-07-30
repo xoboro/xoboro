@@ -10,7 +10,6 @@ import io.ktor.server.auth.principal
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.header
 import io.ktor.server.request.httpMethod
-import io.ktor.server.response.respond
 import java.net.URI
 import java.util.Locale
 
@@ -29,12 +28,10 @@ internal val XoboroCookieCsrfProtection =
   }
 
 internal suspend fun ApplicationCall.respondCsrfRejected() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      code = CrossSiteRequestRejectedException.CODE,
-      message = CrossSiteRequestRejectedException.MESSAGE,
-    ),
+    CrossSiteRequestRejectedException.CODE,
+    CrossSiteRequestRejectedException.MESSAGE,
   )
 }
 

@@ -495,22 +495,18 @@ private fun ReadList.toNativeResponse(visibleMemberCount: Int): XoboroReadListRe
   )
 
 private suspend fun ApplicationCall.respondCollectionAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "collection_administration_forbidden",
-      "Collection administration requires an administrator",
-    ),
+    "collection_administration_forbidden",
+    "Collection administration requires an administrator",
   )
 }
 
 private suspend fun ApplicationCall.respondReadListAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "read_list_administration_forbidden",
-      "Read-list administration requires an administrator",
-    ),
+    "read_list_administration_forbidden",
+    "Read-list administration requires an administrator",
   )
 }
 
