@@ -211,6 +211,18 @@ fun Route.xoboroNativeOpsRoutes(
         // DurableTaskQueue.clearPending for why these are two distinct operations.
         call.respond(XoboroClearedTasksResponse(cleared = tasks.clearPending()))
       }
+      delete("/tasks/dead") {
+        val caller = call.nativeUser()
+        if (!caller.isAdmin) {
+          call.respondTaskAdministrationForbidden()
+          return@delete
+        }
+        // Task ids are deterministic, and a dead task revives on re-enqueue without resetting
+        // its attempt count (see DurableTaskQueue.enqueue), so the only way to give a repeatedly
+        // failing task a fresh attempt budget is to remove its row entirely. This is that
+        // recovery operation - it never touches PENDING or RUNNING work.
+        call.respond(XoboroClearedTasksResponse(cleared = tasks.clearDead()))
+      }
       get("/metrics") {
         val caller = call.nativeUser()
         if (!caller.isAdmin) {

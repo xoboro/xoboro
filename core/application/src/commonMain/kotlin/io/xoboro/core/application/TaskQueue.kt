@@ -96,8 +96,8 @@ interface DurableTaskQueue {
    * Deletes every row not currently `RUNNING` (`PENDING` and `DEAD` together). This backs the
    * Komga-compat task-clearing route, which mirrors real Komga's "clear the queue" behavior and
    * makes no PENDING/DEAD distinction of its own - narrowing this predicate would change that
-   * compat surface's behavior, so it stays as-is. A native caller wanting only unclaimed
-   * (`PENDING`) work should use [clearPending] instead.
+   * compat surface's behavior, so it stays as-is. A native caller wanting only one of the two
+   * states should use [clearPending] or [clearDead] instead.
    */
   fun clearUnclaimed(): Int =
     error("Clearing unclaimed tasks is not supported by this queue")
@@ -110,4 +110,14 @@ interface DurableTaskQueue {
    */
   fun clearPending(): Int =
     error("Clearing pending tasks is not supported by this queue")
+
+  /**
+   * Deletes every `DEAD` row and leaves `PENDING` and `RUNNING` rows untouched. Task ids are
+   * deterministic and a dead task revives back to `PENDING` on its next enqueue without resetting
+   * its attempt count (see [enqueue]), so a task that keeps dying costs one attempt per
+   * re-enqueue rather than a fresh budget. Removing its row entirely is the only way to give it a
+   * fresh budget, and doing so here never discards work that is still queued to run.
+   */
+  fun clearDead(): Int =
+    error("Clearing dead tasks is not supported by this queue")
 }
