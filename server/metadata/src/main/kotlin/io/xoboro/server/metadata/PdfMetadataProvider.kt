@@ -10,6 +10,7 @@ import io.xoboro.server.media.SourceMediaAccess
 import io.xoboro.server.media.UnknownSourceMediaAccessException
 import java.util.Calendar
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDDocumentInformation
 
 /**
@@ -19,9 +20,20 @@ import org.apache.pdfbox.pdmodel.PDDocumentInformation
  * carried real ones. Only book metadata is provided: a PDF has no notion of a series, so inventing
  * one from a document title would be a guess dressed up as imported data.
  *
- * XMP metadata is not read. It can carry the same fields in a richer form, but the information
- * dictionary is what a PDF practically always has, and reading both raises a precedence question
- * that no observed file has yet forced.
+ * Both the information dictionary and the XMP packet are read, with **per-field precedence** rather
+ * than one source winning outright. The two disagree in kind, not only in value:
+ *
+ * - For `authors` and `tags`, XMP wins when it has them. `dc:creator` and `dc:subject` are ordered
+ *   lists of items, while the dictionary carries one free-text string that has to be guessed apart -
+ *   so preferring XMP for these two removes the documented `"Doe, Jane"` splitting error rather than
+ *   choosing between two equally good values.
+ * - For every other field the dictionary wins and XMP fills gaps. The dictionary is what a producer
+ *   most recently touched in the common case, XMP is routinely a stale template left from an export,
+ *   and gap-filling cannot change a value a library has already imported.
+ *
+ * `dc:language` is read by nothing: [BookMetadataPatch] has no language field, because language in
+ * this catalog belongs to a series and a PDF has no series. Storing it nowhere is better than
+ * inventing a series to hold it.
  */
 class PdfMetadataProvider(
   accesses: Collection<SourceMediaAccess>,
@@ -43,26 +55,46 @@ class PdfMetadataProvider(
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
     // A document needing a user password throws here, which is the correct outcome: unreadable
     // metadata is absent metadata, and the encryption itself is reported by the media analyzer.
-    val information =
+    val read =
       runCatching {
         access.materialize(library.root.itemId, book.sourceItemId).use { materialized ->
           Loader.loadPDF(materialized.path.toFile()).use { document ->
-            document.documentInformation.snapshot()
+            document.documentInformation.snapshot() to document.xmpSnapshot()
           }
         }
       }.getOrNull() ?: return null
+    val (information, xmp) = read
     val patch =
       BookMetadataPatch(
-        title = information.title,
-        summary = information.subject,
-        releaseDate = information.releaseDate,
-        authors = information.authors.ifEmpty { null },
-        tags = information.keywords.ifEmpty { null },
+        title = information.title ?: xmp.title,
+        summary = information.subject ?: xmp.description,
+        releaseDate = information.releaseDate ?: xmp.createDate,
+        // XMP first for these two: a structured list needs no guessing, and the dictionary's free-text
+        // form is split heuristically.
+        authors =
+          xmp.creators
+            .map { Author(it, WRITER_ROLE) }
+            .ifEmpty { information.authors }
+            .ifEmpty { null },
+        tags = xmp.subjects.ifEmpty { information.keywords }.ifEmpty { null },
       )
     // Producers stamp an empty dictionary routinely. Returning a patch of all nulls would report a
     // successful import that changed nothing, so an empty read is reported as no metadata at all.
     return patch.takeUnless { it == BookMetadataPatch() }
   }
+
+  /**
+   * Reads the XMP packet, or an empty snapshot when there is none or it cannot be understood.
+   *
+   * Failure is absence, not an error: a malformed XMP packet is common and must never be the reason a
+   * PDF's dictionary metadata goes unimported.
+   */
+  private fun PDDocument.xmpSnapshot(): PdfXmpSnapshot =
+    runCatching {
+      documentCatalog?.metadata?.exportXMPMetadata()?.use { stream ->
+        PdfXmpMetadata.parse(stream.readBytes().decodeToString())
+      }
+    }.getOrNull() ?: PdfXmpSnapshot()
 
   private fun PDDocumentInformation.snapshot(): DocumentInformation =
     DocumentInformation(

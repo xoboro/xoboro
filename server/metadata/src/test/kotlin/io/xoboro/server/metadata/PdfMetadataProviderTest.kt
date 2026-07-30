@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.common.PDMetadata
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import org.junit.jupiter.api.io.TempDir
@@ -90,21 +91,138 @@ class PdfMetadataProviderTest {
     assertNull(provider(pdf).provide(library(), book()))
   }
 
+  @Test
+  fun `lets the dictionary win and XMP fill the gaps`() {
+    val pdf =
+      createPdf(
+        name = "both.pdf",
+        xmp =
+          xmpPacket(
+            title = "XMP Title",
+            description = "XMP description",
+            createDate = "2001-01-01",
+          ),
+      ) { information ->
+        information.title = "Dictionary Title"
+        // No subject and no creation date, so those two come from XMP.
+      }
+
+    val patch = requireNotNull(provider(pdf).provide(library(), book()))
+
+    // The dictionary is what a producer most recently touched in the common case, and gap-filling
+    // cannot change a value a library already imported.
+    assertEquals("Dictionary Title", patch.title)
+    assertEquals("XMP description", patch.summary)
+    assertEquals("2001-01-01", patch.releaseDate)
+  }
+
+  @Test
+  fun `prefers the structured XMP creator list over the dictionary's free text`() {
+    val pdf =
+      createPdf(
+        name = "creators.pdf",
+        xmp = xmpPacket(creators = listOf("Doe, Jane", "Roe, John"), subjects = listOf("xmp-tag")),
+      ) { information ->
+        // Comma-separated, which the dictionary's heuristic splits into four people because it cannot
+        // tell a surname comma from a separator. The fixture has to be a value the dictionary gets
+        // *wrong*, or the assertion below would pass whichever source won.
+        information.author = "Doe, Jane, Roe, John"
+        information.keywords = "dictionary-tag"
+      }
+
+    val patch = requireNotNull(provider(pdf).provide(library(), book()))
+
+    // XMP carries the names as separate items, so preferring it removes a documented error rather than
+    // choosing between two equally good values.
+    assertEquals(listOf("Doe, Jane", "Roe, John"), patch.authors?.map { it.name })
+    assertEquals(listOf("writer"), patch.authors?.map { it.role }?.distinct())
+    assertEquals(setOf("xmp-tag"), patch.tags)
+  }
+
+  @Test
+  fun `falls back to the dictionary when XMP carries no creators`() {
+    val pdf =
+      createPdf(name = "dictionary-only.pdf", xmp = xmpPacket(creators = emptyList())) { information ->
+        information.author = "Primary Author; Second Author"
+      }
+
+    val patch = requireNotNull(provider(pdf).provide(library(), book()))
+
+    assertEquals(listOf("Primary Author", "Second Author"), patch.authors?.map { it.name })
+  }
+
+  @Test
+  fun `imports XMP alone when the dictionary is empty`() {
+    val pdf = createPdf(name = "xmp-only.pdf", xmp = xmpPacket(title = "XMP Title")) { }
+
+    val patch = requireNotNull(provider(pdf).provide(library(), book()))
+
+    assertEquals("XMP Title", patch.title)
+  }
+
+  @Test
+  fun `reports no metadata when a malformed XMP packet is the only source`() {
+    val pdf = createPdf(name = "broken-xmp.pdf", xmp = "<x:xmpmeta><rdf:RDF><rdf:Desc") { }
+
+    // A malformed packet is absence, not an error: it must never be the reason an import fails.
+    assertNull(provider(pdf).provide(library(), book()))
+  }
+
   private fun provider(pdf: Path): PdfMetadataProvider =
     PdfMetadataProvider(listOf(FixedAccess(pdf)))
 
   private fun createPdf(
     name: String,
+    xmp: String? = null,
     describe: (org.apache.pdfbox.pdmodel.PDDocumentInformation) -> Unit,
   ): Path {
     val path = temporaryDirectory.resolve(name)
     PDDocument().use { document ->
       document.addPage(PDPage())
       describe(document.documentInformation)
+      xmp?.let { packet ->
+        document.documentCatalog.metadata =
+          PDMetadata(document, packet.byteInputStream())
+      }
       document.save(path.toFile())
     }
     return path
   }
+
+  private fun xmpPacket(
+    title: String? = null,
+    description: String? = null,
+    createDate: String? = null,
+    creators: List<String> = emptyList(),
+    subjects: List<String> = emptyList(),
+  ): String =
+    buildString {
+      append("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">")
+      append("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"")
+      append(" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"")
+      append(" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"><rdf:Description>")
+      title?.let {
+        append("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">$it</rdf:li></rdf:Alt></dc:title>")
+      }
+      description?.let {
+        append(
+          "<dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">$it</rdf:li></rdf:Alt>" +
+            "</dc:description>",
+        )
+      }
+      createDate?.let { append("<xmp:CreateDate>$it</xmp:CreateDate>") }
+      if (creators.isNotEmpty()) {
+        append("<dc:creator><rdf:Seq>")
+        creators.forEach { append("<rdf:li>$it</rdf:li>") }
+        append("</rdf:Seq></dc:creator>")
+      }
+      if (subjects.isNotEmpty()) {
+        append("<dc:subject><rdf:Bag>")
+        subjects.forEach { append("<rdf:li>$it</rdf:li>") }
+        append("</rdf:Bag></dc:subject>")
+      }
+      append("</rdf:Description></rdf:RDF></x:xmpmeta>")
+    }
 
   private fun library(settings: LibrarySettings = LibrarySettings()): Library =
     Library(
