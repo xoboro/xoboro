@@ -147,12 +147,10 @@ fun Route.xoboroNativeLibraryAdminRoutes(
 
 private suspend fun ApplicationCall.requireLibraryAdministrator(user: User): Boolean {
   if (user.isAdmin) return true
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "library_administration_forbidden",
-      "Library administration requires an administrator",
-    ),
+    "library_administration_forbidden",
+    "Library administration requires an administrator",
   )
   return false
 }

@@ -99,15 +99,8 @@ class XoboroNativeOpsApplicationTest {
 
       val deletedAgain =
         client.delete("$XOBORO_API_PREFIX/backups/${backup.id}") { bearerAuth(token) }
-      // The route itself answers "backup_not_found" (see XoboroNativeOpsTest), but Application.kt
-      // installs a global StatusPages `status(NotFound)` handler that rewrites every native 404
-      // body to a generic {"code":"not_found"} regardless of what the route already sent. This is
-      // a pre-existing defect affecting every native "*_not_found" response in production (verified
-      // against the already-shipped PATCH /media-items/{id}/metadata route too, not something this
-      // change introduced) and is out of scope for the backup/metrics/maintenance surface — flagged
-      // separately rather than fixed here.
       assertEquals(HttpStatusCode.NotFound, deletedAgain.status)
-      assertEquals("not_found", deletedAgain.body<XoboroApiError>().code)
+      assertEquals("backup_not_found", deletedAgain.body<XoboroApiError>().code)
     }
   }
 
@@ -184,12 +177,8 @@ class XoboroNativeOpsApplicationTest {
         client.post("$XOBORO_API_PREFIX/media-items/missing-media-item/analyze") {
           bearerAuth(token)
         }
-      // See the comment in the backup test above: Application.kt's global StatusPages
-      // status(NotFound) handler rewrites every native 404 body to a generic "not_found", so the
-      // route's own "media_item_not_found" code (asserted at the route level in
-      // XoboroNativeOpsTest) is not observable through the full production pipeline today.
       assertEquals(HttpStatusCode.NotFound, missing.status)
-      assertEquals("not_found", missing.body<XoboroApiError>().code)
+      assertEquals("media_item_not_found", missing.body<XoboroApiError>().code)
     }
   }
 
@@ -223,7 +212,7 @@ class XoboroNativeOpsApplicationTest {
       val seriesMissing =
         client.post("$XOBORO_API_PREFIX/series/missing-series/analyze") { bearerAuth(token) }
       assertEquals(HttpStatusCode.NotFound, seriesMissing.status)
-      assertEquals("not_found", seriesMissing.body<XoboroApiError>().code)
+      assertEquals("series_not_found", seriesMissing.body<XoboroApiError>().code)
     }
   }
 

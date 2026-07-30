@@ -247,12 +247,10 @@ private suspend fun ApplicationCall.receiveNativeArtworkUpload(): ByteArray? {
 }
 
 private suspend fun ApplicationCall.respondArtworkAdministrationForbidden() {
-  respond(
+  respondNativeError(
     HttpStatusCode.Forbidden,
-    XoboroApiError(
-      "artwork_administration_forbidden",
-      "Artwork administration permission is required",
-    ),
+    "artwork_administration_forbidden",
+    "Artwork administration permission is required",
   )
 }
 
