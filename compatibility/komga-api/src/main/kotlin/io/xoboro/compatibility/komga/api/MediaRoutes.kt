@@ -7,9 +7,9 @@ import io.ktor.http.parseAndSortContentTypeHeader
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
-import io.ktor.server.response.header
 import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -20,6 +20,7 @@ import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookPage
 import io.xoboro.core.domain.MediaProfile
@@ -44,7 +45,7 @@ fun Route.komgaMediaRoutes(
       get {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        val item = catalog.findBookByIdOrNull(bookId, principal.user.mediaAccess())
+        val item = catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess())
         if (item == null) {
           call.respond(HttpStatusCode.NotFound)
           return@get
@@ -131,7 +132,7 @@ private suspend fun io.ktor.server.application.ApplicationCall.streamPage(
   deliveryRequest: PageImageRequest? = null,
 ) {
   val bookId = BookId(requireNotNull(parameters["bookId"]))
-  val item = catalog.findBookByIdOrNull(bookId, user.mediaAccess())
+  val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
   if (item == null) {
     respond(HttpStatusCode.NotFound)
     return
@@ -268,7 +269,7 @@ internal suspend fun io.ktor.server.application.ApplicationCall.streamBook(
     return
   }
   val bookId = BookId(requireNotNull(parameters["bookId"]))
-  if (catalog.findBookByIdOrNull(bookId, principal.user.mediaAccess()) == null) {
+  if (catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess()) == null) {
     respond(HttpStatusCode.NotFound)
     return
   }
@@ -446,13 +447,6 @@ private suspend inline fun MediaContentStream.useForResponse(
     close()
   }
 }
-
-private fun User.mediaAccess(): CatalogAccess =
-  CatalogAccess(
-    userId = id,
-    libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
-    restrictions = restrictions,
-  )
 
 private fun BookPage.toDto(): KomgaPageContentDto =
   KomgaPageContentDto(

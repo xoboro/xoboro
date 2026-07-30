@@ -12,6 +12,7 @@ import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.MetadataEditingLifecycle
 import io.xoboro.core.application.MetadataFacetRepository
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMetadata
 import io.xoboro.core.domain.SeriesId
@@ -31,7 +32,7 @@ fun Route.xoboroNativeMetadataRoutes(
       install(XoboroCookieCsrfProtection)
       patch("/media-items/{mediaItemId}/metadata") {
         val user = call.nativeUser()
-        val access = user.nativeCatalogAccess()
+        val access = user.catalogAccess()
         val id = BookId(call.requiredParameter("mediaItemId"))
         if (catalog.findBookByIdOrNull(id, access) == null) {
           call.respondNativeNotFound("media_item_not_found", "Media item was not found")
@@ -47,7 +48,7 @@ fun Route.xoboroNativeMetadataRoutes(
       }
       patch("/media-items/metadata") {
         val user = call.nativeUser()
-        val access = user.nativeCatalogAccess()
+        val access = user.catalogAccess()
         val raw = call.receive<JsonObject>()
         val requested =
           runCatching {
@@ -100,7 +101,7 @@ fun Route.xoboroNativeMetadataRoutes(
       }
       patch("/series/{seriesId}/metadata") {
         val user = call.nativeUser()
-        val access = user.nativeCatalogAccess()
+        val access = user.catalogAccess()
         val id = SeriesId(call.requiredParameter("seriesId"))
         if (catalog.findSeriesByIdOrNull(id, access) == null) {
           call.respondNativeNotFound("series_not_found", "Series was not found")
@@ -121,7 +122,7 @@ fun Route.xoboroNativeMetadataRoutes(
           facets.findValues(
             call.requiredMetadataFacet(),
             call.nativeMetadataFacetQuery(),
-            user.nativeCatalogAccess(),
+            user.catalogAccess(),
           ),
         )
       }
@@ -132,7 +133,7 @@ fun Route.xoboroNativeMetadataRoutes(
           facets
             .findAuthors(
               call.nativeMetadataFacetQuery(),
-              user.nativeCatalogAccess(),
+              user.catalogAccess(),
               call.nativeAuthorPageRequest(),
             ).toNativeAuthorPage(),
         )

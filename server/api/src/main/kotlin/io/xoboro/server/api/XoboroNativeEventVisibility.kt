@@ -1,6 +1,7 @@
 package io.xoboro.server.api
 
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.User
 
@@ -17,7 +18,7 @@ internal fun XoboroNativeEvent.isVisibleTo(
   user: User,
   catalog: CatalogReadRepository,
 ): Boolean {
-  val access = user.nativeCatalogAccess()
+  val access = user.catalogAccess()
   return when (val scope = scope) {
     is XoboroNativeEventScope.Owner -> scope.userId == user.id
 

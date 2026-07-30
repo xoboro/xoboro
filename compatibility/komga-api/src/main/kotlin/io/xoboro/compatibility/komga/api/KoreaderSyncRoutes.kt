@@ -10,10 +10,12 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.xoboro.core.application.CatalogBook
+import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ReadProgressLifecycle
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookMedia
 import io.xoboro.core.domain.BookMediaRepository
-import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.MediaItemFingerprintAlgorithm
 import io.xoboro.core.domain.MediaItemFingerprintIndex
 import io.xoboro.core.domain.MediaPosition
@@ -74,7 +76,7 @@ fun Route.komgaKoreaderSyncRoutes(sync: KoreaderSyncLifecycle) {
 
 class KoreaderSyncLifecycle(
   private val fingerprints: MediaItemFingerprintIndex,
-  private val books: BookRepository,
+  private val catalog: CatalogReadRepository,
   private val media: BookMediaRepository,
   private val progress: ReadProgressLifecycle,
   private val currentTimeMillis: () -> Long,
@@ -126,16 +128,32 @@ class KoreaderSyncLifecycle(
     )
   }
 
+  /**
+   * Resolves a KOReader document fingerprint to the single media item it identifies for this caller.
+   *
+   * The lookup goes through [CatalogReadRepository] with the caller's [catalogAccess] rather than
+   * reading the book repository directly. A fingerprint is supplied by the client and is not a
+   * capability: matching one must not reveal an item the caller cannot otherwise see. Filtering only
+   * on [io.xoboro.core.domain.User.canAccessLibrary] — as this did before — left age-rating and
+   * sharing-label restrictions unenforced, so a restricted caller could read and overwrite progress
+   * for an item the catalog hides from them.
+   *
+   * An item the caller cannot see is treated as absent, not as a conflict: when two items share a
+   * fingerprint and only one is visible, the visible one resolves. Restricted content must not
+   * change the outcome for a caller who is not allowed to know it exists.
+   */
   private fun resolve(
     fingerprint: String,
     user: User,
   ): ResolvedFingerprint? {
     if (fingerprint.isBlank()) return null
+    val access = user.catalogAccess()
     val matches =
       fingerprints
         .findAll(MediaItemFingerprintAlgorithm.KOREADER_PARTIAL_MD5, fingerprint)
-        .mapNotNull(books::findByIdOrNull)
-        .filter { it.deletedAtMillis == null && user.canAccessLibrary(it.libraryId) }
+        .mapNotNull { catalog.findBookByIdOrNull(it, access) }
+        .map(CatalogBook::book)
+        .filter { it.deletedAtMillis == null }
     return when (matches.size) {
       0 -> null
       1 -> ResolvedFingerprint(book = matches.single())

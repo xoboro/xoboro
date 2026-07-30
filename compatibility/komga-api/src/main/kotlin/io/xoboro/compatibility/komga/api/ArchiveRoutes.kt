@@ -18,6 +18,7 @@ import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CatalogSort
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.ReadListRepository

@@ -14,6 +14,7 @@ import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.ReadProgressLifecycle
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.SeriesId
 import kotlinx.serialization.Serializable
@@ -33,7 +34,7 @@ fun Route.komgaReadProgressRoutes(
       patch {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        val access = principal.user.progressAccess()
+        val access = principal.user.catalogAccess()
         if (catalog.findBookByIdOrNull(bookId, access) == null) {
           call.respond(HttpStatusCode.NotFound)
           return@patch
@@ -57,7 +58,7 @@ fun Route.komgaReadProgressRoutes(
       delete {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val bookId = BookId(requireNotNull(call.parameters["bookId"]))
-        if (catalog.findBookByIdOrNull(bookId, principal.user.progressAccess()) == null) {
+        if (catalog.findBookByIdOrNull(bookId, principal.user.catalogAccess()) == null) {
           call.respond(HttpStatusCode.NotFound)
           return@delete
         }
@@ -69,7 +70,7 @@ fun Route.komgaReadProgressRoutes(
       post {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val seriesId = SeriesId(requireNotNull(call.parameters["seriesId"]))
-        if (catalog.findSeriesByIdOrNull(seriesId, principal.user.progressAccess()) == null) {
+        if (catalog.findSeriesByIdOrNull(seriesId, principal.user.catalogAccess()) == null) {
           call.respond(HttpStatusCode.NotFound)
           return@post
         }
@@ -79,7 +80,7 @@ fun Route.komgaReadProgressRoutes(
       delete {
         val principal = requireNotNull(call.principal<KomgaPrincipal>())
         val seriesId = SeriesId(requireNotNull(call.parameters["seriesId"]))
-        if (catalog.findSeriesByIdOrNull(seriesId, principal.user.progressAccess()) == null) {
+        if (catalog.findSeriesByIdOrNull(seriesId, principal.user.catalogAccess()) == null) {
           call.respond(HttpStatusCode.NotFound)
           return@delete
         }
@@ -95,10 +96,3 @@ data class ReadProgressUpdateDto(
   val page: Int? = null,
   val completed: Boolean? = null,
 )
-
-private fun io.xoboro.core.domain.User.progressAccess(): CatalogAccess =
-  CatalogAccess(
-    userId = id,
-    libraryIds = if (canAccessAllLibraries()) null else sharedLibraryIds,
-    restrictions = restrictions,
-  )

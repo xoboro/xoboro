@@ -12,22 +12,23 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
+import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.DatabaseBackupDescriptor
 import io.xoboro.core.application.DatabaseBackupRequester
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.NullableSettingUpdate
 import io.xoboro.core.application.OperationalMetricsSnapshotProvider
 import io.xoboro.core.application.OperationalStatusSnapshot
-import io.xoboro.core.application.TaskCounts
-import io.xoboro.core.application.AuthenticationActivityLifecycle
-import io.xoboro.core.application.ClientSettingsLifecycle
-import io.xoboro.core.application.NullableSettingUpdate
 import io.xoboro.core.application.ServerSettingsLifecycle
 import io.xoboro.core.application.ServerSettingsSnapshot
 import io.xoboro.core.application.ServerSettingsUpdate
 import io.xoboro.core.application.SettingMultiSource
+import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.ThumbnailSize
+import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.AuthenticationActivity
 import io.xoboro.core.domain.AuthenticationActivityPage
 import io.xoboro.core.domain.AuthenticationActivityPageRequest
@@ -295,7 +296,7 @@ fun Route.xoboroNativeOpsRoutes(
           return@post
         }
         val id = SeriesId(call.requiredParameter("seriesId"))
-        if (catalog.findSeriesByIdOrNull(id, caller.nativeCatalogAccess()) == null) {
+        if (catalog.findSeriesByIdOrNull(id, caller.catalogAccess()) == null) {
           call.respondNativeNotFound("series_not_found", "Series was not found")
           return@post
         }
@@ -309,7 +310,7 @@ fun Route.xoboroNativeOpsRoutes(
           return@post
         }
         val id = SeriesId(call.requiredParameter("seriesId"))
-        if (catalog.findSeriesByIdOrNull(id, caller.nativeCatalogAccess()) == null) {
+        if (catalog.findSeriesByIdOrNull(id, caller.catalogAccess()) == null) {
           call.respondNativeNotFound("series_not_found", "Series was not found")
           return@post
         }

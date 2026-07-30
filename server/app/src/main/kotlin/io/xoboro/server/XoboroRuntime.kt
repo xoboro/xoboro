@@ -358,7 +358,7 @@ class XoboroRuntime private constructor(
         val koreaderSyncLifecycle =
           KoreaderSyncLifecycle(
             fingerprints = JooqMediaItemFingerprintIndex(database),
-            books = books,
+            catalog = catalogReads,
             media = media,
             progress = readProgressLifecycle,
             currentTimeMillis = System::currentTimeMillis,
