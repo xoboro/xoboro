@@ -136,7 +136,7 @@ class XoboroNativeEventBridgeTest {
   }
 
   @Test
-  fun `maps media item and series artwork owners to poster changed, leaving grouping owners unmapped`() {
+  fun `maps media item and series artwork owners to poster changed`() {
     val mediaItemMapped = XoboroNativeEventBridge.map(ArtworkEvent.Added(artwork(ArtworkOwnerKind.MEDIA_ITEM)))
     assertNotNullAnd(mediaItemMapped) { mapped ->
       assertEquals("poster.changed", mapped.name)
@@ -150,11 +150,46 @@ class XoboroNativeEventBridgeTest {
       assertEquals(XoboroNativeEventScope.SeriesMembers(listOf(SERIES_ID)), mapped.scope)
       assertEquals("""{"ids":["series-1"],"ownerKind":"SERIES"}""", mapped.payload)
     }
+  }
 
-    // A collection or read list's member series/books are not on ArtworkEvent, so scoping either
-    // honestly would require the bridge to run its own repository lookup. Left unmapped rather
-    // than guessed at: this assertion pins the gap so it cannot silently come back as a fail-open
-    // filter.
+  @Test
+  fun `scopes grouping artwork to the members the event carries`() {
+    val collection =
+      XoboroNativeEventBridge.map(
+        ArtworkEvent.Added(
+          artwork(ArtworkOwnerKind.COLLECTION),
+          groupingMembers = listOf("series-1", "series-2"),
+        ),
+      )
+    assertNotNullAnd(collection) { mapped ->
+      assertEquals("poster.changed", mapped.name)
+      assertEquals(
+        XoboroNativeEventScope.SeriesMembers(listOf(SERIES_ID, SeriesId("series-2"))),
+        mapped.scope,
+      )
+      // The payload still names the grouping, not its members: a client is being told which cover
+      // changed, and the members are only how the server decided who may hear it.
+      assertEquals("""{"ids":["collection-1"],"ownerKind":"COLLECTION"}""", mapped.payload)
+    }
+
+    val readList =
+      XoboroNativeEventBridge.map(
+        ArtworkEvent.Deleted(
+          artwork(ArtworkOwnerKind.READ_LIST),
+          groupingMembers = listOf("book-1"),
+        ),
+      )
+    assertNotNullAnd(readList) { mapped ->
+      assertEquals(XoboroNativeEventScope.MediaItemMembers(listOf(BOOK_ID)), mapped.scope)
+      assertEquals("""{"ids":["read-list-1"],"ownerKind":"READ_LIST"}""", mapped.payload)
+    }
+  }
+
+  @Test
+  fun `drops grouping artwork with no members rather than widening its scope`() {
+    // An empty grouping has no visible members, and XoboroNativeEventScope.SeriesMembers already
+    // defines that as not visible. Announcing it would require a scope broader than the truth, so
+    // this pins the absence: a future fail-open fallback cannot slip in unnoticed.
     assertNull(XoboroNativeEventBridge.map(ArtworkEvent.Added(artwork(ArtworkOwnerKind.COLLECTION))))
     assertNull(XoboroNativeEventBridge.map(ArtworkEvent.Deleted(artwork(ArtworkOwnerKind.COLLECTION))))
     assertNull(XoboroNativeEventBridge.map(ArtworkEvent.Added(artwork(ArtworkOwnerKind.READ_LIST))))
