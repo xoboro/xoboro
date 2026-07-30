@@ -801,7 +801,24 @@ class XoboroRuntime private constructor(
                     // self-heal once the book's metadata is known-good, instead of the wrong
                     // value persisting forever.
                     books.findByIdOrNull(bookId)?.let { book ->
-                      refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+                      val enqueued = refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+                      if (!enqueued) {
+                        // enqueue() drops this request if the series task row is already
+                        // RUNNING (see JooqDurableTaskQueue.enqueue). The mechanism behind the
+                        // ordering inversion this fix targets is not fully understood -- the
+                        // book/series task pair share a groupId that claimNext is supposed to
+                        // serialise, and that was already shown not to guarantee the ordering
+                        // it appeared to. So this branch is not provably unreachable; log it
+                        // rather than assume it away, so a recurrence surfaces as a diagnosable
+                        // warning instead of silently reproducing the original defect with an
+                        // empty task queue.
+                        logger.log(
+                          Level.WARNING,
+                          "Series metadata refresh for series ${book.seriesId.value} " +
+                            "(triggered by book ${bookId.value}) was not re-enqueued: " +
+                            "a refresh was already running for that series",
+                        )
+                      }
                     }
                   },
                 ),
