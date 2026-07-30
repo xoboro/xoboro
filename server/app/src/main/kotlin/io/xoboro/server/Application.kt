@@ -101,6 +101,7 @@ import io.xoboro.server.api.xoboroNativeLibraryAdminRoutes
 import io.xoboro.server.api.xoboroNativeMetadataRoutes
 import io.xoboro.server.api.xoboroNativeOpsRoutes
 import io.xoboro.server.api.xoboroNativeProgressRoutes
+import io.xoboro.server.api.xoboroNativeOAuth2Routes
 import io.xoboro.server.api.xoboroNativeSelfServiceRoutes
 import io.xoboro.server.api.xoboroNativeUserAdminRoutes
 import io.xoboro.server.persistence.DatabaseBackupManager
@@ -518,6 +519,7 @@ fun Application.xoboroModule(
           if (nativeEventHub != null) {
             xoboroNativeEventRoutes(hub = nativeEventHub, sessions = sessions)
           }
+          oauth2LoginLifecycle?.let(::xoboroNativeOAuth2Routes)
           if (
             serverSettingsLifecycle != null &&
             clientSettingsLifecycle != null &&

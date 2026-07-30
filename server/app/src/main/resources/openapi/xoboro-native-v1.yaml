@@ -91,6 +91,31 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/authentication/oauth2:
+    get:
+      tags: [Authentication activity]
+      operationId: get_oauth2_configuration
+      description: >-
+        Reports the OAuth2/OIDC providers this deployment resolved and the effective
+        login policy. Administrator-only, and read-only: provider registration lives in
+        environment variables so client secrets never enter the database, and no client
+        id, client secret or endpoint URI is returned. See ADR 0093.
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroOAuth2Configuration" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not an administrator.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/backups:
     get:
       tags: [Operations]
@@ -3261,6 +3286,41 @@ components:
           examples: [library_unavailable, series_not_found, invalid_query]
         message:
           type: string
+    XoboroOAuth2Configuration:
+      type: object
+      description: >-
+        Names and policy only. Deliberately carries no client id, client secret or
+        endpoint URI: those would turn a configuration display into a credential
+        disclosure, and an administrator who needs them already has the environment that
+        holds them.
+      required: [providers, accountCreationEnabled, oidcEmailVerificationRequired, accountLinking]
+      properties:
+        providers:
+          type: array
+          items:
+            type: object
+            required: [registrationId, name]
+            properties:
+              registrationId: { type: string }
+              name: { type: string }
+        accountCreationEnabled:
+          type: boolean
+          description: >-
+            Whether an external identity with no matching local account may create one.
+        oidcEmailVerificationRequired:
+          type: boolean
+          description: >-
+            Whether an OIDC provider must assert that it verified the email before the
+            login is accepted at all.
+        accountLinking:
+          type: string
+          enum: [VERIFIED_EMAIL, EMAIL, NEVER]
+          description: >-
+            Whether an external identity may sign in as an existing local account.
+            VERIFIED_EMAIL, the default, requires the provider to have asserted that it
+            verified the email - which a plain OAuth2 provider never does. EMAIL accepts
+            an email match regardless, matching Komga. NEVER refuses a matching email
+            rather than signing in or creating a duplicate.
     XoboroPage:
       type: object
       required: [items, page, size, totalItems, totalPages, hasPrevious, hasNext]
