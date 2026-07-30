@@ -35,6 +35,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
+import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.sources.local.LocalSourceInventory
@@ -42,10 +43,12 @@ import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.xoboroModule
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlin.random.Random
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 import kotlin.time.measureTime
 import kotlinx.coroutines.delay
@@ -211,6 +214,65 @@ class PerformanceHarnessTest {
     assertTrue(databaseSizeBytes > 0, "database file should be non-empty after a scan")
   }
 
+  /**
+   * Waits until the durable task queue has no pending or running work, and records what happened.
+   *
+   * Polls rather than subscribing: the queue exposes counts, there is no completion signal to wait on,
+   * and a poll interval two orders of magnitude below the deadline cannot meaningfully distort the
+   * measurement it protects.
+   *
+   * `DEAD` tasks are deliberately not waited for. A dead task will never run again, so waiting for one
+   * would hang until the deadline on any run where something failed permanently - turning an unrelated
+   * failure into a timeout in every latency metric.
+   */
+  private fun drainTaskQueue(
+    runtime: XoboroRuntime,
+    scannedBookCount: Long,
+    report: PerformanceReport,
+  ) {
+    var counts = runtime.durableTaskQueue.counts()
+    // Proportional to the catalog, with a floor. The first version used a flat two minutes and reported
+    // 10,296 tasks still queued at 15,050 items - so a flat deadline just moved the defect from
+    // "measured while busy" to "reported not drained on every large run", which is the same blindness.
+    val timeout =
+      maxOf(
+        QUEUE_DRAIN_MINIMUM,
+        (scannedBookCount * QUEUE_DRAIN_MILLIS_PER_ITEM).milliseconds,
+      )
+    val elapsed =
+      measureTime {
+        val deadline = System.nanoTime() + timeout.inWholeNanoseconds
+        while (counts.pending + counts.running > 0 && System.nanoTime() < deadline) {
+          Thread.sleep(QUEUE_DRAIN_POLL.inWholeMilliseconds)
+          counts = runtime.durableTaskQueue.counts()
+        }
+      }
+    val remaining = counts.pending + counts.running
+    report.recordQueueDrain(
+      itemCount = scannedBookCount,
+      millis = elapsed.inWholeMilliseconds.toDouble(),
+      drained = remaining == 0L,
+      remainingTasks = remaining,
+    )
+    if (remaining > 0) {
+      // The breakdown, not just the count. "10,296 tasks queued" says the measurement is unusable;
+      // "10,296 of them are GENERATE_BOOK_ARTWORK" says why, and whether that is the harness's problem
+      // or the server's.
+      val byType =
+        (runtime.durableTaskQueue as? JooqDurableTaskQueue)
+          ?.countsByType()
+          ?.entries
+          ?.sortedByDescending { it.value }
+          ?.joinToString(", ") { "${it.key}=${it.value}" }
+          ?: "unavailable"
+      println(
+        "--- xoboro performance harness: WARNING queue did not drain within $timeout, " +
+          "$remaining task(s) still pending or running ($byType); api.* latency below is not " +
+          "comparable with a drained run ---",
+      )
+    }
+  }
+
   private fun measureApiLatency(
     databasePath: Path,
     scannedBookCount: Long,
@@ -233,6 +295,16 @@ class PerformanceHarnessTest {
         ),
       )
     try {
+      // Drained before anything is measured. The harness previously started measuring immediately, so
+      // at 15,050 items the runtime's own start-up sweeps were plausibly still running and competing
+      // for the SQLite write lock during the measurement - which is the recorded explanation for
+      // api.series_listing being bimodal there while its `min` stayed at the 3,050-item p50. A latency
+      // number taken while background work is running is not a latency number.
+      //
+      // The outcome is reported rather than asserted. A timeout must not fail the harness - it is a
+      // measurement tool, not a gate - but it must be visible, because latency metrics from an
+      // undrained run cannot be compared with metrics from a drained one.
+      drainTaskQueue(runtime, scannedBookCount, report)
       testApplication {
         application { xoboroModule(runtime) }
         val client = createClient { install(ContentNegotiation) { json() } }
@@ -564,6 +636,26 @@ class PerformanceHarnessTest {
     const val DEFAULT_BOOKS_PER_SERIES = 5
     const val DEFAULT_ONE_SHOT_COUNT = 5
     const val RESCAN_REPEAT_COUNT = 5
+
+    /**
+     * Floor for the drain deadline, for catalogs small enough that the proportional budget is trivial.
+     */
+    val QUEUE_DRAIN_MINIMUM = 30.seconds
+
+    /**
+     * Per-item drain budget.
+     *
+     * Calibrated from an observation, not chosen: at 3,050 items the queue drained in 29.9 s, or about
+     * 10 ms per item, and a budget three times that leaves room for a slower machine without waiting
+     * indefinitely on a genuinely stuck queue.
+     */
+    const val QUEUE_DRAIN_MILLIS_PER_ITEM = 30L
+
+    /**
+     * Poll interval. Two orders of magnitude below the deadline, so the polling itself cannot
+     * meaningfully distort the measurement it exists to protect.
+     */
+    val QUEUE_DRAIN_POLL = 250.milliseconds
     const val WARMUP_REQUESTS = 5
     const val MEASURED_REQUESTS = 50
     /** Page size for the first-page/last-page comparison; matches `api.series_listing`'s. */

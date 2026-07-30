@@ -252,7 +252,19 @@ mise exec -- ./gradlew :server:app:performanceHarness \
 ```
 
 Omit the properties for a small, fast smoke run (20 series × 5 books + 5
-one-shots). Output is printed twice: stable `xoboro.perf.<metric>=<value>`
+one-shots).
+
+The harness waits for the durable task queue to drain before it measures API
+latency, and reports that wait as `queue_drain.*`. This matters more than it
+sounds: opening a runtime on a 15,050-item library enqueues over ten thousand
+background tasks and takes about four and a half minutes to clear, and every
+latency number measured during that is meaningless. A run that fails to drain
+prints a warning with the pending count by task type and is not comparable with
+one that drained.
+
+`scripts/cold-scan-repetitions.sh` repeats the cold-scan metrics in separate JVMs
+and prints a CSV of the spread. Cold metrics cannot be repeated in-process — the
+second iteration is JIT-warm and no longer measuring a cold start. Output is printed twice: stable `xoboro.perf.<metric>=<value>`
 lines for diffing across runs, and a markdown table. It reports numbers only
 and does not assert performance thresholds; see the harness class doc at
 `server/app/src/test/kotlin/io/xoboro/server/perf/PerformanceHarnessTest.kt`
