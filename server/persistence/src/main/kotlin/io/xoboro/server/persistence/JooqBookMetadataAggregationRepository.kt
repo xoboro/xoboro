@@ -5,6 +5,10 @@ import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.SeriesId
 import org.jooq.DSLContext
 import org.jooq.Record
+import org.sqlite.SQLiteConfig
+import org.sqlite.SQLiteConnection
+import org.sqlite.SQLiteErrorCode
+import org.sqlite.SQLiteException
 
 internal class JooqBookMetadataAggregationRepository(
   private val database: XoboroDatabase,
@@ -12,19 +16,22 @@ internal class JooqBookMetadataAggregationRepository(
   fun refreshAllDirty() {
     while (true) {
       val refreshed =
-        database.transaction { transaction ->
-          val ids =
-            transaction
-              .fetch(
-                """
-                SELECT series_id
-                FROM series_book_metadata_aggregation_dirty
-                ORDER BY series_id
-                LIMIT $QUERY_BATCH_SIZE
-                """.trimIndent(),
-              ).map { SeriesId(it.requiredString("series_id")) }
-          if (ids.isNotEmpty()) transaction.rebuild(ids)
-          ids.size
+        retryOnBusySnapshot {
+          database.transaction { transaction ->
+            transaction.forceImmediateWriteLock()
+            val ids =
+              transaction
+                .fetch(
+                  """
+                  SELECT series_id
+                  FROM series_book_metadata_aggregation_dirty
+                  ORDER BY series_id
+                  LIMIT $QUERY_BATCH_SIZE
+                  """.trimIndent(),
+                ).map { SeriesId(it.requiredString("series_id")) }
+            if (ids.isNotEmpty()) transaction.rebuild(ids)
+            ids.size
+          }
         }
       if (refreshed < QUERY_BATCH_SIZE) return
     }
@@ -68,20 +75,85 @@ internal class JooqBookMetadataAggregationRepository(
 
   fun refreshDirty(requested: Collection<SeriesId>) {
     requested.chunked(QUERY_BATCH_SIZE).forEach { batch ->
-      database.transaction { transaction ->
-        val dirty =
-          transaction
-            .fetch(
-              """
-              SELECT series_id
-              FROM series_book_metadata_aggregation_dirty
-              WHERE series_id IN (${batch.placeholders()})
-              ORDER BY series_id
-              """.trimIndent(),
-              *batch.bindings(),
-            ).map { SeriesId(it.requiredString("series_id")) }
-        if (dirty.isNotEmpty()) transaction.rebuild(dirty)
+      retryOnBusySnapshot {
+        database.transaction { transaction ->
+          transaction.forceImmediateWriteLock()
+          val dirty =
+            transaction
+              .fetch(
+                """
+                SELECT series_id
+                FROM series_book_metadata_aggregation_dirty
+                WHERE series_id IN (${batch.placeholders()})
+                ORDER BY series_id
+                """.trimIndent(),
+                *batch.bindings(),
+              ).map { SeriesId(it.requiredString("series_id")) }
+          if (dirty.isNotEmpty()) transaction.rebuild(dirty)
+        }
       }
+    }
+  }
+
+  /**
+   * These transactions read [series_book_metadata_aggregation_dirty] and then, if they find
+   * anything, conditionally write to it. Under SQLite's default deferred-transaction behavior, a
+   * transaction that starts with a read and later attempts to *upgrade* that same transaction to a
+   * writer can fail two ways, neither of which benefits from `busy_timeout` waiting:
+   * - SQLITE_BUSY_SNAPSHOT: a concurrent connection already committed a write since this read
+   *   established its snapshot, so SQLite refuses to silently invalidate that snapshot.
+   * - a bare SQLITE_BUSY: another connection currently holds the write lock. Unlike a *fresh*
+   *   transaction's first write (which SQLite's busy handler retries internally for up to
+   *   `busy_timeout`), a lock *upgrade* attempted mid-transaction is not worth retrying in place -
+   *   waiting cannot change the fact that this transaction's read snapshot is already fixed - so
+   *   SQLite fails it immediately instead.
+   *
+   * Two layers of defense:
+   * 1. [forceImmediateWriteLock] asks this connection's next transaction to open with `BEGIN
+   *    IMMEDIATE` instead of the default deferred `BEGIN`, so the write lock is acquired upfront,
+   *    before any read establishes a snapshot that could go stale. When this connection needs to
+   *    wait for another writer, it now does so as a genuine fresh lock acquisition, which
+   *    `busy_timeout` *does* wait for.
+   * 2. [retryOnBusySnapshot] is a bounded safety net for whatever this first layer does not catch.
+   *    SQLite's own documentation gives the same remedy for both failure shapes above: roll back
+   *    and retry the whole transaction. A fresh attempt gets a new read snapshot and, if it needs to
+   *    write, a genuinely fresh lock acquisition.
+   */
+  private fun <T> retryOnBusySnapshot(
+    attempts: Int = MAX_BUSY_SNAPSHOT_ATTEMPTS,
+    block: () -> T,
+  ): T {
+    repeat(attempts - 1) {
+      try {
+        return block()
+      } catch (failure: Exception) {
+        if (!failure.isTransactionUpgradeConflict()) throw failure
+      }
+    }
+    return block()
+  }
+
+  private fun Throwable.isTransactionUpgradeConflict(): Boolean =
+    generateSequence(this) { it.cause }
+      .any {
+        it is SQLiteException &&
+          (it.resultCode == SQLiteErrorCode.SQLITE_BUSY_SNAPSHOT || it.resultCode == SQLiteErrorCode.SQLITE_BUSY)
+      }
+
+  /**
+   * This setting is intentionally left in place afterward rather than reset - every other
+   * `database.transaction { }` call site in this module starts with a write as its first
+   * statement, so it already needs to escalate to a writer immediately regardless of
+   * deferred/immediate mode. Leaving it set is a no-op for those, and is a strict improvement for
+   * the few call sites elsewhere that share this same read-then-write shape (e.g.
+   * JooqServerSettingRepository.findOrCreate, JooqMetadataOrganizationWriter).
+   */
+  private fun DSLContext.forceImmediateWriteLock() {
+    connection { connection ->
+      connection
+        .unwrap(SQLiteConnection::class.java)
+        .connectionConfig
+        .setTransactionMode(SQLiteConfig.TransactionMode.IMMEDIATE)
     }
   }
 
@@ -299,5 +371,6 @@ internal class JooqBookMetadataAggregationRepository(
 
   private companion object {
     const val QUERY_BATCH_SIZE = 500
+    const val MAX_BUSY_SNAPSHOT_ATTEMPTS = 5
   }
 }
