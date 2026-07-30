@@ -141,13 +141,15 @@ class XoboroNativeOpsApplicationTest {
 
   @Test
   fun `queues native media item maintenance through the production boundary`() {
-    // A single test intentionally does not chain a media-item call directly into a series call
-    // here: enqueuing the media-item analyze task starts real background processing on the
+    // The media-item and series cases are kept in separate runtimes below for an unrelated
+    // reason: enqueuing the media-item analyze task starts real background processing on the
     // durable task worker, which can race the series route's own read-triggered aggregation
-    // rebuild (JooqCatalogReadRepository.findSeriesByIdOrNull -> refreshDirty) and hit SQLite's
-    // WAL SQLITE_BUSY_SNAPSHOT. That race is a pre-existing persistence-layer concurrency risk,
-    // not something this change introduces, so the media-item and series cases are kept in
-    // separate runtimes below instead of masking it with retries.
+    // rebuild (JooqCatalogReadRepository.findSeriesByIdOrNull -> refreshDirty) via SQLite's WAL
+    // SQLITE_BUSY_SNAPSHOT. That race is now fixed at the persistence layer - see
+    // JooqBookMetadataAggregationRepository.forceImmediateWriteLock/retryOnBusySnapshot and its
+    // dedicated regression coverage in JooqBookMetadataAggregationRepositoryConcurrencyTest - so
+    // this split is no longer load-bearing; it is left as-is here rather than chained back
+    // together purely to keep this change scoped to the concurrency fix.
     val databasePath = tempDirectory.resolve("ops-maintenance.sqlite")
     createSyntheticCatalog(databasePath)
     val runtime =

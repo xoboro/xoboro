@@ -6,6 +6,29 @@ import io.xoboro.core.domain.SeriesId
 import org.jooq.DSLContext
 import org.jooq.Record
 
+/**
+ * Maintains the denormalized per-series view of book metadata.
+ *
+ * Refreshing is **write-first**: each transaction opens by deleting the dirty rows it intends to
+ * handle and taking their ids from `RETURNING`, then rebuilds those series. Reading the dirty table
+ * first and writing later in the same transaction is the shape that fails with
+ * `SQLITE_BUSY_SNAPSHOT` - SQLite refuses to upgrade a transaction to a writer once another
+ * connection has committed against the read snapshot it already took, and `busy_timeout` does not
+ * wait for a mid-transaction lock upgrade the way it waits for a fresh transaction's first write.
+ * Because the delete is the first statement, this is a fresh transaction's first write, so the busy
+ * handler applies normally and there is nothing to retry around.
+ *
+ * Claiming by deleting also means concurrent refreshers do not duplicate work: the write lock
+ * serializes them, and whoever loses the race finds the rows already claimed and skips the rebuild
+ * - correctly, because the winner's rebuild has committed by the time the loser's delete returns.
+ * A rollback restores the dirty rows along with everything else, so nothing is lost.
+ *
+ * This is only safe because no trigger marks a series dirty in response to writes on the
+ * aggregation tables themselves: every `mark_series_aggregation_dirty_*` trigger fires on `series`,
+ * `book`, `book_metadata`, `book_metadata_author` or `book_metadata_tag`. If one were ever added to
+ * an aggregation table, a rebuild would re-dirty what it just claimed and [refreshAllDirty] would
+ * not terminate.
+ */
 internal class JooqBookMetadataAggregationRepository(
   private val database: XoboroDatabase,
 ) {
@@ -17,13 +40,17 @@ internal class JooqBookMetadataAggregationRepository(
             transaction
               .fetch(
                 """
-                SELECT series_id
-                FROM series_book_metadata_aggregation_dirty
-                ORDER BY series_id
-                LIMIT $QUERY_BATCH_SIZE
+                DELETE FROM series_book_metadata_aggregation_dirty
+                WHERE series_id IN (
+                  SELECT series_id
+                  FROM series_book_metadata_aggregation_dirty
+                  ORDER BY series_id
+                  LIMIT $QUERY_BATCH_SIZE
+                )
+                RETURNING series_id
                 """.trimIndent(),
               ).map { SeriesId(it.requiredString("series_id")) }
-          if (ids.isNotEmpty()) transaction.rebuild(ids)
+          if (ids.isNotEmpty()) transaction.rebuild(ids.sortedBy { it.value })
           ids.size
         }
       if (refreshed < QUERY_BATCH_SIZE) return
@@ -73,14 +100,13 @@ internal class JooqBookMetadataAggregationRepository(
           transaction
             .fetch(
               """
-              SELECT series_id
-              FROM series_book_metadata_aggregation_dirty
+              DELETE FROM series_book_metadata_aggregation_dirty
               WHERE series_id IN (${batch.placeholders()})
-              ORDER BY series_id
+              RETURNING series_id
               """.trimIndent(),
               *batch.bindings(),
             ).map { SeriesId(it.requiredString("series_id")) }
-        if (dirty.isNotEmpty()) transaction.rebuild(dirty)
+        if (dirty.isNotEmpty()) transaction.rebuild(dirty.sortedBy { it.value })
       }
     }
   }
@@ -246,13 +272,6 @@ internal class JooqBookMetadataAggregationRepository(
         )
       }
     }
-    execute(
-      """
-      DELETE FROM series_book_metadata_aggregation_dirty
-      WHERE series_id IN (${batch.placeholders()})
-      """.trimIndent(),
-      *bindings,
-    )
   }
 
   private fun loadAuthors(ids: Collection<SeriesId>): Map<SeriesId, List<Author>> =
