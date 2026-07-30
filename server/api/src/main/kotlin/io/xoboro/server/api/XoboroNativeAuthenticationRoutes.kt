@@ -1,6 +1,7 @@
 package io.xoboro.server.api
 
 import io.ktor.http.Cookie
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
@@ -8,6 +9,7 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.ratelimit.rateLimit
+import io.ktor.server.request.header
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -15,15 +17,24 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
+import io.xoboro.core.application.AuthenticationActivityLifecycle
+import io.xoboro.core.application.AuthenticationRequestDetails
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ServerAlreadyClaimedException
 import io.xoboro.core.domain.User
 import kotlinx.serialization.Serializable
 
+/**
+ * [activities] is optional so a deployment - or a route test - can mount the session surface without an
+ * activity store. It is a recording concern, not an authentication one: a failure to write an audit row
+ * must never be what stops a valid login, which is also why every call here is a side effect on a path
+ * that has already decided the outcome.
+ */
 fun Route.xoboroNativeAuthenticationRoutes(
   users: UserLifecycle,
   sessions: UserSessionLifecycle,
+  activities: AuthenticationActivityLifecycle? = null,
 ) {
   route(XOBORO_API_PREFIX) {
     get("/setup") {
@@ -51,17 +62,40 @@ fun Route.xoboroNativeAuthenticationRoutes(
           )
           return@post
         }
+      activities?.recordSuccess(
+        user = user,
+        source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
+        details = call.nativeAuthenticationDetails(),
+      )
       call.respondSession(user, request.transport, sessions, HttpStatusCode.Created)
     }
     rateLimit(XOBORO_LOGIN_RATE_LIMIT) {
       post("/session") {
         val request = call.receive<LoginRequest>()
         if (request.transport == SessionTransport.COOKIE && !call.hasTrustedMutationOrigin()) {
+          // Recorded, and recorded as a failure: a cross-site attempt to open a session is exactly
+          // the event an administrator reading this log is looking for, and it is invisible in the
+          // response because the browser is the one being told no.
+          activities?.recordFailure(
+            source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
+            details = call.nativeAuthenticationDetails(),
+            error = CrossSiteRequestRejectedException.CODE,
+            email = request.email,
+          )
           call.respondCsrfRejected()
           return@post
         }
         val user = users.authenticate(request.email, request.password)
         if (user == null) {
+          // The submitted email is recorded even though no account matched it. That is the whole
+          // value of a failure row - "someone is trying this address" - and it is already what the
+          // Komga-compatible surface records.
+          activities?.recordFailure(
+            source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
+            details = call.nativeAuthenticationDetails(),
+            error = "invalid_credentials",
+            email = request.email,
+          )
           call.respondNativeError(
             HttpStatusCode.Unauthorized,
             "invalid_credentials",
@@ -69,6 +103,11 @@ fun Route.xoboroNativeAuthenticationRoutes(
           )
           return@post
         }
+        activities?.recordSuccess(
+          user = user,
+          source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
+          details = call.nativeAuthenticationDetails(),
+        )
         call.respondSession(user, request.transport, sessions)
       }
     }
@@ -90,6 +129,21 @@ fun Route.xoboroNativeAuthenticationRoutes(
     }
   }
 }
+
+/**
+ * The source name every native session event carries.
+ *
+ * Distinct from the Komga-compatible surface's `"Password"` on purpose: the two are different entry
+ * points with different CSRF and transport rules, and collapsing them into one name would make an
+ * administrator unable to tell which door was used.
+ */
+const val XOBORO_NATIVE_AUTHENTICATION_SOURCE: String = "XoboroSession"
+
+private fun ApplicationCall.nativeAuthenticationDetails(): AuthenticationRequestDetails =
+  AuthenticationRequestDetails(
+    ip = request.origin.remoteHost,
+    userAgent = request.header(HttpHeaders.UserAgent),
+  )
 
 private suspend fun ApplicationCall.respondSession(
   user: User,
