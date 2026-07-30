@@ -10,8 +10,13 @@ import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import java.nio.file.Path
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class JooqMetadataOrganizationWriterTest {
@@ -79,7 +84,82 @@ class JooqMetadataOrganizationWriterTest {
       }
   }
 
-  private fun seedCatalog(database: XoboroDatabase): Fixture {
+  /**
+   * Both entry points used to look the name up and then write inside one transaction, so a
+   * concurrent commit against the read snapshot they had already taken made the later insert fail
+   * to acquire the write lock - `SQLITE_BUSY_SNAPSHOT`, which `busy_timeout` does not wait out
+   * because the failure is a mid-transaction lock upgrade rather than a fresh transaction's first
+   * write. Book analysis drives this concurrently for real.
+   *
+   * Each thread owns its own collection and read list, so the threads do not contend with each
+   * other: the competitor is the background writer committing unrelated rows.
+   */
+  @Test
+  fun `organizes metadata while another connection commits`() {
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("organization-concurrency.sqlite")))
+      .use { database ->
+        val fixture = seedCatalog(database, itemCount = THREADS * ITEMS_PER_THREAD)
+        val identifiers = AtomicInteger()
+        val writer =
+          JooqMetadataOrganizationWriter(
+            database = database,
+            collectionIdFactory = { "collection-${identifiers.incrementAndGet()}" },
+            readListIdFactory = { "read-list-${identifiers.incrementAndGet()}" },
+            currentTimeMillis = { CONCURRENT_TIMESTAMP },
+          )
+        val settings = JooqServerSettingRepository(database)
+        val keepWriting = AtomicBoolean(true)
+        val failures = mutableListOf<Throwable>()
+        val executor = Executors.newFixedThreadPool(THREADS + 1)
+        try {
+          val competingWriter =
+            executor.submit {
+              var counter = 0L
+              while (keepWriting.get()) {
+                settings.put("SYNTHETIC_COMPETING_WRITER", "value-${counter++}")
+              }
+            }
+          (0 until THREADS)
+            .map { thread ->
+              executor.submit {
+                repeat(ITEMS_PER_THREAD) { index ->
+                  val item = thread * ITEMS_PER_THREAD + index
+                  writer.addBookToReadList("Synthetic list $thread", fixture.bookIds[item], null)
+                  writer.addSeriesToCollection("Synthetic shelf $thread", fixture.seriesIds[item])
+                }
+              }
+            }.forEach { worker ->
+              runCatching { worker.get(CONCURRENCY_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+                .onFailure { failure -> failures += failure }
+            }
+          keepWriting.set(false)
+          competingWriter.get(CONCURRENCY_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } finally {
+          keepWriting.set(false)
+          executor.shutdownNow()
+        }
+        assertTrue(failures.isEmpty(), "Concurrent organization failed: ${failures.map { it.message }}")
+        val readLists = JooqReadListRepository(database)
+        val seriesCollections = JooqSeriesCollectionRepository(database)
+        (0 until THREADS).forEach { thread ->
+          assertEquals(
+            ITEMS_PER_THREAD,
+            requireNotNull(readLists.findByNameIgnoreCaseOrNull("synthetic list $thread")).bookIds.size,
+          )
+          assertEquals(
+            ITEMS_PER_THREAD,
+            requireNotNull(
+              seriesCollections.findByNameIgnoreCaseOrNull("synthetic shelf $thread"),
+            ).seriesIds.size,
+          )
+        }
+      }
+  }
+
+  private fun seedCatalog(
+    database: XoboroDatabase,
+    itemCount: Int = 3,
+  ): Fixture {
     val libraryId = LibraryId("library-1")
     JooqLibraryRepository(database).insert(
       Library(
@@ -91,8 +171,8 @@ class JooqMetadataOrganizationWriterTest {
     )
     val seriesRepository = JooqSeriesRepository(database)
     val bookRepository = JooqBookRepository(database)
-    val seriesIds = (1..3).map { SeriesId("series-$it") }
-    val bookIds = (1..3).map { BookId("book-$it") }
+    val seriesIds = (1..itemCount).map { SeriesId("series-$it") }
+    val bookIds = (1..itemCount).map { BookId("book-$it") }
     seriesIds.forEachIndexed { index, seriesId ->
       seriesRepository.insert(
         Series(
@@ -127,4 +207,13 @@ class JooqMetadataOrganizationWriterTest {
     val seriesIds: List<SeriesId>,
     val bookIds: List<BookId>,
   )
+
+  private companion object {
+    const val THREADS = 4
+    const val ITEMS_PER_THREAD = 25
+    const val CONCURRENCY_TIMEOUT_SECONDS = 120L
+
+    /** Fixed so the timestamp source stays thread-safe; timestamps are not what this test checks. */
+    const val CONCURRENT_TIMESTAMP = 1_000L
+  }
 }
