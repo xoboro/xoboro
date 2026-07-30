@@ -1,8 +1,11 @@
 package io.xoboro.server
 
+import io.xoboro.core.application.ArtworkLifecycle
+import io.xoboro.core.application.ArtworkProcessor
 import io.xoboro.core.application.BookMetadataPatch
 import io.xoboro.core.application.BookMetadataProvider
 import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.LocalArtworkRefreshLifecycle
 import io.xoboro.core.application.MetadataRefreshLifecycle
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
@@ -14,6 +17,7 @@ import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.metadata.OneShotSeriesMetadataProvider
 import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.JooqArtworkRepository
 import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
@@ -42,14 +46,15 @@ import org.junit.jupiter.api.io.TempDir
  * corrected, so the wrong title stuck permanently.
  *
  * The fix makes `RefreshBookMetadataTaskHandler` re-enqueue a series metadata
- * refresh after every successful book refresh (see `XoboroRuntime`'s wiring of
- * `RefreshBookMetadataTaskHandler.afterRefresh`). This test reproduces the
- * "series ran first" ordering directly and asserts the series title is
- * corrected once the book refresh runs, mirroring that same wiring against a
- * real, SQLite-backed catalog. Reverting the `afterRefresh` change (dropping
- * the `refreshSeriesMetadata` re-enqueue below) makes this test fail: the
- * queue never gets a series task, `claimNext` returns null, and the
- * `requireNotNull` below throws.
+ * refresh after every successful book refresh, via [BookMetadataRefreshCompletion]
+ * - the exact production class `XoboroRuntime` wires as
+ * `RefreshBookMetadataTaskHandler.afterRefresh`, not a parallel copy of its
+ * logic. This test reproduces the "series ran first" ordering directly and
+ * asserts the series title is corrected once the book refresh runs, against a
+ * real, SQLite-backed catalog. Reverting `BookMetadataRefreshCompletion`'s
+ * re-enqueue (or reverting `XoboroRuntime` back to not using it at all) makes
+ * this test fail: the queue never gets a series task, `claimNext` returns
+ * null, and the `requireNotNull` below throws.
  */
 class OneShotSeriesMetadataSelfHealTest {
   @TempDir
@@ -134,17 +139,34 @@ class OneShotSeriesMetadataSelfHealTest {
           currentTimeMillis = clock::getAndIncrement,
         )
 
-      // Mirrors XoboroRuntime's RefreshBookMetadataTaskHandler wiring: after a
-      // successful book refresh, re-enqueue a series metadata refresh so a
-      // one-shot series title self-heals instead of staying wrong forever.
+      // The exact production class XoboroRuntime wires as
+      // RefreshBookMetadataTaskHandler.afterRefresh, not a parallel copy of its logic: this
+      // is what makes a revert of the production wiring fail this test. Local artwork import
+      // is not exercised here (accesses is empty, so LocalArtworkRefreshLifecycle.refreshBook
+      // short-circuits before touching the artwork repository/processor below).
+      val localArtworkRefresh =
+        LocalArtworkRefreshLifecycle(
+          libraries = libraries,
+          books = books,
+          series = series,
+          artwork =
+            ArtworkLifecycle(
+              artwork = JooqArtworkRepository(database),
+              processor = ArtworkProcessor { error("not used") },
+              idFactory = { error("not used") },
+              currentTimeMillis = clock::getAndIncrement,
+            ),
+          accesses = emptyList(),
+        )
       val bookHandler =
         RefreshBookMetadataTaskHandler(
           lifecycle,
-          afterRefresh = { bookId ->
-            books.findByIdOrNull(bookId)?.let { book ->
-              emitter.refreshSeriesMetadata(book.seriesId)
-            }
-          },
+          afterRefresh =
+            BookMetadataRefreshCompletion(
+              books = books,
+              localArtworkRefresh = localArtworkRefresh,
+              refreshMetadataTaskEmitter = emitter,
+            ),
         )
 
       bookHandler.handle(
