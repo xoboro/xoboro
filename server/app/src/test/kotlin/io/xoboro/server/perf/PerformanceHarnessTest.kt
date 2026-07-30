@@ -70,11 +70,16 @@ import org.junit.jupiter.api.io.TempDir
  * network transport (native HTTP calls run in-process through Ktor's test host), and artwork
  * generation (no thumbnails are produced here).
  *
- * Native API calls retry transient 5xx responses a few times (see [retryingTransientFailures]):
- * a rarely observed `SQLITE_BUSY_SNAPSHOT` from background scheduler/worker threads racing a
- * request-triggered cache refresh can otherwise fail a single sample. That is a pre-existing
- * concurrency detail of the read path, reported here rather than fixed, and on the rare run where
- * it fires it may inflate that one sample's latency by the retry backoff.
+ * Retry policy for native API calls (see [attemptWithRetries]): up to 5 attempts total (1 initial
+ * + 4 retries) on a 5xx response or a thrown exception, with a fixed 150 ms backoff between
+ * attempts. This exists to smooth over a rarely observed transient `SQLITE_BUSY_SNAPSHOT` from
+ * background scheduler/worker threads racing a request-triggered cache refresh — a pre-existing
+ * concurrency detail of the read path, reported here rather than fixed. If all attempts for a call
+ * fail, the harness fails outright rather than recording a sample for it. Within
+ * [measureRepeated], any measured request that needed more than one attempt is excluded from that
+ * endpoint's p50/max — a retried call's latency includes backoff sleep and would misrepresent the
+ * read path — and is instead counted separately as `<key>.retried_samples` so it stays visible
+ * rather than being silently dropped.
  */
 @Tag("performance")
 class PerformanceHarnessTest {
@@ -177,8 +182,12 @@ class PerformanceHarnessTest {
           port = 25_601,
           databasePath = databasePath,
           workerCount = 1,
-          taskPollMillis = 50,
-          taskFailurePollMillis = 50,
+          // Production defaults, not an aggressive test-only interval: the idle worker issues a
+          // write (`UPDATE task SET ...`) on every poll even against an empty queue, so a fast
+          // poll here would collide with the read-triggered aggregation-cache refresh far more
+          // often than a real deployment ever would (see the retry-policy doc above).
+          taskPollMillis = ServerConfig.DEFAULT_TASK_POLL_MILLIS,
+          taskFailurePollMillis = ServerConfig.DEFAULT_TASK_FAILURE_POLL_MILLIS,
           taskLeaseMillis = 1_000,
           shutdownTimeoutMillis = 2_000,
         ),
@@ -204,35 +213,47 @@ class PerformanceHarnessTest {
         assertEquals(HttpStatusCode.Created, setup.status)
         val token = requireNotNull(setup.body<SessionResponse>().accessToken)
 
+        // The first-ever call to /series triggers a one-time full-catalog aggregation-cache
+        // rebuild (JooqBookMetadataAggregationRepository.refreshAllDirty) covering every series
+        // marked dirty since the scan. At this library's scale that write can take long enough to
+        // collide with the idle worker's periodic queue poll, so this one call — and only this
+        // one — gets a generously larger retry budget than steady-state requests. Once the cache
+        // is warm, nothing later should need it: no other request in this harness dirties a series.
         val topSeries =
-          retryingTransientFailures {
+          attemptWithRetries(
+            attempts = CACHE_WARMUP_RETRY_ATTEMPTS,
+            backoffMillis = CACHE_WARMUP_RETRY_BACKOFF_MILLIS,
+          ) {
             client.get("$XOBORO_API_PREFIX/series?page=0&size=1&sort=mediaItemCount,desc") {
               bearerAuth(token)
             }
-          }.body<XoboroPageResponse<XoboroSeriesResponse>>()
+          }.response
+            .body<XoboroPageResponse<XoboroSeriesResponse>>()
             .items
             .single()
 
+        val seriesListing =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/series?page=0&size=20") { bearerAuth(token) }
+          }
         report.recordLatency(
           "api.series_listing",
           scannedBookCount,
-          measureRepeated {
-            retryingTransientFailures {
-              client.get("$XOBORO_API_PREFIX/series?page=0&size=20") { bearerAuth(token) }
-            }
-          },
+          seriesListing.stats,
+          seriesListing.retriedSamples,
         )
 
+        val booksInSeries =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/series/${topSeries.id}/media-items?page=0&size=20") {
+              bearerAuth(token)
+            }
+          }
         report.recordLatency(
           "api.books_in_series",
           topSeries.mediaItemCount.toLong(),
-          measureRepeated {
-            retryingTransientFailures {
-              client.get("$XOBORO_API_PREFIX/series/${topSeries.id}/media-items?page=0&size=20") {
-                bearerAuth(token)
-              }
-            }
-          },
+          booksInSeries.stats,
+          booksInSeries.retriedSamples,
         )
 
         val sampleBooks =
@@ -262,16 +283,17 @@ class PerformanceHarnessTest {
           }
         }
 
+        val keepReadingFeed =
+          measureRepeated {
+            client.get("$XOBORO_API_PREFIX/media-items?keepReading=true&page=0&size=20") {
+              bearerAuth(token)
+            }
+          }
         report.recordLatency(
           "api.keep_reading_feed",
           scannedBookCount,
-          measureRepeated {
-            retryingTransientFailures {
-              client.get("$XOBORO_API_PREFIX/media-items?keepReading=true&page=0&size=20") {
-                bearerAuth(token)
-              }
-            }
-          },
+          keepReadingFeed.stats,
+          keepReadingFeed.retriedSamples,
         )
       }
     } finally {
@@ -279,42 +301,82 @@ class PerformanceHarnessTest {
     }
   }
 
-  private suspend fun measureRepeated(request: suspend () -> HttpResponse): LatencyStats {
-    repeat(WARMUP_REQUESTS) { request() }
-    val samples =
-      (1..MEASURED_REQUESTS).map {
-        val mark = TimeSource.Monotonic.markNow()
-        request()
-        mark.elapsedNow().inWholeNanoseconds
+  /**
+   * Runs [request] [WARMUP_REQUESTS] then [MEASURED_REQUESTS] times, timing each measured call
+   * end-to-end (including any retries it needed). A call that succeeded on its first attempt
+   * contributes its latency to [MeasuredCall.stats]; a call that needed a retry is excluded from
+   * the stats — its latency includes retry backoff and is not representative of the read path —
+   * and is counted in [MeasuredCall.retriedSamples] instead. See the class doc for the full retry
+   * policy. If every measured call needed a retry, there is no clean latency data and the test
+   * fails rather than reporting an empty/misleading stat.
+   */
+  private suspend fun measureRepeated(request: suspend () -> HttpResponse): MeasuredCall {
+    repeat(WARMUP_REQUESTS) { attemptWithRetries(request = request) }
+    val cleanSampleNanos = mutableListOf<Long>()
+    var retriedSamples = 0
+    repeat(MEASURED_REQUESTS) {
+      val mark = TimeSource.Monotonic.markNow()
+      val outcome = attemptWithRetries(request = request)
+      val elapsedNanos = mark.elapsedNow().inWholeNanoseconds
+      if (outcome.attempts == 1) {
+        cleanSampleNanos += elapsedNanos
+      } else {
+        retriedSamples += 1
       }
-    return LatencyStats.of(samples)
+    }
+    check(cleanSampleNanos.isNotEmpty()) {
+      "All $MEASURED_REQUESTS measured requests needed a retry; no clean latency sample was recorded"
+    }
+    return MeasuredCall(LatencyStats.of(cleanSampleNanos), retriedSamples)
   }
 
   /**
-   * Retries a request a few times on a 5xx response or a thrown exception. Exists to smooth over
-   * a rarely observed transient `SQLITE_BUSY_SNAPSHOT` (see the class doc); it is not a
-   * production fix, only a harness-level tolerance for a known-rare race between a request's
-   * read-triggered cache refresh and background scheduler/worker writes.
+   * Retries a request on a 5xx response or a thrown exception (see the class doc for the default
+   * policy). Exists to smooth over a rarely observed transient `SQLITE_BUSY`/`SQLITE_BUSY_SNAPSHOT`;
+   * it is not a production fix, only a harness-level tolerance for a known-rare race between a
+   * request's read-triggered cache refresh and background scheduler/worker writes. [attempts] and
+   * [backoffMillis] default to the steady-state policy; callers absorbing a known one-time
+   * expensive write (see the `topSeries` call site) may override them.
    */
-  private suspend fun retryingTransientFailures(request: suspend () -> HttpResponse): HttpResponse {
+  private suspend fun attemptWithRetries(
+    attempts: Int = TRANSIENT_RETRY_ATTEMPTS,
+    backoffMillis: Long = TRANSIENT_RETRY_BACKOFF_MILLIS,
+    request: suspend () -> HttpResponse,
+  ): RetryOutcome {
     var lastFailure: Throwable? = null
-    repeat(TRANSIENT_RETRY_ATTEMPTS) { attempt ->
+    repeat(attempts) { attempt ->
       try {
         val response = request()
-        if (response.status.value < 500) return response
+        if (response.status.value < 500) return RetryOutcome(response, attempts = attempt + 1)
         lastFailure = IllegalStateException("Transient server error: HTTP ${response.status}")
       } catch (failure: Exception) {
         lastFailure = failure
       }
-      if (attempt < TRANSIENT_RETRY_ATTEMPTS - 1) delay(TRANSIENT_RETRY_BACKOFF_MILLIS)
+      if (attempt < attempts - 1) delay(backoffMillis)
     }
     throw requireNotNull(lastFailure) { "Retry loop exited without recording a failure" }
   }
+
+  /** One-shot convenience over [attemptWithRetries] for setup/seed calls that are not timed. */
+  private suspend fun retryingTransientFailures(request: suspend () -> HttpResponse): HttpResponse =
+    attemptWithRetries(request = request).response
 
   private fun intProperty(
     name: String,
     default: Int,
   ): Int = System.getProperty(name)?.toIntOrNull() ?: default
+
+  /** Result of [measureRepeated]: latency stats from clean (non-retried) samples only, plus how many samples were retried. */
+  private data class MeasuredCall(
+    val stats: LatencyStats,
+    val retriedSamples: Int,
+  )
+
+  /** Outcome of [attemptWithRetries]: the successful response and how many attempts it took. */
+  private data class RetryOutcome(
+    val response: HttpResponse,
+    val attempts: Int,
+  )
 
   private companion object {
     const val DEFAULT_SERIES_COUNT = 20
@@ -324,7 +386,9 @@ class PerformanceHarnessTest {
     const val MEASURED_REQUESTS = 50
     const val KEEP_READING_SAMPLE_SIZE = 200
     const val KEEP_READING_SEED_STRIDE = 5
-    const val TRANSIENT_RETRY_ATTEMPTS = 3
-    const val TRANSIENT_RETRY_BACKOFF_MILLIS = 50L
+    const val TRANSIENT_RETRY_ATTEMPTS = 5
+    const val TRANSIENT_RETRY_BACKOFF_MILLIS = 150L
+    const val CACHE_WARMUP_RETRY_ATTEMPTS = 10
+    const val CACHE_WARMUP_RETRY_BACKOFF_MILLIS = 300L
   }
 }

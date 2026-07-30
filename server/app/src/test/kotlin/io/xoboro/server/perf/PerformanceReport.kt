@@ -50,14 +50,22 @@ class PerformanceReport {
     metrics += PerformanceMetric(key, itemCount, String.format(Locale.ROOT, "%.1f", millis), "ms")
   }
 
+  /**
+   * Records p50/max latency plus the sample counts. [retriedSamples] is the number of measured
+   * requests that needed a retry and were therefore excluded from [stats] (see
+   * `PerformanceHarnessTest.measureRepeated`) — always recorded, even when zero, so a reader never
+   * has to guess whether retries happened.
+   */
   fun recordLatency(
     key: String,
     itemCount: Long,
     stats: LatencyStats,
+    retriedSamples: Int,
   ) {
     recordMillis("$key.p50", itemCount, stats.p50Millis)
     recordMillis("$key.max", itemCount, stats.maxMillis)
     metrics += PerformanceMetric("$key.samples", itemCount, stats.sampleCount.toString(), "requests")
+    metrics += PerformanceMetric("$key.retried_samples", itemCount, retriedSamples.toString(), "requests")
   }
 
   fun recordBytes(
