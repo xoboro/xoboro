@@ -681,6 +681,42 @@ Invalid keys, blank values, and malformed JSON return `400 invalid_request`.
 A non-administrator receives `403 client_settings_forbidden` from a global
 route.
 
+### External login configuration
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/authentication/oauth2` | `200 OK` |
+
+Administrator-only. Reports the OAuth2/OIDC providers a running deployment
+resolved — `registrationId` and display `name` — together with the effective
+login policy: `accountCreationEnabled`, `oidcEmailVerificationRequired`, and
+`accountLinking`.
+
+Read-only by design. Provider registration lives in environment variables so that
+client secrets never enter the database, which is the one artifact that gets
+backed up, copied elsewhere to debug, and restored onto other hosts. What was
+missing was not the ability to change the configuration — anyone who can set
+environment variables already can — but the ability to see what the running
+process resolved without shell access to the host.
+
+No client id, client secret, or endpoint URI is returned. Publishing those would
+turn a configuration display into a credential disclosure.
+
+`accountLinking` decides whether an external identity may sign in as an existing
+local account, and is set by `XOBORO_OAUTH2_ACCOUNT_LINKING`:
+
+| Value | Behaviour |
+| --- | --- |
+| `VERIFIED_EMAIL` | Default. Links only when the provider asserted it verified the email. A plain OAuth2 provider makes no such assertion, so it can never link — only create. |
+| `EMAIL` | Links on an email match whatever the provider verified. Komga's behaviour. |
+| `NEVER` | Never links; a matching email is refused rather than signed in or duplicated. |
+
+A refused link returns `account_linking_requires_verified_email` or
+`account_linking_disabled`. An unrecognised value for the environment variable
+fails startup rather than falling back to a default — a misspelled security
+setting must not resolve to something that merely looks like what was meant. See
+ADR 0093.
+
 ### Authentication activity and history
 
 | Method | Path | Success |

@@ -188,9 +188,133 @@ class OAuth2LoginLifecycleTest {
     val expected: String,
   )
 
+  @Test
+  fun `refuses to enter an existing account on an unverified assertion`() {
+    runSuspend {
+      // The configuration an operator reaches for while getting a provider working: a plain OAuth2
+      // provider, which makes no verification claim at all. Before the policy existed, asserting an
+      // email was enough to become that account.
+      val fixture =
+        Fixture(
+          protocol = OAuth2Protocol.OAUTH2,
+          accountCreationEnabled = true,
+          oidcEmailVerificationEnabled = false,
+        )
+      fixture.users.insertExisting("admin@example.invalid")
+      fixture.gateway.identity =
+        OAuth2ExternalIdentity(email = "admin@example.invalid", emailVerified = null)
+      val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+
+      val failure =
+        assertFailsWith<OAuth2LoginException> {
+          runSuspend {
+            fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding)
+          }
+        }
+
+      assertEquals(
+        OAuth2LoginLifecycle.ACCOUNT_LINKING_REQUIRES_VERIFIED_EMAIL,
+        failure.errorCode,
+      )
+      // Refused, not quietly turned into a second account with the same email.
+      assertEquals(1, fixture.users.count())
+    }
+  }
+
+  @Test
+  fun `enters an existing account when the provider verified the email`() {
+    runSuspend {
+      val fixture =
+        Fixture(
+          protocol = OAuth2Protocol.OAUTH2,
+          accountCreationEnabled = false,
+          oidcEmailVerificationEnabled = false,
+        )
+      val existing = fixture.users.insertExisting("reader@example.invalid")
+      fixture.gateway.identity =
+        OAuth2ExternalIdentity(email = "reader@example.invalid", emailVerified = true)
+      val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+
+      assertSame(
+        existing,
+        fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding),
+      )
+    }
+  }
+
+  @Test
+  fun `EMAIL linking accepts an unverified assertion`() {
+    runSuspend {
+      // Komga's behaviour, retained for migrating deployments. The point of the test is that reaching
+      // it now requires naming it.
+      val fixture =
+        Fixture(
+          protocol = OAuth2Protocol.OAUTH2,
+          accountCreationEnabled = false,
+          oidcEmailVerificationEnabled = false,
+          accountLinking = OAuth2AccountLinking.EMAIL,
+        )
+      val existing = fixture.users.insertExisting("reader@example.invalid")
+      fixture.gateway.identity =
+        OAuth2ExternalIdentity(email = "reader@example.invalid", emailVerified = null)
+      val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+
+      assertSame(
+        existing,
+        fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding),
+      )
+    }
+  }
+
+  @Test
+  fun `NEVER linking refuses even a verified assertion`() {
+    runSuspend {
+      val fixture =
+        Fixture(
+          protocol = OAuth2Protocol.OIDC,
+          accountCreationEnabled = true,
+          accountLinking = OAuth2AccountLinking.NEVER,
+        )
+      fixture.users.insertExisting("reader@example.invalid")
+      fixture.gateway.identity =
+        OAuth2ExternalIdentity(email = "reader@example.invalid", emailVerified = true)
+      val launch = fixture.lifecycle.begin("synthetic", CALLBACK_URI)
+
+      val failure =
+        assertFailsWith<OAuth2LoginException> {
+          runSuspend {
+            fixture.lifecycle.complete("synthetic", launch.state, "code", launch.browserBinding)
+          }
+        }
+
+      assertEquals(OAuth2LoginLifecycle.ACCOUNT_LINKING_DISABLED, failure.errorCode)
+      // Account creation is enabled, so this proves the refusal is not a fall-through: a duplicate
+      // account sharing the email would be worse than either linking or refusing.
+      assertEquals(1, fixture.users.count())
+    }
+  }
+
+  @Test
+  fun `reports the effective login policy`() {
+    val fixture =
+      Fixture(
+        accountCreationEnabled = true,
+        oidcEmailVerificationEnabled = false,
+        accountLinking = OAuth2AccountLinking.NEVER,
+      )
+
+    val policy = fixture.lifecycle.policy()
+
+    assertEquals(true, policy.accountCreationEnabled)
+    assertEquals(false, policy.oidcEmailVerificationRequired)
+    assertEquals(OAuth2AccountLinking.NEVER, policy.accountLinking)
+  }
+
   private class Fixture(
     protocol: OAuth2Protocol = OAuth2Protocol.OIDC,
     accountCreationEnabled: Boolean,
+    oidcEmailVerificationEnabled: Boolean = true,
+    accountLinking: OAuth2AccountLinking = OAuth2AccountLinking.VERIFIED_EMAIL,
   ) {
     val users = MutableUserRepository()
     val gateway = FakeOAuth2IdentityGateway()
@@ -220,7 +344,8 @@ class OAuth2LoginLifecycleTest {
         pendingAuthorizations = pending,
         identityGateway = gateway,
         accountCreationEnabled = accountCreationEnabled,
-        oidcEmailVerificationEnabled = true,
+        oidcEmailVerificationEnabled = oidcEmailVerificationEnabled,
+        accountLinking = accountLinking,
         randomPasswordFactory = {
           passwordFactoryCalls += 1
           "synthetic-random-password"

@@ -1,5 +1,6 @@
 package io.xoboro.server
 
+import io.xoboro.core.application.OAuth2AccountLinking
 import io.xoboro.core.application.OAuth2ClientRegistration
 import java.nio.file.Path
 
@@ -16,6 +17,7 @@ data class ServerConfig(
   val oauth2Registrations: List<OAuth2ClientRegistration> = emptyList(),
   val oauth2AccountCreation: Boolean = false,
   val oidcEmailVerification: Boolean = true,
+  val oauth2AccountLinking: OAuth2AccountLinking = OAuth2AccountLinking.VERIFIED_EMAIL,
   val fontsDirectory: Path = Path.of("config/fonts"),
   val backupsDirectory: Path = Path.of("config/backups"),
   val corsAllowedOrigins: Set<String> = emptySet(),
@@ -102,6 +104,21 @@ data class ServerConfig(
           environment.booleanValue("KOMGA_OAUTH2_ACCOUNT_CREATION", false),
         oidcEmailVerification =
           environment.booleanValue("KOMGA_OIDC_EMAIL_VERIFICATION", true),
+        // Deliberately a Xoboro-prefixed name: Komga has no equivalent setting, so borrowing its
+        // prefix would imply a compatibility this does not have.
+        oauth2AccountLinking =
+          environment["XOBORO_OAUTH2_ACCOUNT_LINKING"]
+            ?.takeIf(String::isNotBlank)
+            ?.trim()
+            ?.uppercase()
+            ?.let { value ->
+              OAuth2AccountLinking.entries.firstOrNull { it.name == value }
+                ?: throw IllegalArgumentException(
+                  "XOBORO_OAUTH2_ACCOUNT_LINKING must be one of " +
+                    OAuth2AccountLinking.entries.joinToString(", ") { it.name },
+                )
+            }
+            ?: OAuth2AccountLinking.VERIFIED_EMAIL,
         fontsDirectory =
           environment["XOBORO_FONTS_PATH"]
             ?.takeIf(String::isNotBlank)
