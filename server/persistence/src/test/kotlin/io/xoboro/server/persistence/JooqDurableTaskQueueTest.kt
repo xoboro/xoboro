@@ -8,6 +8,10 @@ import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -54,6 +58,37 @@ class JooqDurableTaskQueueTest {
 
       assertEquals(
         mapOf("ANALYZE_BOOK" to 1, "SYNTHETIC" to 2),
+        queue.countsByType(),
+      )
+    }
+  }
+
+  @Test
+  fun `excludes dead tasks from counts by type`() {
+    withQueue("counts-by-type-dead") { queue, _ ->
+      queue.enqueue(taskFixture(id = "dead-1", maxAttempts = 1), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "pending-1"), nowMillis = 2L)
+      queue.enqueue(
+        taskFixture(id = "analyze-1").copy(type = "ANALYZE_BOOK"),
+        nowMillis = 3L,
+      )
+      // "dead-1" was enqueued first, so it is the one claimed and dead-lettered below.
+      queue.claim("worker", "lease", nowMillis = 10L)
+      assertTrue(
+        queue.fail(
+          taskId = "dead-1",
+          leaseToken = "lease",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 11L,
+        ),
+      )
+      assertEquals(TaskCounts(pending = 2L, running = 0L, dead = 1L), queue.counts())
+
+      // A dead task is permanently abandoned, not queued or running work, so it must not inflate
+      // a count that operators read as "this is about to run".
+      assertEquals(
+        mapOf("ANALYZE_BOOK" to 1, "SYNTHETIC" to 1),
         queue.countsByType(),
       )
     }
@@ -149,6 +184,39 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `logs a warning when lease-expiry recovery dead-letters a task`() {
+    withQueue("lease-recovery-log") { queue, _ ->
+      val baseTime = 1_700_000_000_000L
+      queue.enqueue(
+        taskFixture(maxAttempts = 1, availableAtMillis = baseTime),
+        nowMillis = baseTime,
+      )
+      queue.claim("worker-1", "lease-1", nowMillis = baseTime, leaseDuration = 10_000L)
+
+      // A crashed worker never calls fail(), so this recovery step - run here by an unrelated
+      // worker polling for its own next task - is the only place this task's death is decided.
+      val records =
+        collectLogRecords(JooqDurableTaskQueue::class.java.name) {
+          assertNull(
+            queue.claim(
+              "worker-2",
+              "lease-2",
+              nowMillis = baseTime + 10_000L,
+              leaseDuration = 10_000L,
+            ),
+          )
+        }
+
+      val record = records.single { it.level == Level.WARNING }
+      assertTrue(record.message.contains("task-1"))
+      assertTrue(record.message.contains("SYNTHETIC"))
+      assertTrue(record.message.contains("1/1"))
+      assertTrue(record.message.contains("Lease expired"))
+      assertEquals(TaskCounts(pending = 0, running = 0, dead = 1), queue.counts())
+    }
+  }
+
+  @Test
   fun `retries failures after backoff and rejects stale lease tokens`() {
     withQueue("retry") { queue, _ ->
       queue.enqueue(taskFixture(maxAttempts = 2), nowMillis = 1L)
@@ -227,6 +295,65 @@ class JooqDurableTaskQueueTest {
 
       assertEquals(2, queue.clearUnclaimed())
       assertEquals(TaskCounts(pending = 0, running = 1, dead = 0), queue.counts())
+      assertTrue(queue.complete("running", "running-lease"))
+    }
+  }
+
+  @Test
+  fun `clears only pending tasks and leaves dead and running work intact`() {
+    withQueue("clear-pending") { queue, _ ->
+      queue.enqueue(taskFixture(id = "pending"), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "running", priority = TaskPriority.HIGH), nowMillis = 2L)
+      queue.enqueue(
+        taskFixture(id = "dead", priority = TaskPriority.HIGHEST, maxAttempts = 1),
+        nowMillis = 3L,
+      )
+      queue.claim("worker", "dead-lease", nowMillis = 10L)
+      assertTrue(
+        queue.fail(
+          taskId = "dead",
+          leaseToken = "dead-lease",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 11L,
+        ),
+      )
+      queue.claim("worker", "running-lease", nowMillis = 12L)
+
+      assertEquals(1, queue.clearPending())
+      // The two halves that matter: the pending row is gone, and the dead row (still worth
+      // inspecting) and the in-flight running row are both untouched by an endpoint literally
+      // named "unclaimed".
+      assertEquals(TaskCounts(pending = 0, running = 1, dead = 1), queue.counts())
+      assertTrue(queue.complete("running", "running-lease"))
+    }
+  }
+
+  @Test
+  fun `clears only dead tasks and leaves pending and running work intact`() {
+    withQueue("clear-dead") { queue, _ ->
+      queue.enqueue(taskFixture(id = "pending"), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "running", priority = TaskPriority.HIGH), nowMillis = 2L)
+      queue.enqueue(
+        taskFixture(id = "dead", priority = TaskPriority.HIGHEST, maxAttempts = 1),
+        nowMillis = 3L,
+      )
+      queue.claim("worker", "dead-lease", nowMillis = 10L)
+      assertTrue(
+        queue.fail(
+          taskId = "dead",
+          leaseToken = "dead-lease",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 11L,
+        ),
+      )
+      queue.claim("worker", "running-lease", nowMillis = 12L)
+
+      assertEquals(1, queue.clearDead())
+      // The two halves that matter: the dead row is gone, and the still-queued "pending" row and
+      // the in-flight "running" row are both untouched by a call meant only to clear the corpse.
+      assertEquals(TaskCounts(pending = 1, running = 1, dead = 0), queue.counts())
       assertTrue(queue.complete("running", "running-lease"))
     }
   }
@@ -341,6 +468,32 @@ class JooqDurableTaskQueueTest {
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("$name.sqlite"))).use { database ->
       block(JooqDurableTaskQueue(database), database)
     }
+  }
+
+  /** Attaches a temporary [Handler] to the named logger for the duration of [block]. */
+  private fun collectLogRecords(
+    loggerName: String,
+    block: () -> Unit,
+  ): List<LogRecord> {
+    val records = mutableListOf<LogRecord>()
+    val handler =
+      object : Handler() {
+        override fun publish(record: LogRecord) {
+          records += record
+        }
+
+        override fun flush() = Unit
+
+        override fun close() = Unit
+      }
+    val logger = Logger.getLogger(loggerName)
+    logger.addHandler(handler)
+    try {
+      block()
+    } finally {
+      logger.removeHandler(handler)
+    }
+    return records
   }
 
   private fun JooqDurableTaskQueue.claim(

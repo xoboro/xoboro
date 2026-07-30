@@ -8,6 +8,10 @@ import io.xoboro.server.persistence.XoboroDatabase
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -63,6 +67,80 @@ class DurableTaskWorkerTest {
       )
       assertEquals(TaskCounts(0, 0, 1), queue.counts())
     }
+  }
+
+  @Test
+  fun `logs a warning naming the task, attempt count, and error when dead lettered`() {
+    withQueue("dead-letter-log") { queue ->
+      queue.enqueue(task(maxAttempts = 1), nowMillis = 1L)
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { error("synthetic dead letter failure") },
+          times = ArrayDeque(listOf(10L, 11L)),
+        )
+
+      val records = collectLogRecords(DurableTaskWorker::class.java.name) {
+        assertEquals(
+          TaskRunResult.Failed("task-1", willRetry = false),
+          worker.runOnce("worker-1"),
+        )
+      }
+
+      val record = records.single { it.level == Level.WARNING }
+      assertTrue(record.message.contains("task-1"))
+      assertTrue(record.message.contains("SYNTHETIC"))
+      assertTrue(record.message.contains("1/1"))
+      assertTrue(record.message.contains("synthetic dead letter failure"))
+    }
+  }
+
+  @Test
+  fun `does not log a warning for a retry that will run again`() {
+    withQueue("retry-no-log") { queue ->
+      queue.enqueue(task(maxAttempts = 2), nowMillis = 1L)
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { error("synthetic retryable failure") },
+          times = ArrayDeque(listOf(10L, 11L)),
+        )
+
+      val records = collectLogRecords(DurableTaskWorker::class.java.name) {
+        assertEquals(
+          TaskRunResult.Failed("task-1", willRetry = true),
+          worker.runOnce("worker-1"),
+        )
+      }
+
+      assertTrue(records.none { it.level == Level.WARNING })
+    }
+  }
+
+  /** Attaches a temporary [Handler] to the named logger for the duration of [block]. */
+  private fun collectLogRecords(
+    loggerName: String,
+    block: () -> Unit,
+  ): List<LogRecord> {
+    val records = mutableListOf<LogRecord>()
+    val handler =
+      object : Handler() {
+        override fun publish(record: LogRecord) {
+          records += record
+        }
+
+        override fun flush() = Unit
+
+        override fun close() = Unit
+      }
+    val logger = Logger.getLogger(loggerName)
+    logger.addHandler(handler)
+    try {
+      block()
+    } finally {
+      logger.removeHandler(handler)
+    }
+    return records
   }
 
   @Test

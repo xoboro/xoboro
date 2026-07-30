@@ -679,19 +679,30 @@ administrator:
 { "pending": 3, "running": 1, "dead": 2 }
 ```
 
-`DELETE /api/xoboro/v1/tasks/unclaimed` discards queued work that no worker has
-claimed and requires an administrator. It answers `200` with the number removed
-rather than `204`, because the count is the useful part of the reply for an
-administrator clearing a backlog:
+Two routes discard tasks by state, each honest about which state it targets.
+Both answer `200` with the number removed rather than `204`, because the count
+is the useful part of the reply for an administrator clearing a backlog, and
+both return `403 task_administration_forbidden` for a non-administrator with
+the check running before the queue is consulted, so a refused request never
+reaches it:
 
 ```json
 { "cleared": 7 }
 ```
 
-Running and dead tasks are untouched: only unclaimed work is discarded. Both
-routes return `403 task_administration_forbidden` for a non-administrator, and
-the administrator check runs before the queue is consulted, so a refused request
-never reaches it.
+`DELETE /api/xoboro/v1/tasks/unclaimed` discards queued work that no worker
+has claimed (`PENDING`) and requires an administrator. Running and dead tasks
+are untouched - only unclaimed work is discarded, matching what the route's
+name says.
+
+`DELETE /api/xoboro/v1/tasks/dead` discards tasks that have permanently failed
+(`DEAD`) and requires an administrator. Pending and running tasks are
+untouched. Task ids are deterministic, and a dead task revives back to
+`PENDING` on its next enqueue without resetting its attempt count (see the
+durable queue's `enqueue` documentation), so a task that keeps dying costs one
+attempt per re-enqueue rather than a fresh budget. This endpoint removes the
+row entirely so the next enqueue starts that budget over, without discarding
+any unrelated work still queued to run.
 
 ## Operational metrics
 
