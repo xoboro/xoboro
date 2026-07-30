@@ -56,7 +56,7 @@ Statuses:
 | EPUB 2/3, fixed layout, DiViNa, resources, and positions | PARTIAL | DRM-protected publications no longer index as `READY` (ADR 0089); metadata reads the spine reading direction, `opf:event`-tagged dates, `file-as` sort forms, and a broadened MARC relator map; `inker` and `letterer` have no MARC relator and still arrive only from ComicInfo; reader acceptance remains |
 | Natural ordering, dimensions, content detection, and hashes | READY | Add only formats required by new sources |
 | Book, series, and read-list downloads | READY | Native API/UI |
-| Artwork upload, discovery, selection, generation, and caching | PARTIAL | Bundled WebP sidecars and generated collection/read-list artwork |
+| Artwork upload, discovery, selection, generation, and caching | PARTIAL | Collections and read lists derive a cover from their first member with one, swept by the thumbnail-regeneration command; a tiled composite of several member covers and WebP output from the generator are not implemented, and generation is not re-triggered when membership changes |
 
 ## Metadata and catalog
 
