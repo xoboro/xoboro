@@ -727,6 +727,45 @@ Invalid keys, blank values, and malformed JSON return `400 invalid_request`.
 A non-administrator receives `403 client_settings_forbidden` from a global
 route.
 
+### Named discovery feeds
+
+| Method | Path | Collections |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/{series,media-items}/feeds/new` | both |
+| `GET` | `/api/xoboro/v1/{series,media-items}/feeds/updated` | both |
+| `GET` | `/api/xoboro/v1/{series,media-items}/feeds/recently-read` | both |
+| `GET` | `/api/xoboro/v1/media-items/feeds/on-deck` | media items only |
+| `GET` | `/api/xoboro/v1/media-items/feeds/keep-reading` | media items only |
+
+Every one of these is expressible with the parameters the listings already accept,
+and that is what they are for. When each client decides for itself what "latest"
+sorts by, two clients showing a shelf with the same label show different shelves —
+and a report that "latest is wrong" cannot be answered, because nothing ever said
+what right was.
+
+So **a feed owns its ordering**, and a `sort` parameter is rejected with
+`400 invalid_query` rather than honoured. A caller who wants a different order wants
+the general listing; silently ignoring the parameter would be worse than rejecting
+it, because the caller would believe they had changed something. `page` and `size`
+work as everywhere else.
+
+| Feed | Ordering | Meaning |
+| --- | --- | --- |
+| `new` | `createdAt` descending | Recently added to the catalog. Sorted by when Xoboro created the row, not the file's own timestamp: a decade-old file copied in today is new to *this* library. |
+| `updated` | `updatedAt` descending | Recently changed. Distinct from `new`, because `updatedAt` moves when a volume joins a series that has existed for years — which is the event a reader following it wants. |
+| `recently-read` | `lastReadAt` descending | Per-caller by construction; two readers correctly get different answers. |
+| `on-deck` | `lastReadAt` descending, next-unread filter | "What do I read next." |
+| `keep-reading` | `lastReadAt` descending, started-not-finished filter | "What am I part-way through." |
+
+`on-deck` and `keep-reading` exist on media items only. Both describe what *this
+reader* has started, which is a property of an item rather than of a series, and
+mounting them under `/series` would answer a question nobody asked with a filter that
+means nothing there.
+
+Feeds live under `/feeds/` rather than at the collection root so that a feed name can
+never be mistaken for an identifier — otherwise a series legitimately named `new`
+would be unreachable.
+
 ### Duplicate pages
 
 | Method | Path | Success |

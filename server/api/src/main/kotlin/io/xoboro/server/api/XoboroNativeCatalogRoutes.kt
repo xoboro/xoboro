@@ -66,6 +66,24 @@ fun Route.xoboroNativeCatalogRoutes(
               ).toNativeSeriesPage(),
           )
         }
+        // Registered before "/{seriesId}" so a feed name is a feed and not a series identifier. Ktor
+        // prefers a literal segment over a parameter regardless of order, but relying on that would
+        // make the routing depend on a framework detail rather than on what is written here.
+        XoboroNativeDiscoveryFeed.entries
+          .filter { it.filter == null }
+          .forEach { feed ->
+            get("/feeds/${feed.path}") {
+              val user = call.nativeUser()
+              call.respond(
+                catalog
+                  .findSeries(
+                    query = call.nativeSeriesQuery(),
+                    access = user.catalogAccess(),
+                    page = call.nativeFeedPageRequest(feed),
+                  ).toNativeSeriesPage(),
+              )
+            }
+          }
         get("/{seriesId}") {
           val user = call.nativeUser()
           val series =
@@ -98,6 +116,19 @@ fun Route.xoboroNativeCatalogRoutes(
         }
       }
       route("/media-items") {
+        XoboroNativeDiscoveryFeed.entries.forEach { feed ->
+          get("/feeds/${feed.path}") {
+            val user = call.nativeUser()
+            call.respond(
+              catalog
+                .findBooks(
+                  query = call.nativeMediaItemQuery().withFeedFilter(feed),
+                  access = user.catalogAccess(),
+                  page = call.nativeFeedPageRequest(feed),
+                ).toNativeMediaItemPage(),
+            )
+          }
+        }
         get {
           val user = call.nativeUser()
           call.respond(

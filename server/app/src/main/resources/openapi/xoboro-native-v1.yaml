@@ -1402,6 +1402,171 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/feeds/keep-reading:
+    get:
+      tags: [Media items]
+      operationId: get_media_items_feed_keep_reading
+      description: >-
+        Items the caller has started but not finished, most recently read first.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/feeds/new:
+    get:
+      tags: [Media items]
+      operationId: get_media_items_feed_new
+      description: >-
+        Recently added to the catalog, newest first. Sorted by when Xoboro created the row rather than the file's own timestamp: a decade-old file copied in today is new to this library.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/feeds/on-deck:
+    get:
+      tags: [Media items]
+      operationId: get_media_items_feed_on_deck
+      description: >-
+        The next unread item in each series the caller has started, most recently read first. "What do I read next", as opposed to `keep-reading`.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/feeds/recently-read:
+    get:
+      tags: [Media items]
+      operationId: get_media_items_feed_recently_read
+      description: >-
+        Most recently read by the calling user, newest first. Per-caller by construction.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/feeds/updated:
+    get:
+      tags: [Media items]
+      operationId: get_media_items_feed_updated
+      description: >-
+        Recently changed, newest first. Distinct from `new` because a series gains books over time - `updatedAt` moves when a volume joins a series that has existed for years.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/media-items:
     get:
       tags: [Media items]
@@ -2496,6 +2661,105 @@ paths:
           description: >-
             Not found, or not visible to this user. An unauthorised identifier
             returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/feeds/new:
+    get:
+      tags: [Series]
+      operationId: get_series_feed_new
+      description: >-
+        Recently added to the catalog, newest first. Sorted by when Xoboro created the row rather than the file's own timestamp: a decade-old file copied in today is new to this library.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/feeds/recently-read:
+    get:
+      tags: [Series]
+      operationId: get_series_feed_recently_read
+      description: >-
+        Most recently read by the calling user, newest first. Per-caller by construction.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/feeds/updated:
+    get:
+      tags: [Series]
+      operationId: get_series_feed_updated
+      description: >-
+        Recently changed, newest first. Distinct from `new` because a series gains books over time - `updatedAt` moves when a volume joins a series that has existed for years.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: >-
+            Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
+            override rather than ignoring it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
