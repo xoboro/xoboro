@@ -547,12 +547,37 @@ incorrect current password does not change the password or invalidate
 sessions. Every successful password change invalidates all existing sessions
 for that user.
 
-`POST /me/api-keys` accepts a non-empty `comment`. Its response includes the
-plaintext key as `token` exactly once. Xoboro stores a digest, not the
-plaintext value, so the token cannot be retrieved again. `GET /me/api-keys`
-returns metadata only: identifier, comment, and creation/update timestamps.
-Deleting a missing key or a key owned by another user returns the same
-`404 api_key_not_found` response.
+`POST /me/api-keys` accepts a non-empty `comment` and optionally `scopes` and
+`expiresAtMillis`. Its response includes the plaintext key as `token` exactly
+once. Xoboro stores a digest, not the plaintext value, so the token cannot be
+retrieved again. `GET /me/api-keys` returns metadata only: identifier, comment,
+scopes, expiry, and creation/update timestamps. Deleting a missing key or a key
+owned by another user returns the same `404 api_key_not_found` response.
+
+`scopes` narrows the key to a subset of the caller's own roles. Omitting it, or
+sending an empty list, leaves the key as capable as its owner — which is how every
+key created before scoping existed continues to behave. A scope naming a role the
+caller does not currently hold is rejected with `400 invalid_request`, because at
+creation time an unsatisfiable scope is a mistake worth reporting. At
+authentication the same mismatch is expected — the owner's roles may have been
+reduced since the key was issued — and the key is silently narrowed instead, so a
+stored scope can only ever remove capability, never grant it.
+
+The scope is applied by narrowing the authenticated caller itself, not by a second
+set of per-route checks. Every role check and every visibility filter downstream
+reads that narrowed caller, so a scope holds on the native API and on every
+protocol adapter without either having to know a key was involved.
+
+`expiresAtMillis` is an absolute instant in epoch milliseconds, not a duration, and
+must be in the future. A key stops authenticating at the instant it names —
+expiry is decided when the key is presented, not by a background sweep, so it does
+not depend on a job having run. An expired key is still **listed** by
+`GET /me/api-keys` with its `expiresAtMillis` in the past, so its owner can see
+which key stopped working and delete it deliberately.
+
+The Komga-compatible `/api/v1/users/me/api-keys` surface has no scope or expiry
+field and creates unscoped, non-expiring keys, matching the contract Komga clients
+expect (ADR 0082).
 
 User administration is a separate administrator-only surface:
 

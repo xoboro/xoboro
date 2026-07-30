@@ -17,6 +17,7 @@ import io.xoboro.core.domain.ApiKey
 import io.xoboro.core.domain.ApiKeyCommentAlreadyExistsException
 import io.xoboro.core.domain.ApiKeyId
 import io.xoboro.core.domain.User
+import io.xoboro.core.domain.UserRole
 import kotlinx.serialization.Serializable
 
 fun Route.xoboroNativeSelfServiceRoutes(
@@ -77,9 +78,19 @@ private fun Route.mountXoboroNativeSelfServiceRoutes(
             post {
               val caller = call.nativeUser()
               val request = call.receive<XoboroApiKeyCreationRequest>()
+              val scopes =
+                request.scopes?.map { name ->
+                  UserRole.entries.firstOrNull { it.name == name }
+                    ?: throw XoboroInvalidQueryException("Unknown API key scope: $name")
+                }?.toSet() ?: emptySet()
               val created =
                 try {
-                  lifecycle.create(caller.id, request.comment)
+                  lifecycle.create(
+                    userId = caller.id,
+                    comment = request.comment,
+                    scopes = scopes,
+                    expiresAtMillis = request.expiresAtMillis,
+                  )
                 } catch (_: ApiKeyCommentAlreadyExistsException) {
                   call.respond(
                     HttpStatusCode.Conflict,
@@ -89,10 +100,16 @@ private fun Route.mountXoboroNativeSelfServiceRoutes(
                     ),
                   )
                   return@post
-                } catch (_: IllegalArgumentException) {
+                } catch (failure: IllegalArgumentException) {
+                  // The lifecycle validates the comment, the scope subset and the expiry instant.
+                  // Reporting its message keeps the three distinguishable; a fixed string here
+                  // would tell a caller who sent a past expiry that their comment was blank.
                   call.respond(
                     HttpStatusCode.BadRequest,
-                    XoboroApiError("invalid_request", "API key comment must not be blank"),
+                    XoboroApiError(
+                      "invalid_request",
+                      failure.message ?: "API key request was invalid",
+                    ),
                   )
                   return@post
                 }
@@ -111,6 +128,8 @@ private fun Route.mountXoboroNativeSelfServiceRoutes(
                 XoboroCreatedApiKeyResponse(
                   id = created.apiKey.id.value,
                   comment = created.apiKey.comment,
+                  scopes = created.apiKey.scopes.map { it.name }.sorted(),
+                  expiresAtMillis = created.apiKey.expiresAtMillis,
                   createdAtMillis = created.apiKey.createdAtMillis,
                   updatedAtMillis = created.apiKey.updatedAtMillis,
                   token = created.plainTextKey,
@@ -157,6 +176,8 @@ private fun ApiKey.toNativeMetadataResponse(): XoboroApiKeyMetadataResponse =
   XoboroApiKeyMetadataResponse(
     id = id.value,
     comment = comment,
+    scopes = scopes.map { it.name }.sorted(),
+    expiresAtMillis = expiresAtMillis,
     createdAtMillis = createdAtMillis,
     updatedAtMillis = updatedAtMillis,
   )
@@ -167,15 +188,24 @@ data class XoboroOwnPasswordUpdateRequest(
   val newPassword: String,
 )
 
+/**
+ * [scopes] narrows the key to a subset of the caller's roles; omitting it or passing an empty list
+ * leaves the key as capable as its owner. [expiresAtMillis] is an absolute instant so that a key's
+ * lifetime cannot be extended by reading it later.
+ */
 @Serializable
 data class XoboroApiKeyCreationRequest(
   val comment: String,
+  val scopes: List<String>? = null,
+  val expiresAtMillis: Long? = null,
 )
 
 @Serializable
 data class XoboroApiKeyMetadataResponse(
   val id: String,
   val comment: String,
+  val scopes: List<String>,
+  val expiresAtMillis: Long? = null,
   val createdAtMillis: Long,
   val updatedAtMillis: Long,
 )
@@ -184,6 +214,8 @@ data class XoboroApiKeyMetadataResponse(
 data class XoboroCreatedApiKeyResponse(
   val id: String,
   val comment: String,
+  val scopes: List<String>,
+  val expiresAtMillis: Long? = null,
   val createdAtMillis: Long,
   val updatedAtMillis: Long,
   val token: String,

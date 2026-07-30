@@ -18,7 +18,7 @@ Statuses:
 | Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, history, operational metrics, backup lifecycle, catalog (media-item/series) maintenance commands, storage availability re-checks with the outage timestamp, trashed-entry listings, and the native event stream are implemented; OpenAPI description served and drift-tested; cursor pagination measured and declined (see docs/performance.md) |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
-| Authentication hardening | PARTIAL | Complete the authorization review and scoped API-key policy; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades |
+| Authentication hardening | PARTIAL | The authorization audit (ADR 0090) and the scoped API-key policy (ADR 0092) are done; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades. Remaining: native OIDC configuration and account-linking policy |
 | Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
 
 ## Server foundation
@@ -80,7 +80,7 @@ Statuses:
 |---|---|---|
 | Initial administrator and multi-user management | PARTIAL | Native setup and native user management are implemented; add an automated initial-user option |
 | Roles, library grants, age ratings, and sharing-label restrictions | READY | Audited across every native route group and protocol adapter (ADR 0090); roles are checked at the route, library grants and content restrictions are SQL predicates carried by the `CatalogAccess` that every `CatalogReadRepository` method requires. The audit fixed a KOReader fingerprint path that enforced library grants but not content restrictions, and collapsed five duplicate copies of the access projection into one |
-| API keys | PARTIAL | Native self-service management API is implemented; add scoped keys, expiration, and protocol-specific transport review |
+| API keys | READY | Native self-service management, role-subset scopes and absolute expiry (ADR 0092); the scope is applied by narrowing the authenticated caller, so it holds on the native API and every protocol adapter without per-route checks. The Komga-compatible surface creates unscoped, non-expiring keys because its contract has no such field (ADR 0082) |
 | OAuth2/OIDC | PARTIAL | Native configuration, production-provider acceptance, and account-linking policy |
 | Authentication activity | PARTIAL | Native administrator and caller-scoped activity paging is implemented; record session/OAuth flows and schedule retention cleanup |
 | Per-user client settings | READY | Native effective, per-user write, and administrator global-settings APIs are implemented; replace arbitrary compatibility keys with versioned native preferences where possible |
