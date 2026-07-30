@@ -1,6 +1,12 @@
 .git
 .github
 .gradle
+.omc
+# The web build runs inside the image from package-lock.json, so a host
+# node_modules would only be copied in and then replaced - and it is large enough
+# to dominate the build context.
+web/node_modules
+web/dist
 .idea
 .kotlin
 **/build

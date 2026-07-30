@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { XoboroApiError, XoboroNetworkError } from '../src/lib/errors.js'
-import { API_BASE, buildQuery, onUnauthenticated, request, resourceUrl } from '../src/lib/http.js'
+import {
+  API_BASE,
+  buildQuery,
+  onUnauthenticated,
+  request,
+  resolveApiBase,
+  resourceUrl,
+} from '../src/lib/http.js'
 
 function reply({ status = 200, body = null, headers = {} } = {}) {
   const text = body === null ? '' : JSON.stringify(body)
@@ -12,6 +19,52 @@ function reply({ status = 200, body = null, headers = {} } = {}) {
     json: async () => JSON.parse(text),
   }
 }
+
+describe('resolveApiBase', () => {
+  it('serves the API from the deployment root when there is no context path', () => {
+    expect(resolveApiBase({ scriptUrl: 'http://host/assets/index-abc.js' }))
+      .toBe('/api/xoboro/v1')
+  })
+
+  it('follows the server context path', () => {
+    // Application.kt wraps every route in route(contextPath, routes), so a
+    // deployment at /xoboro answers the API at /xoboro/api/xoboro/v1. A hardcoded
+    // root would 404 against every endpoint there.
+    expect(resolveApiBase({ scriptUrl: 'http://host/xoboro/assets/index-abc.js' }))
+      .toBe('/xoboro/api/xoboro/v1')
+    expect(resolveApiBase({ scriptUrl: 'http://host/a/b/assets/index-abc.js' }))
+      .toBe('/a/b/api/xoboro/v1')
+  })
+
+  it('keeps only the path, never the origin the asset came from', () => {
+    // The origin must come from the document. Carrying it over from the asset URL
+    // would produce an absolute base, which defeats the SameSite=Strict cookie
+    // and the same-origin provenance the mutations require.
+    const base = resolveApiBase({ scriptUrl: 'https://cdn.example/xoboro/assets/i.js' })
+    expect(base).toBe('/xoboro/api/xoboro/v1')
+    expect(base).not.toContain('cdn.example')
+  })
+
+  it('falls back to the document directory when there is no asset URL', () => {
+    // The dev server serves /src/main.js, so there is no asset directory to cut.
+    expect(resolveApiBase({ pathname: '/' })).toBe('/api/xoboro/v1')
+    expect(resolveApiBase({ pathname: '/xoboro/' })).toBe('/xoboro/api/xoboro/v1')
+  })
+
+  it('does not mistake a filename for a directory', () => {
+    expect(resolveApiBase({ pathname: '/xoboro/index.html' })).toBe('/xoboro/api/xoboro/v1')
+  })
+
+  it('prefers the asset URL over the path, because the path moves and it does not', () => {
+    // The server falls back to index.html for an unknown path, so /xoboro/a/b can
+    // legitimately be the current location. Deriving from it would give a root of
+    // /xoboro/a/ and every request would 404.
+    expect(resolveApiBase({
+      scriptUrl: 'http://host/xoboro/assets/index-abc.js',
+      pathname: '/xoboro/a/b',
+    })).toBe('/xoboro/api/xoboro/v1')
+  })
+})
 
 describe('API_BASE', () => {
   it('is relative so requests stay same-origin', () => {
