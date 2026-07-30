@@ -247,12 +247,19 @@ class JooqDurableTaskQueue(
     )
   }
 
+  /**
+   * Counts only `PENDING` and `RUNNING` rows. This feeds the Komga-compat `TaskQueueStatus` SSE
+   * event, where `count`/`countByType` are read by operators as "work that is queued or running
+   * right now". A `DEAD` task has given up permanently, so including it here would report a
+   * permanently-failed task as if it were about to run - the opposite of what the field means.
+   */
   fun countsByType(): Map<String, Int> =
     database.dsl
       .fetch(
         """
         SELECT task_type, count(*) AS task_count
         FROM task
+        WHERE state <> 'DEAD'
         GROUP BY task_type
         ORDER BY task_type
         """.trimIndent(),

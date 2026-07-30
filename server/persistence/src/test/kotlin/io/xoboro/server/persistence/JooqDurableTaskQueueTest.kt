@@ -60,6 +60,37 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `excludes dead tasks from counts by type`() {
+    withQueue("counts-by-type-dead") { queue, _ ->
+      queue.enqueue(taskFixture(id = "dead-1", maxAttempts = 1), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "pending-1"), nowMillis = 2L)
+      queue.enqueue(
+        taskFixture(id = "analyze-1").copy(type = "ANALYZE_BOOK"),
+        nowMillis = 3L,
+      )
+      // "dead-1" was enqueued first, so it is the one claimed and dead-lettered below.
+      queue.claim("worker", "lease", nowMillis = 10L)
+      assertTrue(
+        queue.fail(
+          taskId = "dead-1",
+          leaseToken = "lease",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 11L,
+        ),
+      )
+      assertEquals(TaskCounts(pending = 2L, running = 0L, dead = 1L), queue.counts())
+
+      // A dead task is permanently abandoned, not queued or running work, so it must not inflate
+      // a count that operators read as "this is about to run".
+      assertEquals(
+        mapOf("ANALYZE_BOOK" to 1, "SYNTHETIC" to 1),
+        queue.countsByType(),
+      )
+    }
+  }
+
+  @Test
   fun `allows only one running task per non-null group`() {
     withQueue("groups") { queue, _ ->
       queue.enqueue(taskFixture(id = "group-first", groupId = "series-1"), nowMillis = 1L)
