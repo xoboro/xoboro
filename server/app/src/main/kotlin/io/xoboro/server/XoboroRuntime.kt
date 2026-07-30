@@ -68,6 +68,7 @@ import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.ReadListRepository
 import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.ServerAlreadyClaimedException
 import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.server.api.XoboroNativeEventBridge
 import io.xoboro.server.api.XoboroNativeEventHub
@@ -454,6 +455,23 @@ class XoboroRuntime private constructor(
               XoboroNativeEventBridge.map(event)?.let(nativeEvents::publish)
             },
           )
+        config.initialAdministrator?.let { initial ->
+          // Only when the server is still unclaimed, and never otherwise. Restarting with the variables
+          // still set must not reset the administrator's password - which would also mean that anyone
+          // who can edit the environment could take the account over by restarting, turning a
+          // provisioning convenience into a back door.
+          //
+          // claimIfEmpty underneath does the check atomically, so ServerAlreadyClaimedException is the
+          // expected outcome on every restart after the first and is not an error.
+          try {
+            userLifecycle.claimInitialAdministrator(initial.email, initial.password)
+            // The email, never the password. This line goes to the same log an operator pastes into an
+            // issue.
+            logger.info("Claimed the initial administrator from configuration: ${initial.email}")
+          } catch (_: ServerAlreadyClaimedException) {
+            logger.fine("Server is already claimed; the configured initial administrator was ignored")
+          }
+        }
         val apiKeyLifecycle =
           ApiKeyLifecycle(
             users = userRepository,
