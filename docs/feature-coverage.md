@@ -18,7 +18,7 @@ Statuses:
 | Xoboro-native HTTP API | PARTIAL | Setup/session, user administration, API-key self-service, read-only library/series/media-item discovery, page/resource discovery and delivery, file download, artwork, library administration, metadata editing, facets, collection and read-list administration, server/client settings, authentication activity, history, operational metrics, backup lifecycle, catalog (media-item/series) maintenance commands, storage availability re-checks with the outage timestamp, trashed-entry listings, and the native event stream are implemented; OpenAPI description served and drift-tested; cursor pagination measured and declined (see docs/performance.md) |
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
-| Authentication hardening | PARTIAL | The authorization audit (ADR 0090) and the scoped API-key policy (ADR 0092) are done; native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, and passwords use Argon2id with verified BCrypt upgrades. Remaining: native OIDC configuration and account-linking policy |
+| Authentication hardening | READY | Every named item is done: the authorization audit (ADR 0090), scoped and expiring API keys (ADR 0092), and the explicit OIDC account-linking policy with a safe default (ADR 0093). Native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, passwords use Argon2id with verified BCrypt upgrades, and every native session outcome is recorded as authentication activity. Acceptance against a live OIDC provider needs real credentials and is tracked in the OAuth2/OIDC row |
 | Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
 
 ## Server foundation
@@ -96,7 +96,7 @@ Statuses:
 | Kobo Sync and KEPUB | PARTIAL | Kobo Store proxy merging and device acceptance tests |
 | KOReader Sync | READY | Device acceptance tests |
 | One-way Komga 1.25 database import | PARTIAL | Finish production acceptance for restrictions, progress, collections, and read lists; never require runtime DB compatibility |
-| Docker, Compose, reverse proxy, and base path | READY | Native UI assets and release packaging |
+| Docker, Compose, reverse proxy, and base path | READY | Native UI assets and release packaging. The version/release process is documented in `docs/releasing.md`: versions come from annotated git tags rather than a tracked file, the number follows from the commit types since the previous tag, and there is deliberately no automatic tagging and no `CHANGELOG.md`. That document also records that CI being paused (#128) is a real gap in the release process rather than glossing over it |
 
 ## Xoboro extensions
 
