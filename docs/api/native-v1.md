@@ -97,11 +97,16 @@ A successful bearer response is:
   "user": {
     "id": "01HZX...",
     "email": "reader@example.invalid",
-    "roles": ["USER"]
+    "roles": ["PAGE_STREAMING"]
   },
   "accessToken": "<returned-once>"
 }
 ```
+
+`roles` carries `UserRole` names: `ADMIN`, `FILE_DOWNLOAD`, `PAGE_STREAMING`,
+`KOBO_SYNC`, `KOREADER_SYNC`. There is no `USER` role — a plain reader holds only
+the capability roles it was granted, and an account with none has an empty list.
+`transport` defaults to `COOKIE` when omitted.
 
 Password attempts are limited to ten per minute for each verified client IP by
 default. Rejected attempts consume the same budget as successful attempts.

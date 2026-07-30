@@ -1,0 +1,28 @@
+{
+  "name": "xoboro-web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Xoboro web UI: reader and administrator console",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lucide-svelte": "^1.0.1",
+    "svelte": "^5.56.7",
+    "svelte-i18n": "^4.0.1",
+    "svelte-spa-router": "^5.1.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/svelte": "^5.4.2",
+    "jsdom": "^29.1.1",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  }
+}
