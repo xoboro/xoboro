@@ -82,10 +82,7 @@ fun Route.xoboroNativeDeliveryRoutes(
               ?: throw XoboroInvalidQueryException("pageNumber must be an integer")
           val media = item.media
           if (media == null || media.status != MediaStatus.READY) {
-            call.respond(
-              HttpStatusCode.Conflict,
-              XoboroApiError("media_not_ready", "Media item is not ready"),
-            )
+            call.respondMediaUnusable(media?.status)
             return@get
           }
           if (pageNumber !in 1..media.pageCount) {
@@ -306,6 +303,28 @@ private fun ApplicationCall.nativePageImageRequest(): PageImageRequest {
       )
     "source" -> PageImageRequest(raw = true)
     else -> error("Validated page format was not handled")
+  }
+}
+
+/**
+ * Refuses page delivery for media that is not ready, naming which kind of not-ready it is.
+ *
+ * `media_not_ready` describes a media item that has not been analyzed yet or failed analysis - a
+ * client should come back later. `media_unsupported` describes one that will never be deliverable
+ * from the file on disk, an encrypted archive being the case that produces it. A client that cannot
+ * tell them apart retries forever against a book that is never going to open, so the codes differ
+ * even though both are a 409: in each case the obstacle is the state of the resource, not the
+ * request.
+ */
+private suspend fun ApplicationCall.respondMediaUnusable(status: MediaStatus?) {
+  if (status == MediaStatus.UNSUPPORTED) {
+    respondNativeError(
+      HttpStatusCode.Conflict,
+      "media_unsupported",
+      "Media item cannot be read from its file",
+    )
+  } else {
+    respondNativeError(HttpStatusCode.Conflict, "media_not_ready", "Media item is not ready")
   }
 }
 

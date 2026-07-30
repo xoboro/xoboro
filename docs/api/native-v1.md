@@ -378,8 +378,19 @@ Delivery failures use these native error codes:
 - `404 page_not_found` for a page outside the indexed media range or unavailable
   from the content provider.
 - `404 resource_not_found` for a missing, invalid, or non-EPUB resource.
-- `409 media_not_ready` when indexed media is not ready for page delivery.
+- `409 media_not_ready` when indexed media is not ready for page delivery and a
+  later attempt may succeed.
+- `409 media_unsupported` when the media item can never be delivered from the
+  file on disk. An encrypted archive or document produces this; retrying will not
+  help, the file has to be replaced.
 - `409 page_not_decodable` when an existing page cannot be decoded.
+
+A media item's `media.status` and `media.message` explain its analysis outcome.
+`UNSUPPORTED` with `ERR_1101` means the content is encrypted, and is deliberately
+distinct from `ERROR` with `ERR_1008`, which means the container could not be read
+at all. `ERR_1102` marks one volume of a multipart archive whose siblings are
+missing. `ERR_1006` means no pages were found and `ERR_1007` lists entries that
+failed detection. See ADR 0089.
 
 Invalid page numbers, formats, and dimensions return `400 invalid_query`.
 

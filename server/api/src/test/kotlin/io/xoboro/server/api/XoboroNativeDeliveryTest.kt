@@ -322,6 +322,23 @@ class XoboroNativeDeliveryTest {
       assertEquals(0, fixture.content.openPageCallCount)
     }
 
+  /**
+   * A client that cannot tell "not yet" from "never" retries forever against a book that will not
+   * open. Sits next to the ERROR case above because the value is in the two codes differing.
+   */
+  @Test
+  fun `media that can never be read returns a distinct conflict code`() =
+    testApplication {
+      val fixture = Fixture.visible(MediaStatus.UNSUPPORTED)
+      installDelivery(fixture)
+
+      val response = client.get(PAGE_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_unsupported", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.content.openPageCallCount)
+    }
+
   @Test
   fun `page decode failure returns conflict`() =
     testApplication {

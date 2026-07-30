@@ -1,5 +1,7 @@
 package io.xoboro.server.media
 
+import com.github.junrar.exception.CorruptHeaderException
+import com.github.junrar.exception.MissingNextVolumeException
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.MediaStatus
@@ -14,6 +16,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.apache.tika.Tika
 import org.junit.jupiter.api.io.TempDir
 
 class RarMediaAnalyzerTest {
@@ -76,7 +79,7 @@ class RarMediaAnalyzerTest {
       )
 
     assertEquals(MediaStatus.ERROR, media.status)
-    assertEquals(ZipMediaAnalyzer.ERROR_NO_PAGES, media.comment)
+    assertEquals(MediaAnalysisComment.NO_PAGES, media.comment)
     assertTrue(media.files.single().fileName.endsWith(".txt"))
   }
 
@@ -99,10 +102,90 @@ class RarMediaAnalyzerTest {
       )
 
     assertEquals(MediaStatus.ERROR, media.status)
-    assertEquals(ZipMediaAnalyzer.ERROR_NO_PAGES, media.comment)
+    assertEquals(MediaAnalysisComment.NO_PAGES, media.comment)
     assertEquals(listOf("FILE1.TXT", "FILE2.TXT"), media.files.map { it.fileName })
     assertTrue(media.files.all { it.fileSize == 7L })
   }
+
+  @Test
+  fun `reports a password-protected archive as unsupported rather than damaged`() {
+    val archive =
+      writeSyntheticRar4(
+        temporaryDirectory.resolve("locked.cbr"),
+        mapOf("001.png" to png(10, 20)),
+        flags = SyntheticRar4Flags(passwordProtected = true),
+      )
+
+    val media =
+      RarMediaAnalyzer().analyze(
+        bookId = BookId("book-locked"),
+        path = archive,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    // ERROR invites a retry that can never succeed; the archive is intact and simply not ours to
+    // read. The distinction is the whole point of the code.
+    assertEquals(MediaStatus.UNSUPPORTED, media.status)
+    assertEquals(MediaAnalysisComment.ENCRYPTED, media.comment)
+  }
+
+  /**
+   * An archive-level failure raised while reading a single entry must not be filed as "that entry
+   * would not decode". Tika is the seam here because the failure has to surface from inside entry
+   * analysis, which is where the old code buried it.
+   */
+  @Test
+  fun `carries an archive-level failure out of entry analysis`() {
+    val archive =
+      writeSyntheticRar4(
+        temporaryDirectory.resolve("volume.cbr"),
+        mapOf("001.png" to png(10, 20)),
+      )
+
+    val media =
+      RarMediaAnalyzer(tika = failingTika(MissingNextVolumeException("next.rar")))
+        .analyze(
+          bookId = BookId("book-volume"),
+          path = archive,
+          analyzeDimensions = false,
+          createdAtMillis = 1,
+        )
+
+    // Not NO_PAGES, which is what an entry-level verdict would have produced for the same archive.
+    assertEquals(MediaStatus.ERROR, media.status)
+    assertEquals(MediaAnalysisComment.INCOMPLETE_VOLUME_SET, media.comment)
+  }
+
+  @Test
+  fun `keeps an entry-level failure at the entry level`() {
+    val archive =
+      writeSyntheticRar4(
+        temporaryDirectory.resolve("odd-entry.cbr"),
+        mapOf("001.png" to png(10, 20)),
+      )
+
+    val media =
+      RarMediaAnalyzer(tika = failingTika(CorruptHeaderException()))
+        .analyze(
+          bookId = BookId("book-odd"),
+          path = archive,
+          analyzeDimensions = false,
+          createdAtMillis = 1,
+        )
+
+    assertEquals(MediaStatus.ERROR, media.status)
+    assertEquals(MediaAnalysisComment.NO_PAGES, media.comment)
+    assertEquals(listOf("001.png"), media.files.map { it.fileName })
+  }
+
+  private fun failingTika(failure: Exception): Tika =
+    object : Tika() {
+      override fun detect(
+        stream: java.io.InputStream,
+        name: String?,
+      ): String = throw failure
+    }
 
   private fun png(
     width: Int,

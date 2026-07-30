@@ -23,6 +23,7 @@ class RarMediaAnalyzer(
   private val hasher: Xxh3ContentHasher = Xxh3ContentHasher(),
   private val pageHashing: Int = ZipMediaAnalyzer.DEFAULT_PAGE_HASHING,
   private val maximumDictionarySize: Long = DEFAULT_MAXIMUM_DICTIONARY_SIZE,
+  private val failureClassifier: RarFailureClassifier = RarFailureClassifier(),
 ) {
   init {
     require(pageHashing >= 0) { "Page hashing count must not be negative" }
@@ -42,7 +43,9 @@ class RarMediaAnalyzer(
   ): BookMedia =
     try {
       open(path).use { archive ->
-        require(!archive.isPasswordProtected) { "Password-protected RAR archives are unsupported" }
+        if (archive.isPasswordProtected) {
+          return@use encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
+        }
         val entries =
           archive.fileHeaders
             .asSequence()
@@ -99,7 +102,7 @@ class RarMediaAnalyzer(
         if (pages.isEmpty()) {
           errorMedia(
             bookId = bookId,
-            comment = ZipMediaAnalyzer.ERROR_NO_PAGES,
+            comment = MediaAnalysisComment.NO_PAGES,
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
             files = files,
@@ -115,18 +118,37 @@ class RarMediaAnalyzer(
             comment =
               unreadableNames
                 .takeIf(List<String>::isNotEmpty)
-                ?.joinToString(prefix = "${ZipMediaAnalyzer.ERROR_ENTRY} [", postfix = "]"),
+                ?.joinToString(
+                  prefix = "${MediaAnalysisComment.UNREADABLE_ENTRY} [",
+                  postfix = "]",
+                ),
             createdAtMillis = createdAtMillis,
             updatedAtMillis = updatedAtMillis,
           )
         }
       }
+    } catch (failure: RarException) {
+      when (failureClassifier.classify(failure)) {
+        RarFailure.ENCRYPTED -> encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
+        RarFailure.INCOMPLETE_VOLUME_SET ->
+          errorMedia(
+            bookId,
+            MediaAnalysisComment.INCOMPLETE_VOLUME_SET,
+            createdAtMillis,
+            updatedAtMillis,
+          )
+        RarFailure.UNREADABLE ->
+          errorMedia(
+            bookId,
+            MediaAnalysisComment.UNREADABLE_CONTAINER,
+            createdAtMillis,
+            updatedAtMillis,
+          )
+      }
     } catch (_: IOException) {
-      errorMedia(bookId, ZipMediaAnalyzer.ERROR_ARCHIVE, createdAtMillis, updatedAtMillis)
-    } catch (_: RarException) {
-      errorMedia(bookId, ZipMediaAnalyzer.ERROR_ARCHIVE, createdAtMillis, updatedAtMillis)
+      errorMedia(bookId, MediaAnalysisComment.UNREADABLE_CONTAINER, createdAtMillis, updatedAtMillis)
     } catch (_: IllegalArgumentException) {
-      errorMedia(bookId, ZipMediaAnalyzer.ERROR_ARCHIVE, createdAtMillis, updatedAtMillis)
+      errorMedia(bookId, MediaAnalysisComment.UNREADABLE_CONTAINER, createdAtMillis, updatedAtMillis)
     }
 
   private fun analyzeEntry(
@@ -152,7 +174,11 @@ class RarMediaAnalyzer(
             }
           }.getOrNull(),
       )
-    } catch (_: Exception) {
+    } catch (failure: Exception) {
+      // "This entry would not decode" and "this archive is encrypted or incomplete" are different
+      // findings, and only the first belongs to an entry. A password or a missing volume makes every
+      // read fail, so swallowing it here would report the archive as merely having no usable pages.
+      if (failureClassifier.classify(failure) != RarFailure.UNREADABLE) throw failure
       ArchiveEntry(
         name = header.fileName,
         fileSize = header.fullUnpackSize.takeUnless { it < 0 },
@@ -193,6 +219,21 @@ class RarMediaAnalyzer(
       profile = MediaProfile.DIVINA,
       files = files,
       comment = comment,
+      createdAtMillis = createdAtMillis,
+      updatedAtMillis = updatedAtMillis,
+    )
+
+  private fun encryptedMedia(
+    bookId: BookId,
+    createdAtMillis: Long,
+    updatedAtMillis: Long,
+  ): BookMedia =
+    BookMedia(
+      bookId = bookId,
+      status = MediaStatus.UNSUPPORTED,
+      mediaType = RAR_MEDIA_TYPE,
+      profile = MediaProfile.DIVINA,
+      comment = MediaAnalysisComment.ENCRYPTED,
       createdAtMillis = createdAtMillis,
       updatedAtMillis = updatedAtMillis,
     )
