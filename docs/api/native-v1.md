@@ -157,6 +157,11 @@ Only administrators receive the source provider and location. Reader accounts
 receive `source: null`, preventing local paths and future remote-source
 identifiers from leaking through catalog discovery.
 
+`unavailable` reports whether the library storage is currently unreachable, and
+`unavailableSinceMillis` when the outage was first observed (`null` while the
+library is available). The timestamp is what distinguishes a mount that dropped a
+moment ago from one that has been gone for a week.
+
 ## Library administration
 
 All library administration routes require an administrator. An authenticated
@@ -181,6 +186,24 @@ server looks up a library or reads a request body.
   metadata refresh and returns `202 Accepted`.
 - `POST /api/xoboro/v1/libraries/{libraryId}/empty-trash` enqueues trash
   emptying and returns `202 Accepted`.
+- `POST /api/xoboro/v1/libraries/{libraryId}/availability` re-checks whether the
+  library storage is reachable and returns `200 OK` with the updated library.
+
+The availability check exists because the unavailable flag is otherwise only
+cleared by a successful scan, which is expensive on a large library and whose
+failure is what set the flag to begin with. It answers "is the mount back?"
+directly, and clearing the flag is what makes a plain `DELETE` stop being
+refused.
+
+It applies the same test as the scan: the root must be a readable directory. A
+root that exists but cannot be read counts as unavailable, so a check that
+reports available cannot be contradicted by the next scan. A library whose
+source adapter is not installed also counts as unavailable rather than failing
+the request - the storage genuinely cannot be read.
+
+Unlike the four task triggers above it is synchronous and returns `200` rather
+than `202`: the work is a single check of the library root, and the resulting
+state is the point of the request.
 
 Create and update use the same request shape:
 
@@ -219,12 +242,21 @@ Library administration failures use these codes:
 
 ## Series
 
-`GET /api/xoboro/v1/series` returns visible, non-deleted series. It accepts:
+`GET /api/xoboro/v1/series` returns visible series. It accepts:
 
 - repeated `libraryId`, `publisher`, `language`, `genre`, and `tag` filters;
 - `query` for full-text search;
 - `oneShot=true|false`;
+- `trashed=true|false`, default `false`;
 - pagination and series sorts described above.
+
+`trashed` selects between live and trashed entries; it never returns both.
+Reconciliation soft-deletes what disappeared from storage, and `empty-trash`
+then destroys it, so `trashed=true` is how an operator sees what a scan removed
+before agreeing to lose it. There is no restore endpoint and none is needed: a
+later scan that finds the files again clears the flag itself. The parameter is
+named for the state rather than the column behind it, because these are exactly
+the entries that are not gone yet. Media-item listings accept it too.
 
 `GET /api/xoboro/v1/series/{seriesId}` returns one visible series.
 `GET /api/xoboro/v1/series/{seriesId}/media-items` returns its visible

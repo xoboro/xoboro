@@ -445,6 +445,8 @@ class LibraryRoutesTest {
       }
     }
 
+    override fun isReadable(root: SourceLocation): Boolean = Files.isReadable(root.toPath())
+
     override fun isSameOrAncestor(
       possibleAncestor: SourceLocation,
       possibleDescendant: SourceLocation,

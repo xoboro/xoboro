@@ -58,6 +58,7 @@ import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.LibraryAdministrationLifecycle
+import io.xoboro.core.application.LibraryAvailabilityProbe
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.MetadataEditingLifecycle
@@ -224,6 +225,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     artworkLifecycle = runtime.artworkLifecycle,
     serverSettingsLifecycle = runtime.serverSettingsLifecycle,
     libraryAdministrationLifecycle = runtime.libraryAdministrationLifecycle,
+    libraryAvailabilityProbe = runtime.libraryAvailabilityProbe,
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
@@ -278,6 +280,7 @@ fun Application.xoboroModule(
   artworkLifecycle: ArtworkLifecycle? = null,
   serverSettingsLifecycle: ServerSettingsLifecycle? = null,
   libraryAdministrationLifecycle: LibraryAdministrationLifecycle? = null,
+  libraryAvailabilityProbe: LibraryAvailabilityProbe? = null,
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
@@ -557,11 +560,16 @@ fun Application.xoboroModule(
               libraries = libraryAdministrationLifecycle,
               catalog = catalogReadRepository,
             )
-            if (libraryScanRequester != null && libraryMaintenanceRequester != null) {
+            if (
+              libraryScanRequester != null &&
+              libraryMaintenanceRequester != null &&
+              libraryAvailabilityProbe != null
+            ) {
               xoboroNativeLibraryAdminRoutes(
                 libraries = libraryAdministrationLifecycle,
                 scanRequester = libraryScanRequester,
                 maintenanceRequester = libraryMaintenanceRequester,
+                availabilityProbe = libraryAvailabilityProbe,
               )
             }
             if (bookContentAccess != null) {

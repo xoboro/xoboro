@@ -18,6 +18,16 @@ enum class RootType {
 interface LibraryRootAccess {
   fun typeOf(root: SourceLocation): RootType
 
+  /**
+   * Whether [root] can currently be read, which [typeOf] deliberately does not answer: a directory
+   * that exists but is not readable still reports [RootType.DIRECTORY].
+   *
+   * [LibraryAvailabilityProbe] needs both, because what decides availability is whether the
+   * inventory could start, and `SourceInventory` implementations require a root that is both a
+   * directory and readable.
+   */
+  fun isReadable(root: SourceLocation): Boolean
+
   fun isSameOrAncestor(
     possibleAncestor: SourceLocation,
     possibleDescendant: SourceLocation,
@@ -28,6 +38,9 @@ interface LibraryRootInspector {
   val sourceId: String
 
   fun typeOf(itemId: String): RootType
+
+  /** Per-source half of [LibraryRootAccess.isReadable]. */
+  fun isReadable(itemId: String): Boolean
 
   fun isSameOrAncestor(
     possibleAncestorItemId: String,
@@ -53,6 +66,9 @@ class RoutingLibraryRootAccess(
 
   override fun typeOf(root: SourceLocation): RootType =
     inspector(root.sourceId).typeOf(root.itemId)
+
+  override fun isReadable(root: SourceLocation): Boolean =
+    inspector(root.sourceId).isReadable(root.itemId)
 
   override fun isSameOrAncestor(
     possibleAncestor: SourceLocation,

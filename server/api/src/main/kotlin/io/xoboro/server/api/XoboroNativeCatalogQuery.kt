@@ -13,7 +13,7 @@ internal fun ApplicationCall.nativeSeriesQuery(): SeriesCatalogQuery =
   SeriesCatalogQuery(
     libraryIds = identifierValues("libraryId").mapTo(linkedSetOf(), ::LibraryId),
     fullTextSearch = optionalTrimmed("query"),
-    deleted = false,
+    deleted = trashedFilter(),
     oneshot = optionalBoolean("oneShot"),
     publishers = repeatedValues("publisher"),
     languages = repeatedValues("language"),
@@ -28,10 +28,24 @@ internal fun ApplicationCall.nativeMediaItemQuery(
     libraryIds = identifierValues("libraryId").mapTo(linkedSetOf(), ::LibraryId),
     seriesId = requiredSeriesId ?: optionalIdentifier("seriesId")?.let(::SeriesId),
     fullTextSearch = optionalTrimmed("query"),
-    deleted = false,
+    deleted = trashedFilter(),
     onDeck = optionalBoolean("onDeck") ?: false,
     keepReading = optionalBoolean("keepReading") ?: false,
   )
+
+/**
+ * Resolves `trashed`, which selects between live and trashed entries.
+ *
+ * Both listings previously hardcoded live-only, which left the trash unreadable: reconciliation
+ * soft-deletes what disappeared from storage and `empty-trash` then destroys it, so there was no way
+ * to see what a scan had removed before agreeing to lose it. Restoring needs no endpoint - a scan
+ * that finds the files again clears the flag itself - but deciding whether to wait for that or empty
+ * the trash needs the list.
+ *
+ * The parameter is named for the state rather than the column: `deleted=true` would suggest the rows
+ * are gone, and these are exactly the rows that are not gone yet.
+ */
+private fun ApplicationCall.trashedFilter(): Boolean = optionalBoolean("trashed") ?: false
 
 internal fun ApplicationCall.nativeSeriesPageRequest(): CatalogPageRequest =
   nativePageRequest(String::toSeriesSort, NativeSeriesSort.TITLE.toCatalogSort())
