@@ -20,11 +20,16 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // Relative asset URLs, because the server can be deployed under a context
+    // path. Absolute "/assets/..." references would 404 under /xoboro.
+    base: './',
     build: {
-      // Served by the Xoboro server itself, so the asset paths must be relative
-      // to the deployment root rather than absolute to the host root.
       outDir: 'dist',
       emptyOutDir: true,
+      // Pinned rather than left to the default: lib/http.js derives the
+      // deployment root by cutting this bundle's URL at "/assets/", so renaming
+      // the directory would silently break every API call under a context path.
+      assetsDir: 'assets',
     },
   }
 })

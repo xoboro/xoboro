@@ -494,20 +494,70 @@ Applied to both shells:
 
 ## Serving
 
-**Currently unimplemented, and this design does not pretend otherwise.** The
-server has no `staticFiles`, no `staticResources` and no
-`singlePageApplication` route, and no application-level base path (`rootPath`)
-in its main source — the base-path support recorded as READY in the coverage
-table is reverse-proxy-level. Serving `web/dist` is a server change that has to
-be built.
+The server had no `staticFiles`, no `staticResources` and no
+`singlePageApplication` route, so there was no way to deploy the UI at all. That
+is what the serving change adds.
 
-Design constraints that change places if this is done wrong:
+### The base path is real, and it is an application concern
 
-- Hash routing is chosen partly to avoid needing a rewrite-every-unknown-path
-  rule, which is the usual way an SPA route quietly shadows an API route.
-- Static asset serving must not shadow `/api/**`.
-- If an application-level base path is added later, the API client's base URL
-  must come from one place, which is why `lib/http.js` owns every request.
+An earlier draft of this document claimed the server had no application-level
+base path and that the base-path support recorded as READY was reverse-proxy
+level. **That was wrong.** `Application.kt` wraps its entire routing tree in
+`route(contextPath, routes)`, from `runtime.effectiveServerContextPath` — a
+server setting. A deployment under `/xoboro` therefore answers the native API at
+`/xoboro/api/xoboro/v1`.
+
+This is not a documentation nicety: a client with a hardcoded `/api/xoboro/v1`
+would **404 against every endpoint** on such a deployment, and would do it only
+there, so nobody would see it until a user with a context path did.
+
+So the API root is derived at runtime, and derived from **this bundle's own
+URL** rather than from `location.pathname`. The distinction matters because the
+server falls back to `index.html` for an unknown path: `/xoboro/a/b` can
+legitimately be the current location, and reading the root off the path would
+give `/xoboro/a/`. The script's location does not move when the user navigates.
+`location.pathname` is only the fallback, for the dev server where the entry is
+`/src/main.js` and there is no asset directory to cut.
+
+Two consequences are pinned by test, because both fail silently and only on a
+context-path deployment:
+
+- The derivation keeps only the **path** of the asset URL, never its origin. An
+  absolute base would defeat the `SameSite=Strict` cookie and the same-origin
+  provenance the mutations require, in one step.
+- Vite's `assetsDir` is pinned to `assets`, because the derivation cuts the
+  bundle URL at `/assets/`. Renaming it would break every request under a context
+  path and nowhere else.
+
+`base: './'` makes the built asset references relative for the same reason.
+
+### Not shadowing the API
+
+- Hash routing means a legitimate deep link is `<root>/#/series/1`, whose path is
+  just the served directory. The unknown-path fallback exists for robustness, not
+  as the routing mechanism — which is the usual way an SPA rewrite rule quietly
+  swallows an API route.
+- Static serving is registered so that `/api/**` and `/opds/**` reach their
+  routes, with a test for each rather than an assumption about matcher precedence.
+- The served directory is configuration, not a build product baked into the jar.
+  Wiring npm into Gradle would add a plugin dependency and make the server build
+  need Node; a directory the Docker image copies `web/dist` into needs neither.
+
+`XOBORO_WEB_PATH` names the directory, defaulting to `web` beside the working
+directory. The container image builds the UI in its own Node stage and copies the
+output to `/opt/xoboro/web` — deliberately **not** under `/config`, which is a
+mounted volume where a previous release's UI would survive an upgrade.
+
+A missing or half-copied directory is not an error. The check is for `index.html`
+specifically, and a directory without one counts as not deployed: registering the
+route for an empty directory would make the wildcard answer `404` for paths that
+should have reached an API route. A headless deployment is legitimate — refusing
+to start without a UI would make the API unusable for anyone who only wants the
+API.
+
+The shell is served `no-cache` and hashed assets `max-age` far out. Without that
+split, a browser holding the previous deployment's `index.html` requests asset
+names that no longer exist, and the result is a blank page a reload does not fix.
 
 ## Deliberately not designed
 

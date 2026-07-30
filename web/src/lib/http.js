@@ -1,16 +1,65 @@
 import { XoboroApiError, XoboroNetworkError, parseRetryAfter } from './errors.js'
 
+/** Where the native API sits relative to the deployment root. */
+const API_SUFFIX = 'api/xoboro/v1'
+
+/** Vite's asset directory. Pinned in `vite.config.js`; the derivation below relies on it. */
+const ASSET_DIR = '/assets/'
+
 /**
- * The native API root.
+ * Works out the deployment root, then the API root under it.
  *
- * Deliberately relative. The cookie transport is `SameSite=Strict` and its
- * mutations require same-origin provenance (an exact `Origin` match or
+ * Xoboro can be served under a context path: `Application.kt` wraps every route
+ * in `route(contextPath, routes)` from `runtime.effectiveServerContextPath`, so a
+ * deployment at `/xoboro` answers the API at `/xoboro/api/xoboro/v1`. A hardcoded
+ * `/api/xoboro/v1` would 404 against every endpoint there.
+ *
+ * The root is taken from **this bundle's own URL** rather than from
+ * `location.pathname`, because the script's location does not move when the user
+ * navigates while a path can: the server falls back to `index.html` for unknown
+ * paths, so `/xoboro/a/b` would otherwise be read as a root of `/xoboro/a/`.
+ * `location.pathname` is only the fallback, for the dev server where the entry is
+ * `/src/main.js` and there is no asset directory.
+ *
+ * The result stays a same-origin path. The cookie transport is `SameSite=Strict`
+ * and its mutations require same-origin provenance (an exact `Origin` match or
  * `Sec-Fetch-Site: same-origin`), which the browser supplies for a same-origin
- * request and cannot be forged by the client. Pointing this at an absolute
- * cross-origin URL would defeat the CSRF protection and break authentication
- * outright, so `assertRelative` refuses one.
+ * request and cannot be forged; an absolute cross-origin base would defeat the
+ * CSRF protection and break authentication at the same time.
+ *
+ * @param {object} [source]
+ * @param {string} [source.scriptUrl] this module's URL, absolute in a build.
+ * @param {string} [source.pathname] the document path, used only as a fallback.
+ * @returns {string} the API root, with no trailing slash.
  */
-export const API_BASE = '/api/xoboro/v1'
+export function resolveApiBase(source = {}) {
+  const { scriptUrl = '', pathname = '/' } = source
+
+  const assetAt = scriptUrl.indexOf(ASSET_DIR)
+  if (assetAt >= 0) {
+    const root = scriptUrl.slice(0, assetAt)
+    // Absolute in a build ("http://host/xoboro"), so keep only the path part: the
+    // origin must come from the document, not from wherever the asset was fetched.
+    const withoutOrigin = root.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '')
+    return `${withoutOrigin}/${API_SUFFIX}`
+  }
+
+  // Everything up to and including the last slash — the directory the document was
+  // served from. A trailing filename ("/xoboro/index.html") is not a directory.
+  const directory = pathname.slice(0, pathname.lastIndexOf('/') + 1) || '/'
+  return `${directory}${API_SUFFIX}`
+}
+
+/**
+ * The native API root for this deployment.
+ *
+ * Computed once at load. It cannot change without the page reloading, and every
+ * request goes through this module, so there is nothing to invalidate.
+ */
+export const API_BASE = resolveApiBase({
+  scriptUrl: typeof import.meta.url === 'string' ? import.meta.url : '',
+  pathname: globalThis.location?.pathname ?? '/',
+})
 
 const unauthenticatedHandlers = new Set()
 
