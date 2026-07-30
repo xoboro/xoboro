@@ -82,6 +82,7 @@ import io.xoboro.server.metadata.ComicInfoMetadataProvider
 import io.xoboro.server.metadata.ComicRackReadListParser
 import io.xoboro.server.metadata.EpubMetadataProvider
 import io.xoboro.server.metadata.IsbnBarcodeMetadataProvider
+import io.xoboro.server.metadata.MylarSeriesDiagnostic
 import io.xoboro.server.metadata.MylarSeriesMetadataProvider
 import io.xoboro.server.metadata.OneShotSeriesMetadataProvider
 import io.xoboro.server.metadata.PdfMetadataProvider
@@ -727,7 +728,21 @@ class XoboroRuntime private constructor(
               listOf(
                 comicInfoMetadataProvider,
                 epubMetadataProvider,
-                MylarSeriesMetadataProvider(listOf(LocalSourceSidecarAccess())),
+                MylarSeriesMetadataProvider(
+                  accesses = listOf(LocalSourceSidecarAccess()),
+                  diagnostics = { diagnostic ->
+                    // Schema drift is INFO because a newer Mylar writing new fields is normal and
+                    // logging it as a problem would train an operator to ignore the log. Everything
+                    // else is a file the operator wrote that Xoboro could not use, which is WARNING.
+                    val level =
+                      if (diagnostic is MylarSeriesDiagnostic.SeriesJsonIgnored) {
+                        Level.INFO
+                      } else {
+                        Level.WARNING
+                      }
+                    logger.log(level, "Mylar series.json: $diagnostic")
+                  },
+                ),
                 OneShotSeriesMetadataProvider(bookMetadata),
               ),
             currentTimeMillis = System::currentTimeMillis,
