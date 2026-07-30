@@ -12,6 +12,7 @@ import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaTaskQueueSseDto
 import io.xoboro.compatibility.komga.api.KomgaTaskStatusProvider
 import io.xoboro.compatibility.komga.api.KoreaderSyncLifecycle
+import io.xoboro.core.application.ActivityRetentionLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.ArtworkLifecycle
@@ -127,6 +128,7 @@ import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
+import io.xoboro.server.tasks.ActivityRetentionScheduler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.ArchiveMaintenanceTaskEmitter
@@ -169,6 +171,7 @@ import kotlinx.serialization.json.Json
 class XoboroRuntime private constructor(
   private val database: XoboroDatabase,
   private val libraryScanScheduler: LibraryScanScheduler,
+  private val activityRetentionScheduler: ActivityRetentionScheduler,
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
   private val oauthHttpClient: HttpClient,
@@ -234,6 +237,7 @@ class XoboroRuntime private constructor(
     var failure: Throwable? = null
     listOf<AutoCloseable>(
       libraryScanScheduler,
+      activityRetentionScheduler,
       workerPool,
       heartbeat,
       oauthHttpClient,
@@ -269,6 +273,7 @@ class XoboroRuntime private constructor(
       var heartbeat: ScheduledLeaseHeartbeat? = null
       var workerPool: TaskWorkerPool? = null
       var libraryScanScheduler: LibraryScanScheduler? = null
+      var activityRetentionScheduler: ActivityRetentionScheduler? = null
       var oauthHttpClient: HttpClient? = null
       var sseEventHub: KomgaSseEventHub? = null
       var nativeEventHub: XoboroNativeEventHub? = null
@@ -563,6 +568,30 @@ class XoboroRuntime private constructor(
               ),
           )
         libraryScanScheduler = createdLibraryScanScheduler
+        val createdActivityRetentionScheduler =
+          ActivityRetentionScheduler(
+            retention =
+              ActivityRetentionLifecycle(
+                history = historicalEvents,
+                authenticationActivity = authenticationActivityLifecycle,
+                retention = serverSettingsLifecycle::activityRetention,
+                currentTimeMillis = System::currentTimeMillis,
+              ),
+            scheduler =
+              ExecutorFixedRateTaskScheduler(
+                shutdownTimeoutMillis = config.shutdownTimeoutMillis,
+                onFailure = { failure ->
+                  logger.log(Level.SEVERE, "Activity retention sweep failed", failure)
+                },
+              ),
+            onSwept = { swept ->
+              logger.info(
+                "Activity retention removed ${swept.historyDeleted} history and " +
+                  "${swept.authenticationActivityDeleted} authentication activity rows",
+              )
+            },
+          ).also(ActivityRetentionScheduler::start)
+        activityRetentionScheduler = createdActivityRetentionScheduler
         val libraryMaintenanceQueue =
           object : LibraryMaintenanceQueue {
             override fun scanLibrary(id: LibraryId) {
@@ -926,6 +955,7 @@ class XoboroRuntime private constructor(
         return XoboroRuntime(
           database = database,
           libraryScanScheduler = createdLibraryScanScheduler,
+          activityRetentionScheduler = createdActivityRetentionScheduler,
           heartbeat = createdHeartbeat,
           workerPool = createdWorkerPool,
           oauthHttpClient = createdOAuthHttpClient,
@@ -984,6 +1014,9 @@ class XoboroRuntime private constructor(
         }
       } catch (failure: Throwable) {
         runCatching { libraryScanScheduler?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
+        runCatching { activityRetentionScheduler?.close() }
+          .exceptionOrNull()
+          ?.let(failure::addSuppressed)
         runCatching { workerPool?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { heartbeat?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { oauthHttpClient?.close() }.exceptionOrNull()?.let(failure::addSuppressed)

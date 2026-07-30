@@ -84,6 +84,43 @@ class JooqInteroperabilityRepositoryTest {
   }
 
   @Test
+  fun `history retention deletes strictly older rows and cascades their properties`() {
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("retention.sqlite"))).use { database ->
+      val history = JooqHistoricalEventRepository(database)
+      history.insert(
+        HistoricalEvent(
+          id = "old",
+          type = "BookImported",
+          timestampMillis = 10,
+          properties = mapOf("name" to "Synthetic chapter"),
+        ),
+      )
+      history.insert(HistoricalEvent(id = "boundary", type = "BookImported", timestampMillis = 20))
+      history.insert(HistoricalEvent(id = "recent", type = "BookImported", timestampMillis = 30))
+
+      // Strictly older: the row exactly at the cutoff survives, so a retention window of N days keeps
+      // rows N days old rather than losing them to an off-by-one in the comparison.
+      assertEquals(1, history.deleteOlderThan(20))
+
+      assertEquals(
+        listOf("boundary", "recent"),
+        history
+          .findAll(HistoricalEventPageRequest(unpaged = true, direction = SortDirection.ASCENDING))
+          .content
+          .map(HistoricalEvent::id),
+      )
+      // The deleted event had a property row. An orphan would be reattached to whatever event later
+      // reused the id.
+      assertEquals(
+        0,
+        database.dsl.fetchCount(
+          database.dsl.selectOne().from("historical_event_property").where("event_id = ?", "old"),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `sync points support API key scoped and complete user deletion`() {
     XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("sync.sqlite"))).use { database ->
       JooqUserRepository(database).insert(user())

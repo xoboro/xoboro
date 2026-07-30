@@ -30,7 +30,7 @@ Statuses:
 | Health, readiness, structured logs, and bounded metrics | READY | Native `GET /api/xoboro/v1/metrics` JSON snapshot is implemented alongside the token-gated Prometheus scrape; remaining work is the administrator UI |
 | Backup and offline restore | READY | Native backup create/list/delete over HTTP is implemented; restore stays CLI-only because it requires taking the live database offline; remaining work is the administrator UI and operator documentation |
 | Server-sent updates | READY | Native event names, resume tokens, and reconnect behavior are implemented and tested (see `docs/api/native-v1.md`); the Komga-compatible SSE stream keeps its documented broadcast gap for `OrganizationEvent`/`ArtworkEvent` per ADR 0087 |
-| Runtime configuration | PARTIAL | The typed native server-settings API is implemented; document restart-required fields and add the administrator UI |
+| Runtime configuration | PARTIAL | The typed native server-settings API is implemented, and which fields need a restart is documented per setting — the API reports it by `databaseSource` differing from `effectiveValue` rather than by a derived flag that could disagree. Remaining: the administrator UI |
 
 ## Library and media lifecycle
 
@@ -72,7 +72,7 @@ Statuses:
 | Filters, sorts, facets, latest/new/updated/on-deck/keep-reading | PARTIAL | Native core search/filter/sort/on-deck/keep-reading queries and facets are implemented; add named discovery feeds and uncommon combination/error cases |
 | Collections and manual ordering | PARTIAL | Native UI and generated artwork |
 | Read lists, ComicRack CBL import, and ordering | READY | Native UI |
-| Historical activity | PARTIAL | Native administrator history paging is implemented; emit all native lifecycle/security/maintenance events and add retention controls |
+| Historical activity | PARTIAL | Native administrator history paging and a configurable retention window with a six-hourly sweep are implemented (ADR 0095); `poster.changed` now covers all four artwork owner kinds (ADR 0094). Remaining: recording session and OAuth flows as authentication activity |
 
 ## Users and reading
 
@@ -82,7 +82,7 @@ Statuses:
 | Roles, library grants, age ratings, and sharing-label restrictions | READY | Audited across every native route group and protocol adapter (ADR 0090); roles are checked at the route, library grants and content restrictions are SQL predicates carried by the `CatalogAccess` that every `CatalogReadRepository` method requires. The audit fixed a KOReader fingerprint path that enforced library grants but not content restrictions, and collapsed five duplicate copies of the access projection into one |
 | API keys | READY | Native self-service management, role-subset scopes and absolute expiry (ADR 0092); the scope is applied by narrowing the authenticated caller, so it holds on the native API and every protocol adapter without per-route checks. The Komga-compatible surface creates unscoped, non-expiring keys because its contract has no such field (ADR 0082) |
 | OAuth2/OIDC | PARTIAL | Account-linking policy is explicit with a safe default, and administrators can read back the resolved providers and policy over the native API (ADR 0093). Provider registration stays in environment variables so client secrets never enter the database; write access is declined, not deferred. Production-provider acceptance against a live provider remains open because it needs real credentials |
-| Authentication activity | PARTIAL | Native administrator and caller-scoped activity paging is implemented; record session/OAuth flows and schedule retention cleanup |
+| Authentication activity | PARTIAL | Native administrator and caller-scoped paging plus a configurable retention window with a scheduled sweep are implemented (ADR 0095); recording session and OAuth flows is still missing |
 | Per-user client settings | READY | Native effective, per-user write, and administrator global-settings APIs are implemented; replace arbitrary compatibility keys with versioned native preferences where possible |
 | Page and Readium locator progress | PARTIAL | Reader acceptance of the mutation/conflict contract |
 | Mark read/unread, keep reading, and previous/next navigation | PARTIAL | Native API/UI plus end-to-end multi-item navigation tests |
