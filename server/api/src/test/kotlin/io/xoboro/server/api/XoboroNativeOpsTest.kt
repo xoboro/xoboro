@@ -1266,6 +1266,12 @@ class XoboroNativeOpsTest {
       events.forEach(values::add)
     }
 
+    override fun deleteOlderThan(timestampMillis: Long): Int {
+      val removed = values.count { it.timestampMillis < timestampMillis }
+      values.removeAll { it.timestampMillis < timestampMillis }
+      return removed
+    }
+
     override fun findAll(request: HistoricalEventPageRequest): HistoricalEventPage {
       findAllCalls += 1
       val comparator: Comparator<HistoricalEvent> =

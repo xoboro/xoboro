@@ -646,9 +646,10 @@ reading query parameters or a request body.
 `GET /server-settings` returns exactly these settings:
 `deleteEmptyCollections`, `deleteEmptyReadLists`, `rememberMeDurationDays`,
 `thumbnailSize`, `taskPoolSize`, `serverPort`, `serverContextPath`,
-`koboProxy`, `koboPort`, and `kepubifyPath`. The `serverPort`,
-`serverContextPath`, and `kepubifyPath` values include their
-`configurationSource`, `databaseSource`, and `effectiveValue`.
+`koboProxy`, `koboPort`, `kepubifyPath`, `historyRetentionDays`, and
+`authenticationActivityRetentionDays`. The `serverPort`, `serverContextPath`,
+and `kepubifyPath` values include their `configurationSource`,
+`databaseSource`, and `effectiveValue`.
 
 GET /server-settings never returns the remember-me signing key; PUT accepts
 `renewRememberMeKey` to rotate it without ever exposing its value. Fields absent
@@ -659,6 +660,51 @@ the other optional fields treat absence or `null` as no change.
 Malformed JSON, unknown thumbnail sizes, and invalid setting values return
 `400 invalid_request`. A non-administrator receives
 `403 server_settings_forbidden`.
+
+#### When a change takes effect
+
+Most settings take effect on the next operation that reads them. These do not:
+
+| Setting | When it takes effect |
+| --- | --- |
+| `serverPort` | **Restart.** The listener is bound at startup. `effectiveValue` reports the port actually in use, so a pending change is visible as `databaseSource` differing from `effectiveValue`. |
+| `serverContextPath` | **Restart**, for the same reason: routes are mounted once. |
+| `koboPort` | **Restart.** |
+| `kepubifyPath` | **Restart.** The binary is resolved once at startup so that a missing or non-executable path fails loudly then, rather than on a reader's first Kobo download. |
+| `taskPoolSize` | Immediately — the worker pool resizes in place. |
+| `rememberMeDurationDays`, `renewRememberMeKey` | Immediately, for tokens issued afterwards. Rotating the key invalidates every existing remember-me token, which is the point of rotating it. |
+| `historyRetentionDays`, `authenticationActivityRetentionDays` | At the **next retention sweep**, within six hours. |
+
+For the three multi-source settings, comparing `databaseSource` with
+`effectiveValue` is how a client tells "changed, pending restart" from "in
+effect" — the API deliberately does not report a boolean "restart required",
+because the two values already say it and a derived flag could disagree with
+them.
+
+#### Retention
+
+`historyRetentionDays` and `authenticationActivityRetentionDays` set how long
+recorded activity is kept. **`0` means keep forever, and is the default for
+both.** Retention deletes audit rows, so an operator who has not chosen a policy
+has not asked for their history to be pruned; turning it on is deliberate.
+
+The two windows are independent. Authentication activity and catalog history
+answer different questions — "who tried to get in" versus "what happened to the
+library" — and a short security-log window rarely means wanting to lose a year of
+catalog history with it.
+
+A sweep runs every six hours and deletes rows **strictly older** than the
+window, so a window of N days keeps rows exactly N days old. A window of `0`
+issues no statement at all rather than a delete that matches nothing. A window
+reaching past the epoch — a large window on a fresh install — is also skipped,
+because the cutoff would be negative and a negative cutoff is a delete that
+means nothing.
+
+Retention is applied when a sweep runs, not when a row is read: shortening a
+window does not hide rows that are still stored, and lengthening one does not
+bring back rows already deleted. Values are validated as non-negative;
+a negative window is rejected with `400 invalid_request` rather than silently
+becoming a cutoff in the future that would delete everything.
 
 ### Client settings
 

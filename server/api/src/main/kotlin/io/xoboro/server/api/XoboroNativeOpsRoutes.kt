@@ -425,6 +425,8 @@ private fun JsonObject.toServerSettingsUpdate(): ServerSettingsUpdate =
     koboProxy = optionalValue("koboProxy"),
     koboPort = nullableUpdate("koboPort"),
     kepubifyPath = nullableUpdate("kepubifyPath"),
+    historyRetentionDays = optionalValue("historyRetentionDays"),
+    authenticationActivityRetentionDays = optionalValue("authenticationActivityRetentionDays"),
   )
 
 private inline fun <reified T> JsonObject.optionalValue(key: String): T? {
@@ -451,6 +453,8 @@ private fun ServerSettingsSnapshot.toNativeResponse(): XoboroServerSettingsRespo
     koboProxy = koboProxy,
     koboPort = koboPort,
     kepubifyPath = kepubifyPath.toNativeResponse(),
+    historyRetentionDays = historyRetentionDays,
+    authenticationActivityRetentionDays = authenticationActivityRetentionDays,
   )
 
 private fun <T> SettingMultiSource<T>.toNativeResponse(): XoboroSettingMultiSourceResponse<T> =
@@ -668,6 +672,10 @@ data class XoboroServerSettingsResponse(
   val koboProxy: Boolean,
   val koboPort: Int?,
   val kepubifyPath: XoboroSettingMultiSourceResponse<String?>,
+  /** Days of catalog history kept; `0` keeps everything. */
+  val historyRetentionDays: Long,
+  /** Days of authentication activity kept; `0` keeps everything. */
+  val authenticationActivityRetentionDays: Long,
 )
 
 @Serializable

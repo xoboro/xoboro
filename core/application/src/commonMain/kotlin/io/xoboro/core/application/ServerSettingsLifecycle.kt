@@ -24,6 +24,8 @@ data class ServerSettingsSnapshot(
   val koboProxy: Boolean,
   val koboPort: Int?,
   val kepubifyPath: SettingMultiSource<String?>,
+  val historyRetentionDays: Long,
+  val authenticationActivityRetentionDays: Long,
 )
 
 data class NullableSettingUpdate<T>(
@@ -43,6 +45,10 @@ data class ServerSettingsUpdate(
   val koboProxy: Boolean? = null,
   val koboPort: NullableSettingUpdate<Int> = NullableSettingUpdate(),
   val kepubifyPath: NullableSettingUpdate<String> = NullableSettingUpdate(),
+  /** Days of catalog history to keep; `0` keeps everything. */
+  val historyRetentionDays: Long? = null,
+  /** Days of authentication activity to keep; `0` keeps everything. */
+  val authenticationActivityRetentionDays: Long? = null,
 )
 
 interface ServerSettingStore {
@@ -113,8 +119,24 @@ class ServerSettingsLifecycle(
           databaseSource = databaseKepubifyPath,
           effectiveValue = effectiveKepubifyPath(),
         ),
+      historyRetentionDays = long(HISTORY_RETENTION_DAYS, ActivityRetention.KEEP_FOREVER),
+      authenticationActivityRetentionDays =
+        long(AUTHENTICATION_ACTIVITY_RETENTION_DAYS, ActivityRetention.KEEP_FOREVER),
     )
   }
+
+  /**
+   * The retention policy an [ActivityRetentionLifecycle] sweep should apply.
+   *
+   * Read per sweep rather than captured once, so a change through the settings API takes effect at the
+   * next sweep instead of at the next restart.
+   */
+  fun activityRetention(): ActivityRetention =
+    ActivityRetention(
+      historyDays = long(HISTORY_RETENTION_DAYS, ActivityRetention.KEEP_FOREVER),
+      authenticationActivityDays =
+        long(AUTHENTICATION_ACTIVITY_RETENTION_DAYS, ActivityRetention.KEEP_FOREVER),
+    )
 
   fun update(update: ServerSettingsUpdate) {
     validate(update)
@@ -139,6 +161,10 @@ class ServerSettingsLifecycle(
     update.koboProxy?.let { store.put(KOBO_PROXY, it.toString()) }
     update.koboPort.persistNullable(KOBO_PORT, Int::toString)
     update.kepubifyPath.persistNullable(KEPUBIFY_PATH)
+    update.historyRetentionDays?.let { store.put(HISTORY_RETENTION_DAYS, it.toString()) }
+    update.authenticationActivityRetentionDays?.let {
+      store.put(AUTHENTICATION_ACTIVITY_RETENTION_DAYS, it.toString())
+    }
   }
 
   fun rememberMeKey(): String =
@@ -168,6 +194,14 @@ class ServerSettingsLifecycle(
     }
     update.serverContextPath.value?.let {
       require(CONTEXT_PATH_PATTERN.matches(it)) { "Server context path is invalid" }
+    }
+    // Zero is valid and means "keep forever"; negative is not, because it would silently read as a
+    // cutoff in the future and delete everything.
+    update.historyRetentionDays?.let {
+      require(it >= 0) { "History retention must not be negative" }
+    }
+    update.authenticationActivityRetentionDays?.let {
+      require(it >= 0) { "Authentication activity retention must not be negative" }
     }
   }
 
@@ -215,6 +249,9 @@ class ServerSettingsLifecycle(
     private const val KOBO_PROXY = "KOBO_PROXY"
     private const val KOBO_PORT = "KOBO_PORT"
     private const val KEPUBIFY_PATH = "KEPUBIFY_PATH"
+    private const val HISTORY_RETENTION_DAYS = "HISTORY_RETENTION_DAYS"
+    private const val AUTHENTICATION_ACTIVITY_RETENTION_DAYS =
+      "AUTHENTICATION_ACTIVITY_RETENTION_DAYS"
     private val CONTEXT_PATH_PATTERN = Regex("^/[\\w-/]*[a-zA-Z0-9]$")
   }
 }
