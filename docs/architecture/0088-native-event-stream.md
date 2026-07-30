@@ -74,15 +74,19 @@ publishing only to the Komga bridge with an explicit comment, since routing
 a value through a mapping function that is guaranteed to discard it adds a
 call for no observable effect.
 
-**`ArtworkEvent` for a collection or read-list owner also maps to `null`,**
-for a different reason: those owner kinds carry no member series/media-item
-identifiers on the event itself, and resolving them would mean the bridge
-performing its own repository lookup, then guessing at a scope broader than
-true (or none at all) when that lookup can no longer find the collection.
-The gap is the same shape as ADR 0087's for the Komga stream: `poster.changed`
-is simply not emitted for those two owner kinds, and a client showing a
-collection or read-list cover shows a stale one until it refetches for an
-unrelated reason.
+**`ArtworkEvent` for a collection or read-list owner originally also mapped to
+`null`,** for a different reason: those owner kinds carried no member
+series/media-item identifiers on the event itself, and resolving them would
+have meant the bridge performing its own repository lookup, then guessing at a
+scope broader than true (or none at all) when that lookup could no longer find
+the collection.
+
+**Closed in ADR 0094.** The membership moved onto the domain event as
+`ArtworkEvent.groupingMembers`, filled where it is already known, so the bridge
+stayed a pure function of what it was handed and gained no lookup. `poster.changed`
+is now emitted for all four owner kinds. An *empty* grouping still produces no
+event, because `SeriesMembers` already defines "no visible members" as not
+visible — announcing it would need a scope broader than the truth.
 
 ## Consequences
 

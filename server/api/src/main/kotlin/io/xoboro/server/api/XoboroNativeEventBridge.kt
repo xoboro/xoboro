@@ -152,19 +152,22 @@ object XoboroNativeEventBridge {
     }
 
   /**
-   * `poster.changed` for owner kinds whose visibility can be decided from what [ArtworkEvent]
-   * actually carries — only `owner.kind` and `owner.id`, never the owning grouping's membership.
+   * `poster.changed`, scoped from what [ArtworkEvent] carries and nothing else.
    *
-   * [ArtworkOwnerKind.MEDIA_ITEM] and [ArtworkOwnerKind.SERIES] scope honestly to that one
-   * identifier via [XoboroNativeEventScope.MediaItemMembers] / [XoboroNativeEventScope.SeriesMembers]:
-   * a singleton membership list is exactly "visible if this one item is visible", the same check
-   * the read paths already run, and it costs the bridge no repository lookup of its own.
+   * [ArtworkOwnerKind.MEDIA_ITEM] and [ArtworkOwnerKind.SERIES] scope to their own identifier via
+   * [XoboroNativeEventScope.MediaItemMembers] / [XoboroNativeEventScope.SeriesMembers]: a singleton
+   * membership list is exactly "visible if this one item is visible", the same check the read paths
+   * already run.
    *
-   * [ArtworkOwnerKind.COLLECTION] and [ArtworkOwnerKind.READ_LIST] would need the collection's or
-   * read list's member series/books to scope the same way, and the event does not carry them.
-   * Resolving that here would mean the bridge doing its own repository lookup — inventing a
-   * broader-than-true fallback (or no scope at all) would look right and not be, so these two
-   * owner kinds are left unmapped for now instead.
+   * [ArtworkOwnerKind.COLLECTION] and [ArtworkOwnerKind.READ_LIST] scope to
+   * [ArtworkEvent.groupingMembers], which the event now carries. They were previously unmapped
+   * because the bridge could not scope them without a repository lookup of its own, and a lookup in
+   * an event mapper races the change it describes. The membership moved onto the domain event
+   * instead, so the mapper stays a pure function of what it was handed.
+   *
+   * An **empty** membership list still yields no event. A grouping with no members has no visible
+   * members, and [XoboroNativeEventScope.SeriesMembers] already defines that as not visible — so
+   * there is nothing to announce, and announcing it would require a scope broader than the truth.
    */
   fun map(event: ArtworkEvent): XoboroNativeEvent? {
     val owner = event.artwork.owner
@@ -174,7 +177,16 @@ object XoboroNativeEventBridge {
           XoboroNativeEventScope.MediaItemMembers(listOf(BookId(owner.id)))
         ArtworkOwnerKind.SERIES ->
           XoboroNativeEventScope.SeriesMembers(listOf(SeriesId(owner.id)))
-        ArtworkOwnerKind.COLLECTION, ArtworkOwnerKind.READ_LIST -> return null
+        ArtworkOwnerKind.COLLECTION ->
+          event.groupingMembers
+            .takeIf(List<String>::isNotEmpty)
+            ?.let { members -> XoboroNativeEventScope.SeriesMembers(members.map(::SeriesId)) }
+            ?: return null
+        ArtworkOwnerKind.READ_LIST ->
+          event.groupingMembers
+            .takeIf(List<String>::isNotEmpty)
+            ?.let { members -> XoboroNativeEventScope.MediaItemMembers(members.map(::BookId)) }
+            ?: return null
       }
     return XoboroNativeEvent(
       name = POSTER_CHANGED,

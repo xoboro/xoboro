@@ -18,9 +18,13 @@ import io.xoboro.core.domain.SeriesId
  * Library scoping is applied where the domain event carries a `LibraryId` — [LibraryEvent] and
  * [CatalogMutationEvent], which together are the entire scan firehose. [OrganizationEvent] and
  * [ArtworkEvent] carry no library scope in their payloads (a collection may legitimately span
- * libraries, and an artwork event carries only owner kind and id), so they are still broadcast
- * to every subscriber. Resolving their scope would mean a per-event lookup that cannot work for
- * deletions, so the gap is recorded in ADR 0087 rather than closed with a fail-open filter.
+ * libraries), so they are still broadcast to every subscriber. [ArtworkEvent.groupingMembers] now
+ * carries the owning grouping's membership, which is what the native stream scopes on — but this
+ * hub filters on `libraryId` only, and turning a member list into libraries would put exactly the
+ * per-event lookup back in the mapper that the membership was added to remove. Adding a
+ * member-based filter to this hub would mean extending a surface that is deliberately frozen
+ * (ADR 0082) for no client that asks for it, so the gap stays recorded in ADR 0087. Komga itself
+ * broadcasts these events.
  *
  * [CatalogImportEvent] stays administrator-only and [ReadProgressEvent]/[UserEvent] stay scoped
  * to their own user, as before.

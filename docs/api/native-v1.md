@@ -1022,13 +1022,20 @@ necessarily see was removed; this is bounded to the same disclosure as an
 item that was added and removed while the subscriber was away, and it is what
 lets every client drop a phantom catalog entry instead of holding it forever.
 
-**`poster.changed` is not emitted when the artwork's owner is a collection or
-a read list.** Both owner kinds would need their member series or media items
-resolved to scope the event honestly, and the event does not carry that
-membership. A client that shows a collection or read-list cover will
-therefore show a stale one until it refetches for an unrelated reason (e.g.
-paging back to that view); this is a known, deliberate gap, not an omission
-to route around client-side.
+**`poster.changed` is emitted for all four owner kinds.** For a collection or
+read list it is scoped to the grouping's member series or media items, exactly
+as `collection.changed` and `read-list.changed` are, so a subscriber hears about
+a cover change only if they can see at least one member.
+
+The single exception is a grouping with **no members**: no member is visible, so
+the change is not announced at all. This matches the read paths, where a
+grouping with no visible members is not visible either. A client that creates an
+empty collection, uploads a cover for it, and waits for an event will wait
+forever — it should re-read after its own mutation rather than expect one.
+
+The `ids` payload names the **grouping**, not its members: the client is being
+told which cover changed, and the membership is only how the server decided who
+may hear it.
 
 ### Connection limits and reverse-proxy requirements
 
