@@ -45,6 +45,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.random.Random
 import kotlin.time.TimeSource
 import kotlin.time.measureTime
 import kotlinx.coroutines.delay
@@ -69,6 +70,13 @@ import org.junit.jupiter.api.io.TempDir
  * sequential), a cold OS page cache (the JVM and filesystem cache are warm from generation),
  * network transport (native HTTP calls run in-process through Ktor's test host), and artwork
  * generation (no thumbnails are produced here).
+ *
+ * `api.first_series_read_after_scan` is a deliberate exception to the steady-state latency
+ * metrics: it is a single observation of the first `/series` call after a scan, which absorbs a
+ * one-time full-catalog aggregation-cache rebuild (see the retry-policy note below). It is a
+ * cold-cache, one-time cost, not steady-state `/series` latency — do not compare it against
+ * `api.series_listing`, and do not average it across runs the way `api.series_listing.p50` is
+ * meant to be read.
  *
  * Retry policy for native API calls (see [attemptWithRetries]): up to 5 attempts total (1 initial
  * + 4 retries) on a 5xx response or a thrown exception, with a fixed 150 ms backoff between
@@ -215,11 +223,17 @@ class PerformanceHarnessTest {
 
         // The first-ever call to /series triggers a one-time full-catalog aggregation-cache
         // rebuild (JooqBookMetadataAggregationRepository.refreshAllDirty) covering every series
-        // marked dirty since the scan. At this library's scale that write can take long enough to
-        // collide with the idle worker's periodic queue poll, so this one call — and only this
-        // one — gets a generously larger retry budget than steady-state requests. Once the cache
-        // is warm, nothing later should need it: no other request in this harness dirties a series.
-        val topSeries =
+        // marked dirty since the scan. That is a real, user-visible cost — "how long does the
+        // first browse take after scanning a library" — not an error to retry past and discard.
+        // So this call keeps its generously larger retry budget (it can otherwise collide with
+        // the idle worker's periodic queue poll and exhaust a steady-state budget), but the timed
+        // value recorded below is the FULL elapsed wall time of this call including whatever it
+        // absorbed, plus the attempt count it took — unlike measureRepeated, a retried result here
+        // is the number, not something excluded from it. This is a single, one-time observation:
+        // it is not averaged, and nothing later in this run should need the same budget, since no
+        // other request here dirties a series after the cache is warm.
+        val firstSeriesReadMark = TimeSource.Monotonic.markNow()
+        val firstSeriesReadOutcome =
           attemptWithRetries(
             attempts = CACHE_WARMUP_RETRY_ATTEMPTS,
             backoffMillis = CACHE_WARMUP_RETRY_BACKOFF_MILLIS,
@@ -227,7 +241,16 @@ class PerformanceHarnessTest {
             client.get("$XOBORO_API_PREFIX/series?page=0&size=1&sort=mediaItemCount,desc") {
               bearerAuth(token)
             }
-          }.response
+          }
+        val firstSeriesReadElapsedMillis = firstSeriesReadMark.elapsedNow().inWholeMilliseconds.toDouble()
+        report.recordColdRead(
+          "api.first_series_read_after_scan",
+          scannedBookCount,
+          firstSeriesReadElapsedMillis,
+          firstSeriesReadOutcome.attempts,
+        )
+        val topSeries =
+          firstSeriesReadOutcome.response
             .body<XoboroPageResponse<XoboroSeriesResponse>>()
             .items
             .single()
@@ -336,7 +359,7 @@ class PerformanceHarnessTest {
    * it is not a production fix, only a harness-level tolerance for a known-rare race between a
    * request's read-triggered cache refresh and background scheduler/worker writes. [attempts] and
    * [backoffMillis] default to the steady-state policy; callers absorbing a known one-time
-   * expensive write (see the `topSeries` call site) may override them.
+   * expensive write (see the `firstSeriesReadOutcome` call site) may override them.
    */
   private suspend fun attemptWithRetries(
     attempts: Int = TRANSIENT_RETRY_ATTEMPTS,
@@ -352,7 +375,11 @@ class PerformanceHarnessTest {
       } catch (failure: Exception) {
         lastFailure = failure
       }
-      if (attempt < attempts - 1) delay(backoffMillis)
+      // Full jitter, not a fixed delay: a fixed backoff can stay phase-locked with the competing
+      // background writer's own steady poll cadence, so every retry lands in the same collision
+      // window instead of a progressively different one. Observed in practice: a fixed 300ms
+      // backoff against the largest library size here failed all 10 attempts in a row.
+      if (attempt < attempts - 1) delay(Random.nextLong(1, backoffMillis + 1))
     }
     throw requireNotNull(lastFailure) { "Retry loop exited without recording a failure" }
   }

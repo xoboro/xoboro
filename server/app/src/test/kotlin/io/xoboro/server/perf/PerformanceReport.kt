@@ -76,6 +76,23 @@ class PerformanceReport {
     metrics += PerformanceMetric(key, itemCount, bytes.toString(), "bytes")
   }
 
+  /**
+   * Records a single, one-time cold-read observation: the full elapsed wall time of the call
+   * (including any retries it needed) plus the attempt count it took. Unlike [recordLatency], this
+   * is not a steady-state statistic to be averaged — it is one sample of a cost that only happens
+   * once, so [attempts] is reported alongside it rather than excluding a retried result from the
+   * number. See `PerformanceHarnessTest`'s `api.first_series_read_after_scan` call site.
+   */
+  fun recordColdRead(
+    key: String,
+    itemCount: Long,
+    millis: Double,
+    attempts: Int,
+  ) {
+    recordMillis(key, itemCount, millis)
+    metrics += PerformanceMetric("$key.attempts", itemCount, attempts.toString(), "requests")
+  }
+
   fun toMachineReadableLines(): List<String> =
     metrics.map { "xoboro.perf.${it.key}=${it.value} unit=${it.unit} items=${it.itemCount}" }
 

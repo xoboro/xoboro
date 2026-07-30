@@ -243,6 +243,13 @@ for exactly what it measures and what it deliberately does not (concurrent
 multi-user load, a cold OS page cache, real network transport, artwork
 generation).
 
+One metric, `api.first_series_read_after_scan`, is a single cold-cache
+observation of the first `/series` call after a scan, not steady-state
+latency: that call absorbs a one-time full-catalog metadata-aggregation
+rebuild covering every series scanned so far, and can be considerably
+slower than the `api.series_listing` steady-state numbers reported
+alongside it. Do not quote it as `/series` performance.
+
 ## Feature status
 
 The auditable release ledger is maintained in
