@@ -233,10 +233,38 @@ jobs:
                         lease_expires_at_ms, substr(coalesce(last_error, ''), 1, 400)
                  from task order by created_at_ms;" 2>&1 || true
               echo "--- candidate series rows ---"
+              # The timestamps are the discriminator, not decoration.
+              # initialize_series_metadata (V14) fires AFTER INSERT ON series and seeds
+              # series_metadata from series.name, copying series.created_at_ms into
+              # updated_at_ms. MetadataRefreshLifecycle.refreshSeries stamps a fresh
+              # updated_at_ms only when at least one provider returned a patch; when none
+              # did, it returns early without upserting at all. So:
+              #
+              #   m.updated_at_ms == s.created_at_ms  -> refresh applied nothing
+              #                                          (every series provider returned null)
+              #   m.updated_at_ms >  s.created_at_ms  -> refresh applied, then something else
+              #                                          put the trigger default back
+              #
+              # Those two need entirely different fixes and the previous probe could not tell
+              # them apart, which is why it narrowed the cause without identifying it.
               sqlite3 "${candidate_database}" \
-                "select s.id, s.name, s.oneshot, m.title
+                "select s.id, s.name, s.oneshot, s.relative_uri, s.deleted_at_ms,
+                        s.created_at_ms, m.title, m.title_lock, m.updated_at_ms
                  from series s left join series_metadata m on m.series_id = s.id
                  order by s.name;" 2>&1 || true
+              echo "--- candidate book rows ---"
+              # An empty book list for the series is the only single condition that makes both
+              # ComicInfoMetadataProvider and OneShotSeriesMetadataProvider return null at the
+              # same time, and it happens if the book is not attached to the series the refresh
+              # ran against. Dump the join rather than assuming it holds.
+              sqlite3 "${candidate_database}" \
+                "select b.id, b.name, b.series_id, b.deleted_at_ms, bm.title,
+                        bm.updated_at_ms
+                 from book b left join book_metadata bm on bm.book_id = b.id
+                 order by b.name;" 2>&1 || true
+              echo "--- candidate server log (scan/analyze/refresh) ---"
+              grep -iE 'scan|analyz|refresh|metadata|error|exception' \
+                "${RUNNER_TEMP}/xoboro.log" 2>/dev/null | tail -80 || true
             } >&2
             exit 1
           fi
