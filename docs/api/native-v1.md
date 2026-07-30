@@ -727,6 +727,44 @@ Invalid keys, blank values, and malformed JSON return `400 invalid_request`.
 A non-administrator receives `403 client_settings_forbidden` from a global
 route.
 
+### Duplicate pages
+
+| Method | Path | Success |
+| --- | --- | --- |
+| `GET` | `/api/xoboro/v1/duplicate-pages` | `200 OK` |
+| `GET` | `/api/xoboro/v1/duplicate-pages/decided` | `200 OK` |
+| `GET` | `/api/xoboro/v1/duplicate-pages/{pageHash}/media-items` | `200 OK` |
+| `PUT` | `/api/xoboro/v1/duplicate-pages/{pageHash}` | `200 OK` |
+
+Administrator-only, all four. Duplicate pages expose file names and sizes across
+every library, so a caller with a grant on one library must not learn another's
+file layout from this surface. A non-administrator receives
+`403 duplicate_pages_forbidden`.
+
+`GET /duplicate-pages` lists page hashes that appear in more than one media item
+and have no recorded decision. `GET /duplicate-pages/decided` lists the ones that
+do, optionally filtered by a repeatable `action` parameter; omitting it returns
+every decision rather than none.
+`GET /duplicate-pages/{pageHash}/media-items` lists every media item and page
+number carrying that hash.
+
+`PUT /duplicate-pages/{pageHash}` records what should happen, with an `action` of
+`IGNORE`, `DELETE_MANUAL`, or `DELETE_AUTO`, and an optional `sizeBytes` — optional
+because a hash whose pages differ in size has no single size, and the candidate
+listing reports `null` for it.
+
+**Xoboro records these decisions and does not perform removal.** Nothing executes
+`DELETE_AUTO` or `DELETE_MANUAL`: removing a page means rewriting an archive on
+disk, which is destructive, irreversible for the operator's own files, and a
+decision that belongs to whoever owns those files rather than to a sweep. The two
+delete actions are stored as stated intent, and `deleteCount` is therefore always
+`0` — it is the stored value, not a placeholder that will change shape later.
+
+`IGNORE` is the one action with an effect today, and a real one: the candidate list
+excludes any hash with a recorded decision, so ignoring a hash removes it from the
+list permanently. That is why the delete actions are not rejected outright — the
+surface is useful without removal existing.
+
 ### External login configuration
 
 | Method | Path | Success |
