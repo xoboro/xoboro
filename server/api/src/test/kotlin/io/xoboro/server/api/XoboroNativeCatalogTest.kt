@@ -21,6 +21,8 @@ import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.CatalogSeries
+import io.xoboro.core.application.CatalogSort
+import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEventPublisher
 import io.xoboro.core.application.LibraryLifecycle
@@ -133,6 +135,81 @@ class XoboroNativeCatalogTest {
       assertFalse(fixture.catalog.queried)
     }
 
+  @Test
+  fun `serves named discovery feeds with the feed's own ordering`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      // Ordering-only feeds exist on both collections, because nothing about them is reader-specific.
+      assertEquals(
+        HttpStatusCode.OK,
+        client.get("$XOBORO_API_PREFIX/series/feeds/new") { bearerAuth(fixture.token) }.status,
+      )
+      assertEquals(
+        listOf(CatalogSort("createdAt", CatalogSortDirection.DESC)),
+        fixture.catalog.lastPage?.sorts,
+      )
+
+      assertEquals(
+        HttpStatusCode.OK,
+        client.get("$XOBORO_API_PREFIX/media-items/feeds/updated") { bearerAuth(fixture.token) }.status,
+      )
+      assertEquals(
+        listOf(CatalogSort("updatedAt", CatalogSortDirection.DESC)),
+        fixture.catalog.lastPage?.sorts,
+      )
+    }
+
+  @Test
+  fun `applies the reader-scoped filter for on-deck and keep-reading`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      client.get("$XOBORO_API_PREFIX/media-items/feeds/on-deck") { bearerAuth(fixture.token) }
+      assertEquals(true, fixture.catalog.lastBookQuery?.onDeck)
+      assertEquals(false, fixture.catalog.lastBookQuery?.keepReading)
+
+      client.get("$XOBORO_API_PREFIX/media-items/feeds/keep-reading") { bearerAuth(fixture.token) }
+      assertEquals(true, fixture.catalog.lastBookQuery?.keepReading)
+      assertEquals(false, fixture.catalog.lastBookQuery?.onDeck)
+    }
+
+  @Test
+  fun `refuses to reorder a named feed`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      val response =
+        client.get("$XOBORO_API_PREFIX/media-items/feeds/new?sort=title") {
+          bearerAuth(fixture.token)
+        }
+
+      // Rejected, not silently ignored. A feed's ordering is part of its definition, so honouring an
+      // override would put back the client-to-client disagreement the feed removes - and ignoring it
+      // quietly would leave the caller believing they had changed something.
+      assertEquals(HttpStatusCode.BadRequest, response.status)
+      assertEquals("invalid_query", response.body<XoboroApiError>().code)
+      assertFalse(fixture.catalog.queried)
+    }
+
+  @Test
+  fun `does not expose reader-scoped feeds on the series collection`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      // on-deck and keep-reading are about what this reader has started, which is a property of media
+      // items. Mounting them on /series would answer a question nobody asked with a filter that means
+      // nothing there.
+      assertEquals(
+        HttpStatusCode.NotFound,
+        client.get("$XOBORO_API_PREFIX/series/feeds/on-deck") { bearerAuth(fixture.token) }.status,
+      )
+    }
+
   private fun ApplicationTestBuilder.installCatalog(fixture: Fixture) {
     application {
       install(ContentNegotiation) {
@@ -230,6 +307,7 @@ class XoboroNativeCatalogTest {
   private class RecordingCatalog : CatalogReadRepository {
     var queried = false
     var lastSeriesQuery: SeriesCatalogQuery? = null
+    var lastBookQuery: BookCatalogQuery? = null
     var lastAccess: CatalogAccess? = null
     var lastPage: CatalogPageRequest? = null
 
@@ -239,6 +317,7 @@ class XoboroNativeCatalogTest {
       page: CatalogPageRequest,
     ): CatalogPage<CatalogBook> {
       queried = true
+      lastBookQuery = query
       lastAccess = access
       lastPage = page
       return CatalogPage(listOf(syntheticBook()), page.page, page.size, 1, sorts = page.sorts)
