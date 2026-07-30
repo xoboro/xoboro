@@ -19,7 +19,7 @@ Statuses:
 | Reader web UI | MISSING | Port the simple-komga browsing and comic/EPUB/PDF readers after the native API contract is stable |
 | Administrator web UI | MISSING | Build library, task, user, security, metadata, duplicate, import, settings, metrics, history, and maintenance screens |
 | Authentication hardening | READY | Every named item is done: the authorization audit (ADR 0090), scoped and expiring API keys (ADR 0092), and the explicit OIDC account-linking policy with a safe default (ADR 0093). Native cookies have same-origin CSRF protection, login is throttled, sessions are digest-only and restart-safe, passwords use Argon2id with verified BCrypt upgrades, and every native session outcome is recorded as authentication activity. Acceptance against a live OIDC provider needs real credentials and is tracked in the OAuth2/OIDC row |
-| Local-library end-to-end acceptance | PARTIAL | Run large synthetic and disposable real-tree scans through native APIs, verify restart/resume, deletion safety, and reader delivery without relying on Komga-shaped routes |
+| Local-library end-to-end acceptance | PARTIAL | A real CBZ tree is registered, scanned, analyzed, navigated, read and progressed entirely through native routes, then survives a runtime restart with identifiers, reading order and progress intact; a vanished file leaves the live listing but stays recoverable under `trashed=true` (ADR 0101). Remaining: the same walk at a size where it takes minutes rather than seconds, and against a disposable real-world tree rather than a generated one |
 
 ## Server foundation
 
@@ -84,8 +84,8 @@ Statuses:
 | OAuth2/OIDC | PARTIAL | Account-linking policy is explicit with a safe default, and administrators can read back the resolved providers and policy over the native API (ADR 0093). Provider registration stays in environment variables so client secrets never enter the database; write access is declined, not deferred. Production-provider acceptance against a live provider remains open because it needs real credentials |
 | Authentication activity | READY | Native administrator and caller-scoped paging, a configurable retention window with a scheduled sweep (ADR 0095), and recording of every native session outcome - setup, accepted login, rejected credentials, and cross-site rejection - alongside the Komga-compatible password, API-key, remember-me and OAuth2 sources |
 | Per-user client settings | READY | Native effective, per-user write, and administrator global-settings APIs are implemented; replace arbitrary compatibility keys with versioned native preferences where possible |
-| Page and Readium locator progress | PARTIAL | Reader acceptance of the mutation/conflict contract |
-| Mark read/unread, keep reading, and previous/next navigation | PARTIAL | Native API/UI plus end-to-end multi-item navigation tests |
+| Page and Readium locator progress | READY | The mutation/conflict contract is exercised end to end: a newer write applies, an older one is refused with `409 stale_progress` rather than silently rewinding the reader's place, and progress survives a restart (ADR 0101) |
+| Mark read/unread, keep reading, and previous/next navigation | PARTIAL | Multi-item navigation is covered end to end against a scanned tree: previous/next walk the in-series reading order from a middle item, and the ends return `404` rather than wrapping around (ADR 0101). Remaining: the administrator UI |
 
 ## Interoperability and migration
 
