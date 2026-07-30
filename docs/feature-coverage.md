@@ -43,7 +43,7 @@ Statuses:
 | File import, upgrade, deletion, and transient preview | READY | Native API/UI |
 | Duplicate file detection | READY | Native API/UI |
 | Duplicate-page detection and removal | PARTIAL | Native API/UI and optional automatic policy execution |
-| Incorrect-extension repair | PARTIAL | Add PDF/EPUB repair; local ZIP/RAR repair is implemented |
+| Incorrect-extension repair | READY | ZIP, RAR, PDF, and EPUB are identified by content and repaired, including across media kinds; a rename into a kind the library does not scan is declined so the repair cannot delete the book |
 | RAR-to-CBZ conversion | READY | Native API/UI |
 
 ## Formats and delivery

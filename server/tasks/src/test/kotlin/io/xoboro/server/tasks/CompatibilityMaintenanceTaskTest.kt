@@ -15,6 +15,10 @@ import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.KnownPageHash
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.MediaProfile
+import io.xoboro.core.domain.LibrarySettings
+import io.xoboro.core.domain.BookMedia
 import io.xoboro.core.domain.PageHashAction
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
@@ -45,6 +49,7 @@ import java.util.Base64
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -251,17 +256,159 @@ class CompatibilityMaintenanceTaskTest {
     }
   }
 
+  @Test
+  fun `repairs a document mislabelled as a comic archive and records its kind`() {
+    val root = Files.createDirectories(temporaryDirectory.resolve("library-document"))
+    val seriesDirectory = Files.createDirectories(root.resolve("Synthetic series"))
+    val document = seriesDirectory.resolve("chapter.cbz")
+    Files.write(document, syntheticPdf())
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("document.sqlite"))).use {
+        database ->
+      seedCatalog(database, root, seriesDirectory, document)
+      val books = JooqBookRepository(database)
+      val media = JooqBookMediaRepository(database)
+      media.upsert(
+        BookMedia(
+          bookId = BOOK_ID,
+          status = MediaStatus.ERROR,
+          mediaType = "application/zip",
+          profile = MediaProfile.DIVINA,
+          createdAtMillis = 1,
+        ),
+      )
+      val queue = JooqDurableTaskQueue(database)
+
+      handlerFor(database, books, media, queue).handle(repairTask("maintain-document"))
+
+      assertTrue(Files.exists(seriesDirectory.resolve("chapter.pdf")))
+      assertTrue(!Files.exists(document))
+      val repaired = requireNotNull(books.findByIdOrNull(BOOK_ID))
+      // The scan derives kind from the extension but nothing re-analyzes a book afterwards, so a
+      // repair that left the kind alone would leave this book analyzed as an archive forever.
+      assertEquals(MediaKind.PDF, repaired.mediaKind)
+      assertEquals("Synthetic series/chapter.pdf", repaired.relativePath)
+      // Pages and a profile produced by the ZIP analyzer describe nothing about a PDF.
+      assertNull(media.findByBookIdOrNull(BOOK_ID))
+    }
+  }
+
+  @Test
+  fun `repairs a comic archive mislabelled as a document`() {
+    val root = Files.createDirectories(temporaryDirectory.resolve("library-reverse"))
+    val seriesDirectory = Files.createDirectories(root.resolve("Synthetic series"))
+    val archive = seriesDirectory.resolve("chapter.pdf")
+    ZipOutputStream(Files.newOutputStream(archive)).use { output ->
+      output.putNextEntry(ZipEntry("001.png"))
+      output.write(byteArrayOf(1, 2, 3))
+      output.closeEntry()
+    }
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("reverse.sqlite"))).use {
+        database ->
+      seedCatalog(database, root, seriesDirectory, archive, mediaKind = MediaKind.PDF)
+      val books = JooqBookRepository(database)
+      val media = JooqBookMediaRepository(database)
+      val queue = JooqDurableTaskQueue(database)
+
+      // This direction was unreachable: both the emitter and the handler filtered to comic archives,
+      // so a book the catalog believed was a PDF never entered maintenance at all.
+      assertEquals(
+        1,
+        ArchiveMaintenanceTaskEmitter(books, queue) { 20 }.maintainLibrary(
+          libraryId = LIBRARY_ID,
+          repairExtensions = true,
+          convertToCbz = false,
+        ),
+      )
+      handlerFor(database, books, media, queue).handle(repairTask("maintain-reverse"))
+
+      assertTrue(Files.exists(seriesDirectory.resolve("chapter.cbz")))
+      assertEquals(
+        MediaKind.COMIC_ARCHIVE,
+        requireNotNull(books.findByIdOrNull(BOOK_ID)).mediaKind,
+      )
+    }
+  }
+
+  @Test
+  fun `leaves a mislabelled file alone when the library would stop indexing it`() {
+    val root = Files.createDirectories(temporaryDirectory.resolve("library-unscanned"))
+    val seriesDirectory = Files.createDirectories(root.resolve("Synthetic series"))
+    val document = seriesDirectory.resolve("chapter.cbz")
+    Files.write(document, syntheticPdf())
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("unscanned.sqlite"))).use {
+        database ->
+      seedCatalog(
+        database,
+        root,
+        seriesDirectory,
+        document,
+        settings = LibrarySettings(scanPdf = false),
+      )
+      val books = JooqBookRepository(database)
+      val media = JooqBookMediaRepository(database)
+      val queue = JooqDurableTaskQueue(database)
+
+      handlerFor(database, books, media, queue).handle(repairTask("maintain-unscanned"))
+
+      // Kind comes from the extension, and an unscanned kind yields no scan candidate - so renaming
+      // this file would delete the book on the next scan. A vanished book is worse than a wrong name.
+      assertTrue(Files.exists(document))
+      assertTrue(!Files.exists(seriesDirectory.resolve("chapter.pdf")))
+      assertEquals(
+        "Synthetic series/chapter.cbz",
+        requireNotNull(books.findByIdOrNull(BOOK_ID)).relativePath,
+      )
+      assertEquals(0, queue.counts().pending)
+    }
+  }
+
+  private fun handlerFor(
+    database: XoboroDatabase,
+    books: JooqBookRepository,
+    media: JooqBookMediaRepository,
+    queue: JooqDurableTaskQueue,
+  ): ArchiveMaintenanceTaskHandler =
+    ArchiveMaintenanceTaskHandler(
+      books = books,
+      libraries = JooqLibraryRepository(database),
+      media = media,
+      accesses = listOf(LocalSourceMediaAccess()),
+      mutations = listOf(LocalSourceMutationAccess()),
+      converter = RarToCbzConverter(),
+      analysisEmitter = AnalyzeBookTaskEmitter(books, queue) { 20 },
+      scanEmitter = ScanLibraryTaskEmitter(queue) { 20 },
+      currentTimeMillis = { 20 },
+    )
+
+  private fun repairTask(id: String): DurableTask =
+    DurableTask(
+      id = id,
+      type = ArchiveMaintenanceTaskHandler.TASK_TYPE,
+      payloadJson = """{"bookId":"book-1","repairExtensions":true,"convertToCbz":false}""",
+      availableAtMillis = 1,
+    )
+
+  /**
+   * A file the format detector identifies as a PDF. Only the signature matters here - this test is
+   * about where a repair routes the file, not about parsing a document.
+   */
+  private fun syntheticPdf(): ByteArray =
+    "%PDF-1.7\n%\u00e2\u00e3\u00cf\u00d3\ntrailer<</Root 1 0 R>>\n%%EOF\n".encodeToByteArray()
+
   private fun seedCatalog(
     database: XoboroDatabase,
     root: Path,
     seriesDirectory: Path,
     archive: Path,
+    mediaKind: MediaKind = MediaKind.COMIC_ARCHIVE,
+    settings: LibrarySettings = LibrarySettings(),
   ) {
     JooqLibraryRepository(database).insert(
       Library(
         id = LIBRARY_ID,
         name = "Synthetic library",
         root = SourceLocation("local", root.toUri().toString()),
+        settings = settings,
         createdAtMillis = 1,
       ),
     )
@@ -286,7 +433,7 @@ class CompatibilityMaintenanceTaskTest {
         relativePath =
           root.relativize(archive).iterator().asSequence().joinToString("/") { it.toString() },
         sourceItemId = archive.toUri().toString(),
-        mediaKind = MediaKind.COMIC_ARCHIVE,
+        mediaKind = mediaKind,
         fileModifiedAtMillis = 1,
         fileSize = Files.size(archive),
         createdAtMillis = 1,
