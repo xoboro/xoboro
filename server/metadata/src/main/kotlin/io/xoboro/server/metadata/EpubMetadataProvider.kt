@@ -183,9 +183,17 @@ class EpubMetadataProvider(
             creator.attr("opf:role").trim().ifBlank {
               creator.refinement("role").orEmpty()
             }.ifBlank {
-              if (creator.normalName().endsWith("creator")) "author" else "contributor"
+              // Relator codes rather than display words. This used to be the literal "author", which
+              // no ROLE_NAMES key matched - so an undeclared `dc:creator` reached the catalog as
+              // "author" while a declared `aut` on the next line reached it as "writer".
+              //
+              // What actually fixes that is ROLE_DISPLAY_NAMES, which now resolves "author" too. This
+              // line is the smaller point: the fallback takes the same path as a declared value
+              // instead of depending on "author" also happening to be a display name nobody chose to
+              // support for this purpose.
+              if (creator.normalName().endsWith("creator")) "aut" else "ctb"
             }
-          Author(name, ROLE_NAMES[role.lowercase()] ?: role)
+          Author(name, role.toRoleName())
         }.distinctBy { it.normalizedName to it.normalizedRole }
     val identifiers = metadata.select("*|identifier")
     val isbn =
@@ -337,6 +345,21 @@ class EpubMetadataProvider(
     val readingDirection: ReadingDirection?,
   )
 
+  /**
+   * Resolves a declared role to the shared vocabulary, trying the relator code, then its English name.
+   *
+   * An unresolvable value is returned trimmed and verbatim rather than dropped: a role nobody mapped is
+   * still information the publication asserted, and losing it would be worse than showing it raw.
+   */
+  private fun String.toRoleName(): String {
+    val normalized = trim().lowercase()
+    ROLE_NAMES[normalized]?.let { return it }
+    ROLE_DISPLAY_NAMES[normalized]?.let { return it }
+    // A value that is already a vocabulary name - "writer", "colorist" - passes through as itself.
+    if (normalized in ROLE_NAMES.values) return normalized
+    return trim()
+  }
+
   private companion object {
     const val EPUB_MEDIA_TYPE = "application/epub+zip"
     const val MIMETYPE_PATH = "mimetype"
@@ -353,29 +376,88 @@ class EpubMetadataProvider(
      * An unmapped code passes through verbatim, which is why the map matters: before it was extended,
      * a publication crediting `art` or `clr` surfaced the bare relator code as the author's role.
      *
-     * `inker` and `letterer` have no counterpart here on purpose - MARC defines no relator for
-     * either, and `ltr` is Lithographer, not letterer. Those two roles only arrive from ComicInfo.
+     * `inker` and `letterer` have no counterpart here on purpose: MARC defines no relator for either,
+     * so both arrive only from ComicInfo. In particular **`ltr` is deliberately unmapped.** It looks
+     * like an abbreviation of "letterer" and mapping it there is the obvious mistake to make; the MARC
+     * code for Lithographer is `ltg`, which is mapped. Guessing at `ltr` would mislabel whatever it
+     * actually credits, so it passes through verbatim and a test pins that.
+     *
+     * Where MARC and ComicInfo agree on a concept the ComicInfo name wins, because that is the name
+     * the rest of the catalog already uses. Where MARC has a credit ComicInfo does not, the relator's
+     * own name is used in lowercase rather than being folded into a near-neighbour: an arranger is not
+     * a writer, and crediting one as the other is worse than an unfamiliar role name.
      */
     val ROLE_NAMES =
       mapOf(
+        // Shared with ComicInfo's vocabulary.
         "aut" to "writer",
         "cre" to "writer",
+        "aus" to "writer",
+        "aud" to "writer",
         "art" to "penciller",
         "ill" to "penciller",
         "clr" to "colorist",
         "cov" to "cover",
-        "pht" to "photographer",
-        "dsr" to "designer",
         "trl" to "translator",
         "edt" to "editor",
+        "edc" to "editor",
+        // Present in publications, absent from ComicInfo.
+        "pht" to "photographer",
+        "dsr" to "designer",
+        "bkd" to "designer",
+        "bjd" to "designer",
         "adp" to "adapter",
         "com" to "compiler",
         "ann" to "annotator",
         "aui" to "introduction",
+        "wpr" to "preface",
         "aft" to "afterword",
         "nrt" to "narrator",
+        "spk" to "speaker",
         "pbl" to "publisher",
+        "prt" to "printer",
         "ctb" to "contributor",
+        "wst" to "contributor",
+        "wat" to "contributor",
+        "cmm" to "commentator",
+        "cwt" to "commentator",
+        "rev" to "reviser",
+        "abr" to "abridger",
+        "cll" to "calligrapher",
+        "egr" to "engraver",
+        "etr" to "etcher",
+        "ltg" to "lithographer",
+        "lyr" to "lyricist",
+        "cmp" to "composer",
+        "arr" to "arranger",
+        "drt" to "director",
+        "prf" to "performer",
+      )
+
+    /**
+     * The English relator names for the codes above, so a producer that writes `role="Illustrator"`
+     * instead of `role="ill"` lands on the same role.
+     *
+     * EPUB 3 says a `role` refinement should carry a code from the scheme it names, but writing the
+     * display name is common enough that treating it as unmapped would surface `"Illustrator"` as a
+     * role beside `"penciller"` for the same credit. Derived from [ROLE_NAMES] where the relator name
+     * is simply the value, and listed explicitly only where it is not.
+     */
+    val ROLE_DISPLAY_NAMES =
+      mapOf(
+        "author" to "writer",
+        "creator" to "writer",
+        "screenwriter" to "writer",
+        "artist" to "penciller",
+        "illustrator" to "penciller",
+        "colourist" to "colorist",
+        "coverartist" to "cover",
+        "cover artist" to "cover",
+        "book designer" to "designer",
+        "editor of compilation" to "editor",
+        "writer of preface" to "preface",
+        "author of introduction" to "introduction",
+        "author of afterword" to "afterword",
       )
   }
 }
