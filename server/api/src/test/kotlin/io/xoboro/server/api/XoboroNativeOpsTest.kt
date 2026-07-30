@@ -537,15 +537,15 @@ class XoboroNativeOpsTest {
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.readerToken) }
       assertEquals(HttpStatusCode.Forbidden, forbidden.status)
       assertEquals("task_administration_forbidden", forbidden.body<XoboroApiError>().code)
-      assertEquals(0, fixture.tasks.clearCalls)
-      assertEquals(7, fixture.tasks.unclaimed)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
+      assertEquals(7, fixture.tasks.pending)
 
       val response =
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed") { bearerAuth(fixture.adminToken) }
       assertEquals(HttpStatusCode.OK, response.status)
       assertEquals(7, response.body<XoboroClearedTasksResponse>().cleared)
-      assertEquals(1, fixture.tasks.clearCalls)
-      assertEquals(0, fixture.tasks.unclaimed)
+      assertEquals(1, fixture.tasks.clearPendingCalls)
+      assertEquals(0, fixture.tasks.pending)
     }
 
   @Test
@@ -563,7 +563,7 @@ class XoboroNativeOpsTest {
         client.delete("$XOBORO_API_PREFIX/tasks/unclaimed").status,
       )
       assertEquals(0, fixture.tasks.countsCalls)
-      assertEquals(0, fixture.tasks.clearCalls)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
     }
 
   @Test
@@ -581,8 +581,8 @@ class XoboroNativeOpsTest {
 
       assertEquals(HttpStatusCode.Forbidden, response.status)
       assertEquals("cross_site_request_rejected", response.body<XoboroApiError>().code)
-      assertEquals(0, fixture.tasks.clearCalls)
-      assertEquals(7, fixture.tasks.unclaimed)
+      assertEquals(0, fixture.tasks.clearPendingCalls)
+      assertEquals(7, fixture.tasks.pending)
     }
 
   @Test
@@ -993,23 +993,23 @@ class XoboroNativeOpsTest {
     }
   }
 
-  /** Only counts() and clearUnclaimed() are exercised; the rest of the queue is not this API's concern. */
+  /** Only counts() and clearPending() are exercised; the rest of the queue is not this API's concern. */
   private class RecordingTaskQueue : DurableTaskQueue {
     var countsCalls = 0
       private set
-    var clearCalls = 0
+    var clearPendingCalls = 0
       private set
-    var unclaimed = 7
+    var pending = 7
 
     override fun counts(): TaskCounts {
       countsCalls += 1
       return TaskCounts(pending = 3, running = 1, dead = 2)
     }
 
-    override fun clearUnclaimed(): Int {
-      clearCalls += 1
-      val cleared = unclaimed
-      unclaimed = 0
+    override fun clearPending(): Int {
+      clearPendingCalls += 1
+      val cleared = pending
+      pending = 0
       return cleared
     }
 

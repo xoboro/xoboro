@@ -204,7 +204,12 @@ fun Route.xoboroNativeOpsRoutes(
         }
         // The number removed is the useful part of the answer, so this reports 200 with a body
         // rather than 204. An administrator clearing a backlog needs to know how much went.
-        call.respond(XoboroClearedTasksResponse(cleared = tasks.clearUnclaimed()))
+        //
+        // This calls clearPending(), not clearUnclaimed(): an endpoint named "unclaimed" should
+        // touch unclaimed (PENDING) work and nothing else. clearUnclaimed() also sweeps up DEAD
+        // rows, which belongs to a separate, explicitly-named recovery operation instead - see
+        // DurableTaskQueue.clearPending for why these are two distinct operations.
+        call.respond(XoboroClearedTasksResponse(cleared = tasks.clearPending()))
       }
       get("/metrics") {
         val caller = call.nativeUser()

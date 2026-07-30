@@ -300,6 +300,36 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `clears only pending tasks and leaves dead and running work intact`() {
+    withQueue("clear-pending") { queue, _ ->
+      queue.enqueue(taskFixture(id = "pending"), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "running", priority = TaskPriority.HIGH), nowMillis = 2L)
+      queue.enqueue(
+        taskFixture(id = "dead", priority = TaskPriority.HIGHEST, maxAttempts = 1),
+        nowMillis = 3L,
+      )
+      queue.claim("worker", "dead-lease", nowMillis = 10L)
+      assertTrue(
+        queue.fail(
+          taskId = "dead",
+          leaseToken = "dead-lease",
+          error = "synthetic failure",
+          retryAtMillis = null,
+          nowMillis = 11L,
+        ),
+      )
+      queue.claim("worker", "running-lease", nowMillis = 12L)
+
+      assertEquals(1, queue.clearPending())
+      // The two halves that matter: the pending row is gone, and the dead row (still worth
+      // inspecting) and the in-flight running row are both untouched by an endpoint literally
+      // named "unclaimed".
+      assertEquals(TaskCounts(pending = 0, running = 1, dead = 1), queue.counts())
+      assertTrue(queue.complete("running", "running-lease"))
+    }
+  }
+
+  @Test
   fun `concurrent workers cannot claim the same task`() {
     val path = tempDirectory.resolve("concurrent.sqlite")
     XoboroDatabase.open(DatabaseConfig(path)).use { firstDatabase ->

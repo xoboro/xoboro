@@ -92,6 +92,22 @@ interface DurableTaskQueue {
 
   fun counts(): TaskCounts
 
+  /**
+   * Deletes every row not currently `RUNNING` (`PENDING` and `DEAD` together). This backs the
+   * Komga-compat task-clearing route, which mirrors real Komga's "clear the queue" behavior and
+   * makes no PENDING/DEAD distinction of its own - narrowing this predicate would change that
+   * compat surface's behavior, so it stays as-is. A native caller wanting only unclaimed
+   * (`PENDING`) work should use [clearPending] instead.
+   */
   fun clearUnclaimed(): Int =
     error("Clearing unclaimed tasks is not supported by this queue")
+
+  /**
+   * Deletes every `PENDING` row and leaves `RUNNING` and `DEAD` rows untouched. This is the
+   * native-only counterpart to [clearUnclaimed] that an endpoint literally named "unclaimed" can
+   * honor without also silently discarding the dead-task history an operator may still want to
+   * inspect.
+   */
+  fun clearPending(): Int =
+    error("Clearing pending tasks is not supported by this queue")
 }
