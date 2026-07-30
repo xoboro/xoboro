@@ -6,6 +6,7 @@ import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibrarySettings
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.ReadingDirection
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -77,8 +78,83 @@ class EpubMetadataProviderTest {
     )
   }
 
-  private fun createEpub(): Path {
-    val path = temporaryDirectory.resolve("synthetic.epub")
+  @Test
+  fun `reads the reading direction from the spine`() {
+    val rightToLeft = createEpub(name = "rtl.epub", spineDirection = "rtl")
+    val undeclared = createEpub(name = "undeclared.epub", spineDirection = "default")
+
+    // `page-progression-direction` is how an EPUB says it reads right to left, and nothing read it
+    // before, so every imported publication silently inherited the catalog default.
+    assertEquals(
+      ReadingDirection.RIGHT_TO_LEFT,
+      provider(rightToLeft).provide(library(), series(), listOf(book()))?.readingDirection,
+    )
+    // `default` declines to state a direction. Reporting LEFT_TO_RIGHT would overwrite whatever an
+    // operator had set with a claim the file never made.
+    assertNull(provider(undeclared).provide(library(), series(), listOf(book()))?.readingDirection)
+  }
+
+  @Test
+  fun `prefers the publication date over other dated events`() {
+    val epub =
+      createEpub(
+        name = "dated.epub",
+        dates =
+          """
+          <dc:date opf:event="creation" xmlns:opf="http://www.idpf.org/2007/opf">1999-01-02</dc:date>
+          <dc:date opf:event="publication" xmlns:opf="http://www.idpf.org/2007/opf">2025-04-03</dc:date>
+          """.trimIndent(),
+      )
+
+    // Taking the first parseable date made the release date depend on the order a tool happened to
+    // write the elements in - here that would have been the creation date.
+    assertEquals("2025-04-03", provider(epub).provide(library(), book())?.releaseDate)
+  }
+
+  @Test
+  fun `maps relator codes onto the shared role vocabulary`() {
+    val epub =
+      createEpub(
+        name = "credited.epub",
+        extraCreators =
+          """
+          <dc:contributor opf:role="clr" xmlns:opf="http://www.idpf.org/2007/opf">Color Hand</dc:contributor>
+          <dc:contributor opf:role="cov" xmlns:opf="http://www.idpf.org/2007/opf">Cover Hand</dc:contributor>
+          <dc:contributor opf:role="xyz" xmlns:opf="http://www.idpf.org/2007/opf">Unknown Hand</dc:contributor>
+          """.trimIndent(),
+      )
+
+    val authors =
+      provider(epub).provide(library(), book())?.authors?.associate { it.name to it.role }
+
+    // An unmapped code reaches the catalog verbatim, which is why the mapped set matters: these two
+    // used to surface as the bare relator codes "clr" and "cov" in place of a role.
+    assertEquals("colorist", authors?.get("Color Hand"))
+    assertEquals("cover", authors?.get("Cover Hand"))
+    assertEquals("xyz", authors?.get("Unknown Hand"))
+  }
+
+  @Test
+  fun `uses the collection sort form for the series title sort`() {
+    val epub = createEpub(name = "sorted.epub", seriesSortForm = "Synthetic saga, The")
+
+    val patch = provider(epub).provide(library(), series(), listOf(book()))
+
+    assertEquals("Synthetic saga", patch?.title)
+    assertEquals("Synthetic saga, The", patch?.titleSort)
+  }
+
+  private fun provider(epub: Path): EpubMetadataProvider =
+    EpubMetadataProvider(listOf(FixedAccess(epub)))
+
+  private fun createEpub(
+    name: String = "synthetic.epub",
+    spineDirection: String? = null,
+    dates: String = "<dc:date>2025-04-03T10:15:30+00:00</dc:date>",
+    seriesSortForm: String? = null,
+    extraCreators: String = "",
+  ): Path {
+    val path = temporaryDirectory.resolve(name)
     val container =
       """
       <?xml version="1.0"?>
@@ -103,21 +179,23 @@ class EpubMetadataProviderTest {
           <dc:creator id="author">Primary Author</dc:creator>
           <meta refines="#author" property="role">aut</meta>
           <dc:contributor opf:role="ill" xmlns:opf="http://www.idpf.org/2007/opf">Line Artist</dc:contributor>
+          $extraCreators
           <dc:description>A bounded metadata fixture.</dc:description>
           <dc:publisher>Fiction House</dc:publisher>
           <dc:language>en-US</dc:language>
-          <dc:date>2025-04-03T10:15:30+00:00</dc:date>
+          $dates
           <dc:subject>Adventure</dc:subject>
           <dc:subject>Mystery</dc:subject>
           <meta id="series" property="belongs-to-collection">Synthetic saga</meta>
           <meta refines="#series" property="collection-type">series</meta>
           <meta refines="#series" property="group-position">2.5</meta>
+          ${seriesSortForm?.let { "<meta refines=\"#series\" property=\"file-as\">$it</meta>" }.orEmpty()}
           <link rel="record" href="https://example.invalid/metadata"/>
         </metadata>
         <manifest>
           <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
         </manifest>
-        <spine><itemref idref="chapter"/></spine>
+        <spine${spineDirection?.let { " page-progression-direction=\"$it\"" }.orEmpty()}><itemref idref="chapter"/></spine>
       </package>
       """.trimIndent()
     ZipOutputStream(Files.newOutputStream(path)).use { archive ->
