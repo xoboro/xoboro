@@ -54,7 +54,11 @@
   async function readPage(fetchPage, requested) {
     const first = await fetchPage(requested)
     const last = Math.max(0, (first.totalPages ?? 1) - 1)
-    if (requested <= last || first.totalItems === 0) return first
+    if (requested <= last) return first
+    // Clamped even when the listing came back empty. Returning the out-of-range page
+    // because there is nothing to show anyway left the paging summary reading "0 of 0 ·
+    // page 2 of 1" — the one case where an operator is most likely to be looking at the
+    // indicator to work out where their rows went.
     return fetchPage(last)
   }
 
