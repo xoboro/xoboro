@@ -32,7 +32,14 @@
     <span>{text}</span>
     {#if wait}<span class="wait">{wait}</span>{/if}
     {#if onretry}
-      <button type="button" onclick={onretry}>{$_('common.retry')}</button>
+      <!-- Called with no arguments. Passing the handler directly as `onclick` handed it
+           the MouseEvent as its first parameter, which is harmless for the handlers that
+           take none and silently wrong for any that do: the duplicate-pages retry
+           received the event as its page number and requested
+           `page=%5Bobject+MouseEvent%5D`, so retrying could never succeed against a real
+           server. Dropping the argument here fixes every call site at once, including
+           ones written later. -->
+      <button type="button" onclick={() => onretry()}>{$_('common.retry')}</button>
     {/if}
   </p>
 {/if}
