@@ -271,6 +271,25 @@ export default {
     },
   },
 
+  reader: {
+    title: 'My library',
+    keepReading: 'Keep reading',
+    onDeck: 'On deck',
+    recentlyAdded: 'Recently added',
+    recentlyUpdated: 'Recently updated',
+    allSeries: 'All series',
+    noSeries: 'Nothing here yet',
+    noItems: 'No items',
+    items: '{count} items',
+    unread: 'Unread',
+    read: 'Finished',
+    inProgress: 'Read to page {page}',
+    conflictTitle: 'Another device has read further',
+    conflictBody: 'There is progress up to page {page}. Jump there?',
+    conflictJump: 'Jump there',
+    conflictStay: 'Stay here',
+  },
+
   catalog: {
     navigation: 'My library',
     metadata: {
