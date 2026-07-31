@@ -348,7 +348,8 @@ export default {
       visibilityNote:
         'Only members you can see are listed. Saving replaces the whole list, so anything invisible to you is dropped.',
       deleteTitle: 'Delete this?',
-      deleteSummary: 'This removes \u201c{name}\u201d. The works inside are not deleted.',
+      deleteSummary:
+        'This removes \u201c{name}\u201d and its {count} members. The works themselves are not deleted.',
     },
     collection: {
       title: 'Collections',
