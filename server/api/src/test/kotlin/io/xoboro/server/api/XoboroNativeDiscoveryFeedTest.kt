@@ -37,13 +37,19 @@ class XoboroNativeDiscoveryFeedTest {
     // These four are the definitions a client depends on. `new` sorts by when Xoboro created the row
     // rather than the file's own timestamp, because "new to me" is what a reader means: a decade-old
     // file copied in today is new to this library.
-    assertEquals("createdAt", XoboroNativeDiscoveryFeed.NEW.sortProperty)
+    //
+    // These are wire field names, and this test can say nothing about whether the server can order by
+    // them: asserting a constant against its own literal is what it is. What makes them real is
+    // `XoboroNativeDiscoveryFeedApplicationTest`, which asks a real database for every feed - all five
+    // of these values were once handed to the repository unresolved and answered `500` while this test
+    // passed.
+    assertEquals("createdAt", XoboroNativeDiscoveryFeed.NEW.sortField)
     // `updated` is distinct from `new` because a series gains books over time - updatedAt moves when a
     // volume joins a series that has existed for years.
-    assertEquals("updatedAt", XoboroNativeDiscoveryFeed.UPDATED.sortProperty)
-    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.RECENTLY_READ.sortProperty)
-    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.ON_DECK.sortProperty)
-    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.KEEP_READING.sortProperty)
+    assertEquals("updatedAt", XoboroNativeDiscoveryFeed.UPDATED.sortField)
+    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.RECENTLY_READ.sortField)
+    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.ON_DECK.sortField)
+    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.KEEP_READING.sortField)
 
     // Every feed is newest-first. A discovery shelf that put the oldest thing first would be a list, not
     // a shelf.
