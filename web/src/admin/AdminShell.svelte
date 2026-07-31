@@ -25,6 +25,14 @@
   import Overview from './Overview.svelte'
   import Libraries from './Libraries.svelte'
   import Tasks from './Tasks.svelte'
+  import Trash from './Trash.svelte'
+  import Users from './Users.svelte'
+  import ApiKeys from './ApiKeys.svelte'
+  import Security from './Security.svelte'
+  import Duplicates from './Duplicates.svelte'
+  import History from './History.svelte'
+  import Backups from './Backups.svelte'
+  import Settings from './Settings.svelte'
   import NotFound from '../routes/NotFound.svelte'
 
   const streamStore = eventHub.status
@@ -33,7 +41,15 @@
   const routes = {
     '/admin': Overview,
     '/admin/libraries': Libraries,
+    '/admin/trash': Trash,
     '/admin/tasks': Tasks,
+    '/admin/users': Users,
+    '/admin/api-keys': ApiKeys,
+    '/admin/security': Security,
+    '/admin/duplicates': Duplicates,
+    '/admin/history': History,
+    '/admin/backups': Backups,
+    '/admin/settings': Settings,
     '*': NotFound,
   }
 </script>
