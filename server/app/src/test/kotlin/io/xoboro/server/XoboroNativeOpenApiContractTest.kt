@@ -141,6 +141,14 @@ class XoboroNativeOpenApiContractTest {
         taskFailurePollMillis = 50,
         taskLeaseMillis = 1_000,
         shutdownTimeoutMillis = 2_000,
+        // Named explicitly, and named as absent. `ServerConfig` defaults this to the
+        // relative `web`, which resolves against the process working directory - so
+        // whether this runtime registers the asset wildcard at all would otherwise
+        // depend on where Gradle happened to start the test from. The assertion above
+        // only collects paths under the native prefix, so the wildcard could not
+        // reach it either way; this removes the environmental dependency rather than
+        // leaving it resting on that filter.
+        webDirectory = temporaryDirectory.resolve("no-web-directory"),
       ),
     )
 
