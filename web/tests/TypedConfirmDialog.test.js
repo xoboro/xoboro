@@ -72,12 +72,31 @@ describe('TypedConfirmDialog', () => {
   })
 
   it('refuses a second press while the first is in flight', async () => {
-    const onconfirm = vi.fn()
-    open({ busy: true, onconfirm })
+    // The name has to be typed first. Asserting `disabled` on a freshly opened busy
+    // dialog proves nothing — it is already disabled because nothing has been typed, so
+    // deleting `|| busy` from the source leaves the assertion passing. That was this
+    // test's first version, and the comment on it described a second assertion that was
+    // not there.
+    const { container } = open({ busy: true })
 
-    // Disabled even though nothing has been typed, and disabled again once it has: busy
-    // is not a state a double-click should be able to slip past.
+    await fireEvent.input(container.querySelector('.panel input'), {
+      target: { value: 'Synthetic Library' },
+    })
+
+    // Now the only thing keeping it shut is `busy`, which is what is under test.
     expect(screen.getByTestId('typed-confirm')).toBeDisabled()
+  })
+
+  it('enables the action once the name matches and nothing is in flight', async () => {
+    // The control case for the test above: without it, "disabled" could be unconditional
+    // and both tests would still pass.
+    const { container } = open({ busy: false })
+
+    await fireEvent.input(container.querySelector('.panel input'), {
+      target: { value: 'Synthetic Library' },
+    })
+
+    expect(screen.getByTestId('typed-confirm')).not.toBeDisabled()
   })
 
   it('states the blast radius it was given', async () => {

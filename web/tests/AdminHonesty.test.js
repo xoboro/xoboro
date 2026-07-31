@@ -134,6 +134,34 @@ describe('duplicate pages', () => {
     await waitFor(() => expect(screen.getByTestId('inspect-hash-0')).toBeInTheDocument())
   })
 
+  it('retries with a real page number rather than the click event', async () => {
+    // The retry handler takes the page to load. Wired as `onclick={onretry}` it received
+    // the MouseEvent instead and asked the server for `page=[object MouseEvent]`, so this
+    // screen's retry could never succeed — and no test clicked retry, so nothing said so.
+    let attempt = 0
+    const seen = []
+    globalThis.fetch = vi.fn(async (url) => {
+      seen.push(url)
+      attempt += 1
+      // Fail the first load so the notice appears, then succeed.
+      if (attempt <= 2) return reply({ code: 'internal_error', message: 'nope' }, 500)
+      return reply(page([]))
+    })
+    render(Duplicates)
+
+    const retry = await screen.findByRole('button', { name: /retry|다시 시도/i })
+    seen.length = 0
+    await fireEvent.click(retry)
+
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+    for (const url of seen) {
+      // Asserted as "parses as a number" rather than "equals 0": which page a retry
+      // resumes at is the screen's business, but it always has to be a page.
+      const value = new URL(url, 'http://x').searchParams.get('page')
+      expect(Number.isInteger(Number(value)), `page was ${JSON.stringify(value)}`).toBe(true)
+    }
+  })
+
   it('does not report a page number past the end when the listing empties', async () => {
     // The paging summary is what an operator reads to work out where their rows went, so
     // it is the worst place to print something impossible. Deciding the last candidate
