@@ -4,6 +4,10 @@ import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.plugin
+import io.ktor.server.routing.HttpMethodRouteSelector
+import io.ktor.server.routing.RoutingNode
+import io.ktor.server.routing.RoutingRoot
 import io.ktor.server.testing.testApplication
 import io.xoboro.server.api.XOBORO_API_PREFIX
 import java.nio.file.Files
@@ -30,16 +34,33 @@ class XoboroWebAssetApplicationTest {
   lateinit var tempDirectory: Path
 
   /**
-   * Every reserved prefix, trailing slash trimmed, as probed by the tests below.
+   * Every reserved prefix, as probed by the tests below.
    *
    * Kept as its own list rather than read from production so that a prefix removed
    * there fails here too. The invariant being pinned is "no reserved prefix ever
    * answers with the application shell" - for a prefix whose module installs its own
    * catch-all (`/kobo`) a real handler answers first, which satisfies the invariant
    * just as well as the guard does.
+   *
+   * This list can only ever be as complete as the reserved list it mirrors, which is
+   * why `reserves every path the server registers` exists as well: agreement between
+   * two hand-maintained lists says nothing about what both of them omit.
    */
   private val RESERVED_PREFIXES_UNDER_TEST =
-    listOf("/api", "/opds", "/health", "/ready", "/metrics", "/kobo", "/koreader", "/actuator")
+    listOf(
+      "/api",
+      "/opds",
+      "/sse",
+      "/oauth2/authorization",
+      "/login/oauth2/code",
+      "/v3/api-docs",
+      "/health",
+      "/ready",
+      "/metrics",
+      "/kobo",
+      "/koreader",
+      "/actuator",
+    )
 
   @Test
   fun `serves the application shell at the root`() {
@@ -136,7 +157,10 @@ class XoboroWebAssetApplicationTest {
       application { xoboroModule(openRuntime(web)) }
 
       for (prefix in RESERVED_PREFIXES_UNDER_TEST) {
-        val path = "$prefix/unmatched-probe".replace("//", "/")
+        // Two extra segments, not one. `/oauth2/authorization/{registrationId}` matches a
+        // single appended segment, so a one-segment probe there would be answered by that
+        // route and pass whether the prefix is reserved or not.
+        val path = "$prefix/unmatched-probe/deeper"
         val response = client.get(path)
         assertFalse(
           "xoboro-shell" in response.bodyAsText(),
@@ -151,11 +175,112 @@ class XoboroWebAssetApplicationTest {
     // The list above is the reserved list, not a sample of it. A surface added to
     // XoboroWebAssetRoutes without a probe here would otherwise be shadowed silently,
     // which is the exact failure the reserved list exists to prevent.
+    //
+    // Compared verbatim. An earlier version trimmed a trailing slash off each entry
+    // before comparing, which let `"/health/"` be added to the reserved list and
+    // collapse onto the existing `"/health"` probe - a new entry with no probe, which
+    // is what this test exists to prevent.
     assertEquals(
-      reservedPrefixesForTest().map { it.trimEnd('/') }.toSet(),
-      RESERVED_PREFIXES_UNDER_TEST.toSet(),
+      reservedPrefixesForTest(),
+      RESERVED_PREFIXES_UNDER_TEST,
       "the reserved list and the probed prefixes disagree",
     )
+  }
+
+  @Test
+  fun `reserves a prefix only on a segment boundary`() {
+    // The guard used a raw `startsWith`, which reserved every path merely beginning with
+    // a prefix's characters. `/ready` shadowed a client route at `/readers`, and the
+    // symptom is a 404 on one page of the UI with every other route working - which reads
+    // as a broken link rather than as server routing.
+    val web = webDirectory()
+
+    testApplication {
+      application { xoboroModule(openRuntime(web)) }
+
+      for (path in listOf("/readers", "/apidocs", "/healthcheck", "/metrics-guide")) {
+        val response = client.get(path)
+        assertTrue(
+          "xoboro-shell" in response.bodyAsText(),
+          "the shell did not answer for $path (${response.status}), so the guard claimed it",
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `reserves every path the server registers`() {
+    // The structural hole the two lists above cannot close: they agree with each other,
+    // not with the server. Both omitted `/sse`, `/oauth2/authorization`,
+    // `/login/oauth2/code` and `/v3/api-docs` while passing, and those four answered the
+    // application shell in production.
+    //
+    // So the routing tree is the authority here. Every path with a handler must be
+    // covered by a reserved prefix, which makes a route registered anywhere in the
+    // server - including a module this one knows nothing about - fail here rather than
+    // be shadowed.
+    val web = webDirectory()
+    val registered = mutableSetOf<String>()
+
+    testApplication {
+      application {
+        xoboroModule(openRuntime(web))
+        collectHandledPaths(plugin(RoutingRoot), registered)
+      }
+      client.get("/health")
+    }
+
+    // The walk itself is load-bearing, so it is checked before anything is concluded
+    // from it. `sse {}` registers no HttpMethodRouteSelector, so a method-selector walk
+    // renders no path for the event stream at all - it would report "nothing to check"
+    // for the exact surface that was shadowed. Naming it here means a walk that stops
+    // seeing SSE routes fails instead of quietly passing.
+    assertTrue(registered.size > 50, "the routing walk found only ${registered.size} paths")
+    assertTrue(
+      "/sse/v1/events" in registered,
+      "the walk did not see the SSE stream; paths: ${registered.sorted()}",
+    )
+
+    val shadowed =
+      (registered - ASSET_WILDCARD)
+        .filterNot { path ->
+          reservedPrefixesForTest().any { path == it || path.startsWith("$it/") }
+        }.sorted()
+
+    assertTrue(
+      ASSET_WILDCARD in registered,
+      "the asset wildcard was not found, so nothing here was excluded on purpose",
+    )
+    assertTrue(
+      shadowed.isEmpty(),
+      "registered paths with no reserved prefix, so the shell answers for them:\n" +
+        shadowed.joinToString("\n"),
+    )
+  }
+
+  /**
+   * Collects the client-visible path of every routing node that has a handler.
+   *
+   * Handler-bearing rather than method-selector-bearing, because `Route.sse {}` installs
+   * its handler directly on the path node and registers no method selector. Ktor folds
+   * authentication and rate-limit scopes into the rendered path; neither is part of the
+   * URL a client calls, so both are removed.
+   */
+  private fun collectHandledPaths(
+    node: RoutingNode,
+    into: MutableSet<String>,
+  ) {
+    if (node.hasHandler()) {
+      val rendered =
+        if (node.selector is HttpMethodRouteSelector) node.parent?.toString() else node.toString()
+      rendered?.toClientPath()?.let(into::add)
+    }
+    node.children.forEach { collectHandledPaths(it, into) }
+  }
+
+  private fun String.toClientPath(): String {
+    val withoutScopes = RATE_LIMIT_SCOPE.replace(AUTHENTICATE_SCOPE.replace(this, ""), "")
+    return withoutScopes.removeSuffix("/").ifEmpty { "/" }
   }
 
   @Test
@@ -268,4 +393,11 @@ class XoboroWebAssetApplicationTest {
         webDirectory = web,
       ),
     )
+
+  private companion object {
+    /** How Ktor renders the asset route's own tailcard, the one node excluded on purpose. */
+    const val ASSET_WILDCARD = "/{...}"
+    val AUTHENTICATE_SCOPE = Regex("/\\(authenticate[^)]*\\)")
+    val RATE_LIMIT_SCOPE = Regex("/\\(RateLimit[^)]*\\)")
+  }
 }

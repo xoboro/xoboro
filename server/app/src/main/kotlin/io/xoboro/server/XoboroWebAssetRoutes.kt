@@ -40,7 +40,12 @@ internal fun Route.xoboroWebAssetRoutes(
     // through to a plain 404, which the global StatusPages handler then renders as
     // the native error envelope for an API path - the same answer the caller would
     // get if this route did not exist at all.
-    if (reservedPrefixes.any { requestPath.startsWith(it) }) return@get
+    //
+    // Matched on segment boundaries, the same way `SecurityHeaders.startsWithPathSegment`
+    // does. A raw `startsWith` also reserved paths the server has no route for - `/ready`
+    // shadowed a SPA route at `/readers` - and needed a second `"/api/"`-style entry per
+    // prefix to express "the prefix itself, too". One rule covers both.
+    if (reservedPrefixes.any { requestPath == it || requestPath.startsWith("$it/") }) return@get
 
     // A decoded segment can hold a character no filesystem accepts - a NUL byte from
     // `%00` is the reachable case - and `resolve` throws for it. That is a path which
@@ -110,25 +115,36 @@ private const val IMMUTABLE_MAX_AGE_SECONDS = 31_536_000
  * Path prefixes the UI must never answer for.
  *
  * These are the server's own surfaces, and the list has to name every one of them
- * that is registered at the same level as the wildcard. `/kobo`, `/koreader` and
- * `/actuator` were missing: an unmatched path under any of them fell through to the
- * shell, so a Kobo or KOReader device syncing against a mistyped path received `200`
- * and HTML where it expected a protocol response.
+ * that is registered at the same level as the wildcard. Being incomplete is this
+ * list's whole failure mode, and it has been incomplete twice: first `/koreader` and
+ * `/actuator`, then `/sse`, `/oauth2/authorization`, `/login/oauth2/code` and
+ * `/v3/api-docs`. An unmatched path under any of them answered `200` and HTML, so a
+ * KOReader device syncing against a mistyped path, or a Komga client reconnecting to
+ * the event stream, received the application shell where it expected a protocol
+ * response — and read it as its own bug.
  *
- * `/kobo` is belt-and-braces - `komgaKoboRoutes` installs its own catch-all, so a
- * real handler answers first today. It is listed because that is an implementation
- * detail of another module rather than a guarantee this one can rely on.
+ * `/kobo` is belt-and-braces: `komgaKoboRoutes` installs its own catch-all, so an
+ * unmatched `/kobo/...` path is answered by a real handler (`401`) rather than
+ * reaching this route at all. It is listed because that is an implementation detail
+ * of another module rather than a guarantee this one can rely on.
  *
- * Every entry is probed in `XoboroWebAssetApplicationTest`, and a second test
- * compares the probe list against this one so an addition here without a probe
- * fails rather than being shadowed silently.
+ * `/login/oauth2/code` is the full registered path on purpose. `/login` belongs to
+ * the SPA, and reserving it would break the sign-in route.
+ *
+ * Two tests keep this honest. One probes every entry through the assembled
+ * application; the other walks Ktor's routing tree and asserts each registered path
+ * is covered here, so a surface added anywhere in the server without an entry fails
+ * instead of being shadowed silently. That second test is what the first one could
+ * not do: a probe list maintained by hand omits exactly what this list omits.
  */
 private val RESERVED_PREFIXES =
   listOf(
-    "/api/",
     "/api",
-    "/opds/",
     "/opds",
+    "/sse",
+    "/oauth2/authorization",
+    "/login/oauth2/code",
+    "/v3/api-docs",
     "/health",
     "/ready",
     "/metrics",
