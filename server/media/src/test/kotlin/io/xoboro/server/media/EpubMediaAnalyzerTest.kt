@@ -155,6 +155,115 @@ class EpubMediaAnalyzerTest {
     assertEquals(MediaStatus.READY, media.status)
   }
 
+  @Test
+  fun `marks the manifest item an EPUB3 cover-image property declares`() {
+    val path = tempDirectory.resolve("cover-epub3.epub")
+    writeEpubWithCover(path, declaration = CoverDeclaration.PROPERTY)
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-cover-epub3"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    assertEquals(MediaStatus.READY, media.status)
+    assertEquals(
+      listOf("OEBPS/images/cover.png"),
+      media.files.filter { it.kind == MediaFileKind.EPUB_COVER }.map { it.fileName },
+    )
+  }
+
+  @Test
+  fun `finds the cover through the legacy EPUB2 meta name=cover fallback`() {
+    val path = tempDirectory.resolve("cover-epub2.epub")
+    writeEpubWithCover(path, declaration = CoverDeclaration.META)
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-cover-epub2"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    assertEquals(
+      listOf("OEBPS/images/cover.png"),
+      media.files.filter { it.kind == MediaFileKind.EPUB_COVER }.map { it.fileName },
+    )
+  }
+
+  @Test
+  fun `marks no cover when the OPF declares none`() {
+    val path = tempDirectory.resolve("no-cover.epub")
+    writeEpubWithCover(path, declaration = null)
+
+    val media =
+      EpubMediaAnalyzer().analyze(
+        bookId = BookId("book-no-cover"),
+        path = path,
+        analyzeDimensions = false,
+        createdAtMillis = 1,
+      )
+
+    assertTrue(media.files.none { it.kind == MediaFileKind.EPUB_COVER })
+  }
+
+  private enum class CoverDeclaration { PROPERTY, META }
+
+  private fun writeEpubWithCover(
+    path: Path,
+    declaration: CoverDeclaration?,
+  ) {
+    ZipOutputStream(Files.newOutputStream(path)).use { archive ->
+      archive.entry("mimetype", EpubMediaAnalyzer.EPUB_MEDIA_TYPE.encodeToByteArray())
+      archive.entry(
+        "META-INF/container.xml",
+        """
+        <?xml version="1.0"?>
+        <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+          <rootfiles>
+            <rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/>
+          </rootfiles>
+        </container>
+        """.trimIndent().encodeToByteArray(),
+      )
+      val coverProperties = if (declaration == CoverDeclaration.PROPERTY) """ properties="cover-image"""" else ""
+      val coverMeta =
+        if (declaration == CoverDeclaration.META) {
+          """<meta name="cover" content="cover-image"/>"""
+        } else {
+          ""
+        }
+      archive.entry(
+        "OEBPS/package.opf",
+        """
+        <?xml version="1.0"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Synthetic publication</dc:title>
+            $coverMeta
+          </metadata>
+          <manifest>
+            <item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+            <item id="cover-image" href="images/cover.png" media-type="image/png"$coverProperties/>
+          </manifest>
+          <spine>
+            <itemref idref="chapter1"/>
+          </spine>
+        </package>
+        """.trimIndent().encodeToByteArray(),
+      )
+      archive.entry(
+        "OEBPS/chapter1.xhtml",
+        "<html><body>Synthetic reflowable publication text exceeds the comic image threshold easily.</body></html>"
+          .encodeToByteArray(),
+      )
+      archive.entry("OEBPS/images/cover.png", imageBytes(Color.RED))
+    }
+  }
+
   private fun writeEpub(
     path: Path,
     fixedLayout: Boolean,

@@ -1,5 +1,6 @@
 package io.xoboro.server.persistence
 
+import io.xoboro.core.domain.MediaFileKind
 import java.nio.file.Path
 import java.sql.SQLException
 import kotlin.test.Test
@@ -84,7 +85,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(28, database.migrationResult.migrationsExecuted)
+      assertEquals(29, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -205,7 +206,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(27, database.migrationResult.migrationsExecuted)
+      assertEquals(28, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -314,6 +315,65 @@ class XoboroDatabaseTest {
           )
         }
 
+      assertTrue(failure.cause is SQLException)
+    }
+  }
+
+  @Test
+  fun `accepts every media file kind the domain declares and no other`() {
+    // V29 rebuilt `media_file` to widen its `kind` CHECK for `EPUB_COVER`. Counting migrations, as
+    // the test above does, says only that a file ran - it would pass just as well if the new
+    // constraint listed the wrong values, or if the rebuild had quietly dropped the constraint
+    // altogether and started accepting anything. So this asserts what the constraint does: every
+    // name `MediaFileKind` can be persisted under is accepted, and a name outside it is refused.
+    //
+    // The kinds are read off the enum rather than repeated as a literal list, because a list here
+    // and a list in the migration agreeing says nothing about a value both of them omit - the enum
+    // is what `JooqBookMediaRepository` actually writes.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("media-file-kind.sqlite"))).use { database ->
+      insertLibrary(database, id = "library-1", name = "Synthetic library")
+      database.dsl.execute(
+        """
+        INSERT INTO series
+          (id, library_id, relative_uri, name, sort_title, created_at_ms, updated_at_ms)
+        VALUES ('series-1', 'library-1', 'synthetic-series', 'Synthetic series', 'Synthetic series', 1, 1)
+        """.trimIndent(),
+      )
+      database.dsl.execute(
+        """
+        INSERT INTO book (
+          id, library_id, series_id, relative_uri, name, media_kind, file_size,
+          file_modified_ms, created_at_ms, updated_at_ms
+        ) VALUES ('book-1', 'library-1', 'series-1', 'synthetic-series/book.epub',
+          'Synthetic book', 'EPUB', 1, 1, 1, 1)
+        """.trimIndent(),
+      )
+
+      MediaFileKind.entries.forEachIndexed { index, kind ->
+        database.dsl.execute(
+          """
+          INSERT INTO media_file (book_id, number, file_name, media_type, file_size, kind)
+          VALUES ('book-1', ?, ?, 'image/png', 1, ?)
+          """.trimIndent(),
+          index + 1,
+          "file-$index.png",
+          kind.name,
+        )
+      }
+      assertEquals(
+        MediaFileKind.entries.size,
+        database.dsl.fetchCount(DSL.table(DSL.name("media_file"))),
+      )
+
+      val failure =
+        assertFailsWith<org.jooq.exception.DataAccessException> {
+          database.dsl.execute(
+            """
+            INSERT INTO media_file (book_id, number, file_name, media_type, file_size, kind)
+            VALUES ('book-1', 900, 'unknown.png', 'image/png', 1, 'EPUB_SOMETHING_ELSE')
+            """.trimIndent(),
+          )
+        }
       assertTrue(failure.cause is SQLException)
     }
   }

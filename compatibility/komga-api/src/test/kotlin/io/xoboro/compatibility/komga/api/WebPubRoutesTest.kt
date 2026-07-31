@@ -141,6 +141,24 @@ class WebPubRoutesTest {
         )
         assertEquals("fixed", epub.metadata.rendition["layout"])
         assertTrue(epub.readingOrder.single().href.orEmpty().endsWith("OEBPS/chapter.xhtml"))
+        // Every non-spine manifest item is a resource, whichever kind analysis recorded for it.
+        // A reader fetches the cover through this list, so classifying the declared cover as its
+        // own kind must not drop it out of the manifest: recognising a file is not a reason to
+        // stop publishing it. Asserted on the hrefs rather than the count because `base.resources`
+        // contributes entries of its own, and a count would pass while naming the wrong files.
+        val resourceHrefs = epub.resources.mapNotNull { it.href }
+        assertTrue(
+          resourceHrefs.any { it.endsWith("OEBPS/styles/main.css") },
+          "manifest resources must list the stylesheet asset: $resourceHrefs",
+        )
+        assertTrue(
+          resourceHrefs.any { it.endsWith("OEBPS/images/cover.png") },
+          "manifest resources must list the declared cover: $resourceHrefs",
+        )
+        assertFalse(
+          resourceHrefs.any { it.endsWith("OEBPS/chapter.xhtml") },
+          "a spine page belongs to readingOrder, not resources: $resourceHrefs",
+        )
         assertEquals("Synthetic contents", epub.toc.single().title)
         assertEquals(
           HttpStatusCode.OK,
@@ -380,6 +398,21 @@ class WebPubRoutesTest {
               mediaType = "application/xhtml+xml",
               fileSize = 32,
               kind = MediaFileKind.EPUB_PAGE,
+            ),
+            MediaFile(
+              fileName = "OEBPS/styles/main.css",
+              mediaType = "text/css",
+              fileSize = 16,
+              kind = MediaFileKind.EPUB_ASSET,
+            ),
+            // The manifest item the OPF declares as the cover image. It is a resource of the
+            // publication like any other non-spine item - the kind only records what analysis
+            // recognised it as, so cover generation can find it without re-parsing the archive.
+            MediaFile(
+              fileName = "OEBPS/images/cover.png",
+              mediaType = "image/png",
+              fileSize = 64,
+              kind = MediaFileKind.EPUB_COVER,
             ),
           ),
         epubIsFixedLayout = true,

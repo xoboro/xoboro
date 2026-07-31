@@ -59,6 +59,7 @@ enum class MediaFileKind {
   GENERAL,
   EPUB_PAGE,
   EPUB_ASSET,
+  EPUB_COVER,
 }
 
 data class MediaNavigationEntry(
