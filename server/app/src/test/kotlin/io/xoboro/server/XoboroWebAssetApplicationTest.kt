@@ -29,6 +29,18 @@ class XoboroWebAssetApplicationTest {
   @TempDir
   lateinit var tempDirectory: Path
 
+  /**
+   * Every reserved prefix, trailing slash trimmed, as probed by the tests below.
+   *
+   * Kept as its own list rather than read from production so that a prefix removed
+   * there fails here too. The invariant being pinned is "no reserved prefix ever
+   * answers with the application shell" - for a prefix whose module installs its own
+   * catch-all (`/kobo`) a real handler answers first, which satisfies the invariant
+   * just as well as the guard does.
+   */
+  private val RESERVED_PREFIXES_UNDER_TEST =
+    listOf("/api", "/opds", "/health", "/ready", "/metrics", "/kobo", "/koreader", "/actuator")
+
   @Test
   fun `serves the application shell at the root`() {
     val web = webDirectory()
@@ -113,20 +125,52 @@ class XoboroWebAssetApplicationTest {
 
   @Test
   fun `does not shadow any reserved server surface`() {
-    // One case per prefix. A surface added later without an entry in the reserved
-    // list would be shadowed silently, and this is what makes that visible.
+    // Every probe deliberately names a path with **no** concrete route of its own, so
+    // the guard is what answers rather than a real handler winning on precedence. The
+    // earlier version of this test probed `/api/v1/libraries` and `/opds/v1.2/catalog`,
+    // which have concrete routes and therefore passed whether the prefix was listed or
+    // not - it asserted Ktor's matcher, not the guard.
     val web = webDirectory()
 
     testApplication {
       application { xoboroModule(openRuntime(web)) }
 
-      for (path in listOf("/api/v1/libraries", "/opds/v1.2/catalog", "/metrics", "/api/xoboro/v1/x")) {
+      for (prefix in RESERVED_PREFIXES_UNDER_TEST) {
+        val path = "$prefix/unmatched-probe".replace("//", "/")
         val response = client.get(path)
         assertFalse(
           "xoboro-shell" in response.bodyAsText(),
           "the shell answered for $path with ${response.status}",
         )
       }
+    }
+  }
+
+  @Test
+  fun `probes every reserved prefix`() {
+    // The list above is the reserved list, not a sample of it. A surface added to
+    // XoboroWebAssetRoutes without a probe here would otherwise be shadowed silently,
+    // which is the exact failure the reserved list exists to prevent.
+    assertEquals(
+      reservedPrefixesForTest().map { it.trimEnd('/') }.toSet(),
+      RESERVED_PREFIXES_UNDER_TEST.toSet(),
+      "the reserved list and the probed prefixes disagree",
+    )
+  }
+
+  @Test
+  fun `answers not found for a path that cannot be a filename`() {
+    // A NUL byte decodes to a character no filesystem accepts, so `Path.resolve`
+    // throws InvalidPathException. Uncaught it reached the global handler as a 500
+    // with a logged stack trace per request - an unauthenticated caller could fill
+    // the log. It is a path that does not exist, so it is a 404.
+    val web = webDirectory()
+
+    testApplication {
+      application { xoboroModule(openRuntime(web)) }
+
+      val response = client.get("/%00")
+      assertEquals(HttpStatusCode.NotFound, response.status)
     }
   }
 

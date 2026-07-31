@@ -8,6 +8,7 @@ import io.ktor.server.response.respondFile
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 
 /**
@@ -41,12 +42,34 @@ internal fun Route.xoboroWebAssetRoutes(
     // get if this route did not exist at all.
     if (reservedPrefixes.any { requestPath.startsWith(it) }) return@get
 
-    val requested = if (segments.isEmpty()) index else root.resolve(segments.joinToString("/")).normalize()
+    // A decoded segment can hold a character no filesystem accepts - a NUL byte from
+    // `%00` is the reachable case - and `resolve` throws for it. That is a path which
+    // does not exist, so it answers 404 here rather than reaching the global handler
+    // as a 500 with a logged stack trace per request.
+    val requested =
+      if (segments.isEmpty()) {
+        index
+      } else {
+        try {
+          root.resolve(segments.joinToString("/")).normalize()
+        } catch (_: InvalidPathException) {
+          call.respond(HttpStatusCode.NotFound)
+          return@get
+        }
+      }
 
-    // A request that resolves outside the served directory is refused rather than
-    // quietly answered with the shell: `..` in a path is not a route this
+    // A request whose *lexical* path leaves the served directory is refused rather
+    // than quietly answered with the shell: `..` in a path is not a route this
     // application has, so treating it as one would hide an attempt to read the
     // filesystem behind an ordinary-looking page.
+    //
+    // Lexical, not resolved: `normalize` does not follow links, so a symlink inside
+    // the served tree pointing outward still passes. That is deliberate rather than
+    // overlooked - the served tree is a build product (`COPY web/dist`) which
+    // contains no links, and planting one requires write access to the directory the
+    // server reads, which is already a lost position. `toRealPath` would also cost a
+    // stat per request and would break a root that is itself a symlink, which works
+    // today.
     if (!requested.startsWith(root)) {
       call.respond(HttpStatusCode.NotFound)
       return@get
@@ -86,9 +109,33 @@ private const val IMMUTABLE_MAX_AGE_SECONDS = 31_536_000
 /**
  * Path prefixes the UI must never answer for.
  *
- * These are the server's own surfaces. The list is asserted prefix by prefix in
- * [XoboroWebAssetApplicationTest] rather than described here, because a surface
- * added later without a matching entry would be shadowed silently.
+ * These are the server's own surfaces, and the list has to name every one of them
+ * that is registered at the same level as the wildcard. `/kobo`, `/koreader` and
+ * `/actuator` were missing: an unmatched path under any of them fell through to the
+ * shell, so a Kobo or KOReader device syncing against a mistyped path received `200`
+ * and HTML where it expected a protocol response.
+ *
+ * `/kobo` is belt-and-braces - `komgaKoboRoutes` installs its own catch-all, so a
+ * real handler answers first today. It is listed because that is an implementation
+ * detail of another module rather than a guarantee this one can rely on.
+ *
+ * Every entry is probed in `XoboroWebAssetApplicationTest`, and a second test
+ * compares the probe list against this one so an addition here without a probe
+ * fails rather than being shadowed silently.
  */
 private val RESERVED_PREFIXES =
-  listOf("/api/", "/api", "/opds/", "/opds", "/health", "/ready", "/metrics")
+  listOf(
+    "/api/",
+    "/api",
+    "/opds/",
+    "/opds",
+    "/health",
+    "/ready",
+    "/metrics",
+    "/kobo",
+    "/koreader",
+    "/actuator",
+  )
+
+/** The reserved list, for the test that pins every entry as probed. */
+internal fun reservedPrefixesForTest(): List<String> = RESERVED_PREFIXES

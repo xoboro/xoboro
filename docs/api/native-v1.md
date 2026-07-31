@@ -347,16 +347,29 @@ whatever sequence the packager wrote them.
 Each entry has `position` (one-based), `href`, `mediaType`, `progression` within
 that resource, `totalProgression` through the publication, and `koboSpan` for a
 KEPUB. `href` matches a resource-manifest `path` and is what the resource route
-is asked for verbatim. `progression` and `totalProgression` are what a Readium
-locator carries, so this is also how a client builds the `locator` the read-progress
-endpoint accepts.
+is asked for verbatim. These are the fields a client copies into the `locator` the
+read-progress endpoint accepts.
+
+`totalProgression` is computed as `position / count`, which makes it the progress at
+the **end** of that position rather than at its start: the first of two positions
+reports `0.5` and the last reports `1.0`. A Readium locator's `totalProgression` is
+`0` at the start of a publication, so this value is one position ahead of that
+convention. It is documented rather than corrected because the same number already
+feeds Kobo's `ProgressPercent`, so changing the arithmetic would move reported
+progress for every existing book — a decision on its own rather than a detail of
+adding a reader. Treat it as "how far through the publication this position ends".
 
 The list is returned in stored order without sorting, because `BookMedia` requires
 positions to be exactly `1..n` in sequence — a sort could not reorder anything and
-would only imply a risk the domain has already ruled out. A non-EPUB media item
-returns an empty list rather than an error; it has pages, not positions.
-`PAGE_STREAMING` is required, and an unauthorized identifier returns
-`404 media_item_not_found` like every other delivery route.
+would only imply a risk the domain has already ruled out.
+
+A non-EPUB media item returns an empty list rather than an error; it has pages, not
+positions. An EPUB whose media is not `READY` is a different case and answers
+`409 media_not_ready` (or `409 media_unsupported`), exactly as `/pages/{pageNumber}`
+does — an empty list for it would tell a reader the book has no content when the
+truth is that its content is not known yet. `PAGE_STREAMING` is required, and an
+unauthorized identifier returns `404 media_item_not_found` like every other delivery
+route.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/resources/{resource...}` returns
 one indexed EPUB-container resource. Send a `path` from the resource manifest
