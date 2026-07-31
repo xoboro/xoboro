@@ -33,5 +33,10 @@ out/
 
 # Web UI build output and installed packages. `web/build/` is not listed because
 # the `build/` rule above is unanchored and already covers it.
-/web/node_modules/
+#
+# `node_modules/` is unanchored for the same reason as `.omc/`: an anchored
+# `/web/node_modules/` misses a root-level one, and running a JS tool from the
+# repository root creates exactly that. There is no source package by either name.
+node_modules/
 /web/dist/
+web/dist/

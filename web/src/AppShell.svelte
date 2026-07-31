@@ -14,12 +14,14 @@
   import { wrap } from 'svelte-spa-router/wrap'
   import Home from './reader/Home.svelte'
   import SeriesScreen from './reader/SeriesScreen.svelte'
+  import Reader from './reader/Reader.svelte'
   import Groupings from './catalog/Groupings.svelte'
   import NotFound from './routes/NotFound.svelte'
 
   const routes = {
     '/': Home,
     '/series/:id': SeriesScreen,
+    '/read/:id': Reader,
     // Reader-side, not console: reading a collection is open to any authenticated
     // caller, and only its mutations are administrator-only.
     '/collections': wrap({ component: Groupings, props: { kind: 'collection' } }),
