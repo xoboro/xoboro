@@ -15,13 +15,17 @@
 
   let page = $state(null)
   let error = $state(null)
+  let busy = $state(false)
 
   async function load(next = 0) {
+    busy = true
     try {
       page = await listHistory({ page: next })
       error = null
     } catch (caught) {
       error = caught
+    } finally {
+      busy = false
     }
   }
 
@@ -42,6 +46,7 @@
   columns={[$_('admin.security.when'), $_('admin.history.type'), $_('admin.history.subject')]}
   {page}
   onpage={load}
+  {busy}
   emptyLabel={$_('admin.history.none')}
 >
   {#snippet row(entry)}

@@ -89,4 +89,40 @@ describe('DataTable', () => {
     expect(screen.getByTestId('page-previous-last')).not.toBeDisabled()
     expect(screen.getByTestId('page-next-last')).toBeDisabled()
   })
+
+  it('disables both paging buttons while busy, even on a middle page where both would otherwise be enabled', () => {
+    // A middle page is the case where `hasPrevious` and `hasNext` are both true, so it is
+    // the only fixture that proves `busy` disables independently of those flags rather
+    // than coincidentally agreeing with them.
+    render(DataTableHarness, { page: envelope({ page: 1, totalPages: 3 }), name: 'middle', busy: true })
+
+    expect(screen.getByTestId('page-previous-middle')).toBeDisabled()
+    expect(screen.getByTestId('page-next-middle')).toBeDisabled()
+  })
+
+  it('does not re-request the same page on a second click made while busy', async () => {
+    // The defect this guards against: `onpage` reads the neighbour off the committed
+    // envelope, which is last response that landed, not the one still outstanding. A
+    // caller that sets `busy` for the duration of its load relies on the button being
+    // truly inert while busy, not merely styled as disabled — a disabled DOM button
+    // still fires a click handler wired directly to it in some setups, so this asserts
+    // on the handler's call count, not just the attribute.
+    const onpage = vi.fn()
+    const { rerender } = render(DataTableHarness, {
+      page: envelope({ page: 0, totalPages: 3 }),
+      name: 'busy-case',
+      onpage,
+      busy: true,
+    })
+
+    await fireEvent.click(screen.getByTestId('page-next-busy-case'))
+    expect(onpage).not.toHaveBeenCalled()
+
+    // Once the load completes and busy clears, the same click must go through exactly
+    // once — proving the guard blocks the outstanding load, not clicks in general.
+    await rerender({ page: envelope({ page: 0, totalPages: 3 }), name: 'busy-case', onpage, busy: false })
+    await fireEvent.click(screen.getByTestId('page-next-busy-case'))
+    expect(onpage).toHaveBeenCalledTimes(1)
+    expect(onpage).toHaveBeenNthCalledWith(1, 1)
+  })
 })

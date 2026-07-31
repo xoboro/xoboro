@@ -31,22 +31,32 @@
   let libraries = $state([])
   let libraryId = $state('')
   let error = $state(null)
+  // Held separately per table: the two listings load independently, so a load
+  // outstanding on one must not disable paging on the other.
+  let seriesBusy = $state(false)
+  let itemsBusy = $state(false)
 
   async function loadSeries(next = 0) {
+    seriesBusy = true
     try {
       seriesPage = await listTrashedSeries({ libraryId: libraryId || null, page: next })
       error = null
     } catch (caught) {
       error = caught
+    } finally {
+      seriesBusy = false
     }
   }
 
   async function loadItems(next = 0) {
+    itemsBusy = true
     try {
       itemsPage = await listTrashedMediaItems({ libraryId: libraryId || null, page: next })
       error = null
     } catch (caught) {
       error = caught
+    } finally {
+      itemsBusy = false
     }
   }
 
@@ -91,6 +101,7 @@
   columns={[$_('admin.trash.series'), $_('admin.trash.seriesItemCount')]}
   page={seriesPage}
   onpage={loadSeries}
+  busy={seriesBusy}
   emptyLabel={$_('admin.trash.noSeries')}
 >
   {#snippet row(entry)}
@@ -111,6 +122,7 @@
   columns={[$_('admin.trash.item'), $_('admin.trash.itemSeries')]}
   page={itemsPage}
   onpage={loadItems}
+  busy={itemsBusy}
   emptyLabel={$_('admin.trash.noItems')}
 >
   {#snippet row(entry)}

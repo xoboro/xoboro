@@ -46,6 +46,18 @@
      * captions are translated, so the hooks would change with the locale.
      */
     name,
+    /**
+     * True while the caller has a load outstanding for this listing.
+     *
+     * Disables both paging buttons rather than letting them re-fire: the neighbour
+     * (`page.page ± 1`) is read off the committed envelope, which is the *previous*
+     * response, not the one still in flight. A second click before that response lands
+     * would ask for the page already requested — indistinguishable from doing nothing,
+     * and silently so. Disabling is the smaller fix and matches what every caller here
+     * already tracks (a load in progress), versus having each caller separately hold
+     * the page it asked for and pass that in instead.
+     */
+    busy = false,
   } = $props()
 
   // Refused rather than documented as required. Omitting it emitted
@@ -93,18 +105,18 @@
       <button
         type="button"
         data-testid={`page-previous-${name}`}
-        disabled={!page.hasPrevious}
+        disabled={!page.hasPrevious || busy}
         aria-label={$_('admin.paging.previous')}
-        onclick={() => onpage(page.page - 1)}
+        onclick={() => { if (!busy) onpage(page.page - 1) }}
       >
         <ChevronLeft size={18} aria-hidden="true" />
       </button>
       <button
         type="button"
         data-testid={`page-next-${name}`}
-        disabled={!page.hasNext}
+        disabled={!page.hasNext || busy}
         aria-label={$_('admin.paging.next')}
-        onclick={() => onpage(page.page + 1)}
+        onclick={() => { if (!busy) onpage(page.page + 1) }}
       >
         <ChevronRight size={18} aria-hidden="true" />
       </button>
