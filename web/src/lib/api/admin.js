@@ -158,16 +158,27 @@ export const DUPLICATE_ACTIONS = Object.freeze(['IGNORE', 'DELETE_MANUAL', 'DELE
 /** Actions the server records but does not carry out. */
 export const UNPERFORMED_ACTIONS = Object.freeze(['DELETE_MANUAL', 'DELETE_AUTO'])
 
-export function listDuplicateCandidates() {
-  return request('/duplicate-pages')
+/**
+ * All three duplicate-page listings are **paged**, and answer the page envelope.
+ *
+ * They used to be called without paging and their result assigned straight to an
+ * array, which rendered nothing at all: an envelope is not iterable, and its
+ * `undefined` length did not equal zero either, so the screen showed neither rows nor
+ * an empty state. Passing the page through is also what makes the second page
+ * reachable — without it a caller silently sees only the server's default first page.
+ */
+export function listDuplicateCandidates({ page = 0, size = 50 } = {}) {
+  return request('/duplicate-pages', { query: { page, size } })
 }
 
-export function listDuplicateDecisions() {
-  return request('/duplicate-pages/decided')
+export function listDuplicateDecisions({ page = 0, size = 50 } = {}) {
+  return request('/duplicate-pages/decided', { query: { page, size } })
 }
 
-export function listHashCarriers(pageHash) {
-  return request(`/duplicate-pages/${encodeURIComponent(pageHash)}/media-items`)
+export function listHashCarriers(pageHash, { page = 0, size = 50 } = {}) {
+  return request(`/duplicate-pages/${encodeURIComponent(pageHash)}/media-items`, {
+    query: { page, size },
+  })
 }
 
 export function recordDuplicateDecision(pageHash, action, sizeBytes = null) {

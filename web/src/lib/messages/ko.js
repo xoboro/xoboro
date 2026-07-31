@@ -148,6 +148,7 @@ export default {
       noDecisions: '기록된 결정이 없습니다',
       carriersTitle: '이 해시를 가진 항목',
       page: '{number}쪽',
+      carriersTruncated: '이 해시를 가진 항목 {total}개 중 {shown}개를 보여줍니다.',
       noCarriers: '해당 항목이 없습니다',
       action: {
         IGNORE: '무시로 기록',
@@ -166,8 +167,13 @@ export default {
       filter: '라이브러리',
       allLibraries: '전체',
       series: '시리즈',
-      items: '항목 수',
-      none: '휴지통이 비어 있습니다',
+      trashedSeries: '휴지통의 시리즈',
+      trashedItems: '휴지통의 항목',
+      seriesItemCount: '시리즈 전체 항목 수',
+      item: '항목',
+      itemSeries: '시리즈',
+      noSeries: '휴지통에 시리즈가 없습니다',
+      noItems: '휴지통에 항목이 없습니다',
     },
     backups: {
       create: '백업 만들기',
@@ -266,10 +272,15 @@ export default {
       deleteTitle: '라이브러리를 삭제할까요?',
       deleteSummary:
         '{name}에서 시리즈 {series}개와 항목 {mediaItems}개를 카탈로그에서 삭제합니다. 디스크의 원본 파일은 그대로 둡니다.',
+      deleteSummaryUnknown:
+        '{name}의 카탈로그 항목 전부를 삭제합니다. 개수를 셀 수 없었으므로, 잃어도 되는 양보다 많다고 보아야 합니다. 디스크의 원본 파일은 그대로 둡니다.',
       recheckFirst: '먼저 접근 여부를 다시 확인해야 강제 삭제를 선택할 수 있습니다',
       refusedTitle: '저장소에 접근할 수 없어 거부되었습니다',
       refusedExplain:
         '{name}의 저장소를 읽을 수 없습니다. 마운트가 일시적으로 빠진 것이라면 삭제해서는 안 됩니다. 먼저 접근 여부를 다시 확인하세요.',
+      recheckTitle: '저장소를 다시 확인할까요?',
+      recheckExplain:
+        '{name}의 저장소가 접근 불가로 표시되어 있습니다. 다시 확인하면 서버가 한 번 더 살펴보고, 마운트가 돌아왔다면 표시를 지웁니다.',
       forceDeleteTitle: '접근 불가 상태로 강제 삭제할까요?',
       forceDeleteAction: '강제 삭제',
       forceDeleteWarning:

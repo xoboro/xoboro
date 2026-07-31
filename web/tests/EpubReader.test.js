@@ -38,21 +38,27 @@ const NOVEL = {
   readProgress: null,
 }
 
-/** Deliberately not in manifest order: reading order is the point. */
+/**
+ * The reading-order listing, with the values the server actually computes.
+ *
+ * `totalProgression` is `position / count`, so the first position is 0.5 and the last
+ * is 1 — not 0 and 0.5. A fixture using the other convention describes an API that does
+ * not exist, and the reader copies these straight into the locator it stores.
+ */
 const POSITIONS = [
   {
     position: 1,
     href: 'OEBPS/text/chapter-1.xhtml',
     mediaType: 'application/xhtml+xml',
     progression: 0,
-    totalProgression: 0,
+    totalProgression: 0.5,
   },
   {
     position: 2,
     href: 'OEBPS/text/chapter-2.xhtml',
     mediaType: 'application/xhtml+xml',
     progression: 0,
-    totalProgression: 0.5,
+    totalProgression: 1,
   },
 ]
 
@@ -150,7 +156,7 @@ describe('EpubReader', () => {
     const sent = JSON.parse(write[1].body)
     expect(sent.page).toBe(2)
     expect(sent.locator.href).toBe('OEBPS/text/chapter-2.xhtml')
-    expect(sent.locator.locations.totalProgression).toBe(0.5)
+    expect(sent.locator.locations.totalProgression).toBe(1)
   })
 
   it('persists the column width, which is a setting that has an effect', async () => {

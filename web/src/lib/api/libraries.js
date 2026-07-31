@@ -89,9 +89,20 @@ export async function countTrashed(libraryId) {
   return { series: series.totalItems, mediaItems: mediaItems.totalItems }
 }
 
-/** Lists trashed entries for the trash screen. */
-export function listTrashed({ libraryId = null, page = 0, size = 50 } = {}) {
+/**
+ * Lists trashed series for the trash screen.
+ *
+ * Series and media items are two listings because they are two things. A trashed media
+ * item can sit under a series that is not trashed, so listing only series showed less
+ * than {@link countTrashed} counts and less than emptying the trash destroys.
+ */
+export function listTrashedSeries({ libraryId = null, page = 0, size = 50 } = {}) {
   return request('/series', { query: { libraryId, trashed: true, page, size } })
+}
+
+/** Lists trashed media items, including those under a series that is not trashed. */
+export function listTrashedMediaItems({ libraryId = null, page = 0, size = 50 } = {}) {
+  return request('/media-items', { query: { libraryId, trashed: true, page, size } })
 }
 
 /**

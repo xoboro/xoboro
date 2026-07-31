@@ -20,7 +20,8 @@
 
   let queue = $state(null)
   let error = $state(null)
-  let pendingState = $state(null)
+  /** `{ state, affected }` while a discard confirmation is open. */
+  let pending = $state(null)
   let busy = $state(false)
   let outcome = $state(null)
   let ticker = null
@@ -34,23 +35,37 @@
     }
   }
 
-  // Counted before the dialog opens, so the number in the confirmation is what the
-  // server currently holds rather than whatever the screen last happened to show.
-  const affected = $derived(
-    pendingState === 'unclaimed' ? queue?.pending ?? 0 : queue?.dead ?? 0,
-  )
+  /**
+   * Re-reads the queue, then opens the confirmation with the count that read returned.
+   *
+   * The count used to be derived from the polling snapshot, which meant the number in
+   * the dialog was whatever the screen last happened to show — up to five seconds
+   * stale, and the comment here claimed otherwise. Worse, the poll kept running while
+   * the dialog was open, so the figure an operator was reading could change between
+   * reading it and agreeing to it. The tick is suspended below for the same reason.
+   */
+  async function openDiscard(state) {
+    if (busy) return
+    busy = true
+    try {
+      await refresh()
+      pending = { state, affected: state === 'unclaimed' ? queue?.pending ?? 0 : queue?.dead ?? 0 }
+    } finally {
+      busy = false
+    }
+  }
 
   async function confirm() {
     if (busy) return
     busy = true
     try {
-      const result = await discardTasks(pendingState)
-      outcome = { state: pendingState, cleared: result.cleared }
-      pendingState = null
+      const result = await discardTasks(pending.state)
+      outcome = { state: pending.state, cleared: result.cleared }
+      pending = null
       await refresh()
     } catch (caught) {
       error = caught
-      pendingState = null
+      pending = null
     } finally {
       busy = false
     }
@@ -58,7 +73,12 @@
 
   onMount(() => {
     refresh()
-    ticker = setInterval(refresh, TICK_MILLIS)
+    // Held still while a confirmation is open: the dialog states a number, and a poll
+    // that moved the queue underneath it would make that number wrong while it is
+    // being read.
+    ticker = setInterval(() => {
+      if (!pending) refresh()
+    }, TICK_MILLIS)
   })
 
   onDestroy(() => clearInterval(ticker))
@@ -97,16 +117,16 @@
       <button
         type="button"
         data-testid="discard-unclaimed"
-        disabled={queue.pending === 0}
-        onclick={() => (pendingState = 'unclaimed')}
+        disabled={busy || queue.pending === 0}
+        onclick={() => openDiscard('unclaimed')}
       >
         {$_('admin.tasks.discardUnclaimed')}
       </button>
       <button
         type="button"
         data-testid="discard-dead"
-        disabled={queue.dead === 0}
-        onclick={() => (pendingState = 'dead')}
+        disabled={busy || queue.dead === 0}
+        onclick={() => openDiscard('dead')}
       >
         {$_('admin.tasks.discardDead')}
       </button>
@@ -114,21 +134,21 @@
   </section>
 {/if}
 
-{#if pendingState}
-  <Dialog title={$_('admin.tasks.confirmTitle')} danger onclose={() => (pendingState = null)}>
+{#if pending}
+  <Dialog title={$_('admin.tasks.confirmTitle')} danger onclose={() => (pending = null)}>
     {#snippet children()}
-      <p>
+      <p data-testid="discard-summary">
         {$_(
-          pendingState === 'unclaimed'
+          pending.state === 'unclaimed'
             ? 'admin.tasks.confirmUnclaimed'
             : 'admin.tasks.confirmDead',
-          { values: { count: affected } },
+          { values: { count: pending.affected } },
         )}
       </p>
       <p class="irreversible">{$_('admin.irreversible')}</p>
     {/snippet}
     {#snippet footer()}
-      <button type="button" onclick={() => (pendingState = null)}>{$_('common.cancel')}</button>
+      <button type="button" onclick={() => (pending = null)}>{$_('common.cancel')}</button>
       <button class="destructive" type="button" data-testid="confirm-discard" disabled={busy} onclick={confirm}>
         {busy ? $_('common.saving') : $_('admin.tasks.confirmAction')}
       </button>
