@@ -88,6 +88,61 @@ Where an assertion is known to be weaker than it looks, say so in the test. One 
 here documents that removing the guard it guards does not fail it, and what variant
 it does catch.
 
+## Checking the web UI against a real server
+
+The web suite mocks `fetch`. That is the right default — it is fast and it isolates
+component behaviour — but it cannot find a wrong belief about a response, because the
+mock encodes the same belief as the code. The duplicate-pages screen rendered nothing
+in production while every one of its tests passed, for exactly that reason.
+
+So before a UI change lands, run it against the real thing:
+
+```shell
+npm --prefix web run build
+./gradlew :server:app:installDist
+
+# The password file has to exist before the server reads it, or start-up fails with
+# "XOBORO_INITIAL_ADMIN_PASSWORD_FILE could not be read". Generated, never committed,
+# and never passed on a command line where it would land in shell history.
+mkdir -p /tmp/xoboro-check/backups
+python3 -c "import secrets; print(secrets.token_urlsafe(24))" > /tmp/xoboro-check/pw
+
+XOBORO_PORT=25699 \
+XOBORO_DATABASE_PATH=/tmp/xoboro-check/db.sqlite \
+XOBORO_BACKUPS_PATH=/tmp/xoboro-check/backups \
+XOBORO_WEB_PATH="$PWD/web/dist" \
+XOBORO_INITIAL_ADMIN_EMAIL=check@example.test \
+XOBORO_INITIAL_ADMIN_PASSWORD_FILE=/tmp/xoboro-check/pw \
+  server/app/build/install/app/bin/app
+```
+
+Delete `/tmp/xoboro-check` afterwards. Authenticate with
+`POST /api/xoboro/v1/session` carrying `{"email":…,"password":…,"transport":"COOKIE"}`
+and a same-origin `Origin` header — without one the CSRF guard refuses the mutation,
+which is itself worth confirming.
+
+What this catches that the mocked suite cannot, all of it found this way at least once:
+
+- **Response shape.** Ask each listing endpoint the console uses whether it answers a
+  bare array or the `items`/`totalItems` envelope, and compare against what the client
+  assumes. `web/tests/pageEnvelope.test.js` keeps the two lists in agreement afterwards,
+  but the first census has to come from a live server.
+- **Request shape.** A field the form sends in a form the server rejects. The library
+  location is a `file:` URI and was labelled "Path"; nothing in a mocked test objects,
+  because the mock accepts anything.
+- **Errors the client cannot attribute.** A `400` whose body carries no `field` cannot
+  drive a field-level error, so a form keyed on one shows a generic notice instead. Only
+  the real error body reveals that.
+- **Routing precedence.** Whether an unmatched path under a protocol prefix answers with
+  the application shell. Probe `/koreader/x`, `/actuator/x`, `/kobo/x`, `/api/...` and
+  confirm none returns HTML.
+- **Malformed input.** Percent-encodings that decode to something no filesystem accepts.
+  Watch the server log for `"level":"ERROR"` while probing; an uncaught throw shows up
+  there as a stack trace per request even when the status looks reasonable.
+- **Provenance guards.** That a cookie-authenticated mutation is refused with a foreign
+  `Origin` **and** with none at all. Failing open on a missing header is the easy mistake
+  and a mocked test never sends real headers.
+
 ## Completion rule
 
 Code is not considered complete when only the happy path passes. Tests cover:
