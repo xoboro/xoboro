@@ -1109,10 +1109,48 @@ class XoboroNativeDeliveryTest {
 
       val positions = response.body<List<XoboroMediaPositionResponse>>()
       assertEquals(listOf(1, 2), positions.map(XoboroMediaPositionResponse::position))
-      assertEquals("OEBPS/text/chapter-1.xhtml", positions.first().href)
+      // The whole ordered list, not just its first entry. The previous version asserted
+      // the first href twice - RESOURCE_ARCHIVE_PATH is that same literal - so it looked
+      // like two checks and was one.
+      assertEquals(
+        listOf("OEBPS/text/chapter-1.xhtml", "OEBPS/text/chapter-2.xhtml"),
+        positions.map(XoboroMediaPositionResponse::href),
+      )
       // The href is what the resource route is asked for verbatim, so it has to match a
       // manifest path exactly rather than being an OPF-relative href.
       assertEquals(RESOURCE_ARCHIVE_PATH, positions.first().href)
+      // `position / count`, so the first position reports half rather than zero. Pinned
+      // because a reader copies these into a locator, and because it is one position
+      // ahead of the Readium convention - see the DTO's documentation.
+      assertEquals(listOf(0.5F, 1F), positions.map(XoboroMediaPositionResponse::totalProgression))
+    }
+  }
+
+  @Test
+  fun `positions distinguish an unanalyzed EPUB from one without positions`() {
+    // An empty list means "this is not an EPUB". Answering it for an EPUB that has not
+    // been analyzed yet told a reader the book has no content, when the truth is that
+    // its content is not known yet - and the two are the difference between rendering an
+    // empty book and waiting. Gated exactly as `/pages/{pageNumber}` is.
+    testApplication {
+      val fixture = Fixture.visible(MediaStatus.OUTDATED)
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_not_ready", response.body<XoboroApiError>().code)
+    }
+  }
+
+  @Test
+  fun `positions report an unreadable EPUB as unsupported`() {
+    testApplication {
+      val fixture = Fixture.visible(MediaStatus.UNSUPPORTED)
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_unsupported", response.body<XoboroApiError>().code)
     }
   }
 
@@ -1255,6 +1293,11 @@ class XoboroNativeDeliveryTest {
               ),
             // In order, because BookMedia rejects anything else: positions must be
             // exactly 1..n in sequence. That invariant is why the route does not sort.
+            //
+            // totalProgression is 0.5 then 1.0, which is `position / count` - what
+            // EpubMediaAnalyzer actually computes. The fixture used to read 0 then 0.5,
+            // the `(position - 1) / count` convention, which described an API that does
+            // not exist and made the deviation from Readium invisible here.
             positions =
               listOf(
                 MediaPosition(
@@ -1262,14 +1305,14 @@ class XoboroNativeDeliveryTest {
                   mediaType = "application/xhtml+xml",
                   progression = 0F,
                   position = 1,
-                  totalProgression = 0F,
+                  totalProgression = 0.5F,
                 ),
                 MediaPosition(
                   href = "OEBPS/text/chapter-2.xhtml",
                   mediaType = "application/xhtml+xml",
                   progression = 0F,
                   position = 2,
-                  totalProgression = 0.5F,
+                  totalProgression = 1F,
                 ),
               ),
             createdAtMillis = 1_735_689_600_000,
