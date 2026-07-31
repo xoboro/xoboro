@@ -7,7 +7,7 @@
    */
   import DataTable from '../../src/admin/DataTable.svelte'
 
-  let { page = null, name = undefined, onpage = () => {} } = $props()
+  let { page = null, name = undefined, onpage = () => {}, busy = false } = $props()
 </script>
 
 <DataTable
@@ -15,6 +15,7 @@
   {name}
   {onpage}
   {page}
+  {busy}
   columns={['Identifier']}
   emptyLabel="Nothing here"
   keyOf={(item) => item.id}

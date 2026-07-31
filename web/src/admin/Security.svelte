@@ -21,6 +21,7 @@
   let config = $state(null)
   let activity = $state(null)
   let error = $state(null)
+  let activityBusy = $state(false)
 
   async function loadConfig() {
     try {
@@ -32,11 +33,14 @@
   }
 
   async function loadActivity(page = 0) {
+    activityBusy = true
     try {
       activity = await listAuthenticationActivity({ page })
       error = null
     } catch (caught) {
       error = caught
+    } finally {
+      activityBusy = false
     }
   }
 
@@ -113,6 +117,7 @@
     ]}
     page={activity}
     onpage={loadActivity}
+    busy={activityBusy}
     emptyLabel={$_('admin.security.noActivity')}
   >
     {#snippet row(entry)}
