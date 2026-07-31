@@ -13,10 +13,15 @@
   import Router from 'svelte-spa-router'
   import { wrap } from 'svelte-spa-router/wrap'
   import ReaderHome from './reader/ReaderHome.svelte'
+  import Groupings from './catalog/Groupings.svelte'
   import NotFound from './routes/NotFound.svelte'
 
   const routes = {
     '/': ReaderHome,
+    // Reader-side, not console: reading a collection is open to any authenticated
+    // caller, and only its mutations are administrator-only.
+    '/collections': wrap({ component: Groupings, props: { kind: 'collection' } }),
+    '/read-lists': wrap({ component: Groupings, props: { kind: 'readList' } }),
     // The wildcard is required: the console does its own nested routing, so it has
     // to keep matching for every path beneath it.
     '/admin/*': wrap({ asyncComponent: () => import('./admin/AdminShell.svelte') }),

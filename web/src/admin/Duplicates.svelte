@@ -123,6 +123,7 @@
                   type="button"
                   disabled={busy}
                   data-testid={`record-${action}-${candidate.pageHash}`}
+                  data-performed={UNPERFORMED_ACTIONS.includes(action) ? 'false' : 'true'}
                   onclick={() => record(candidate, action)}
                 >
                   {$_(`admin.duplicates.action.${action}`)}

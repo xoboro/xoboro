@@ -7,7 +7,7 @@
    * tracked separately; this is the shell they mount into, not a placeholder for
    * them.
    */
-  import { Languages, LogOut, Settings } from '@lucide/svelte'
+  import { BookOpen, Languages, Layers3, LogOut, Settings } from '@lucide/svelte'
   import { _, applyLocale, locale } from '../lib/i18n.js'
   import { isAdministrator, session, signOut } from '../lib/session.js'
   import { eventHub } from '../lib/eventHub.js'
@@ -55,6 +55,11 @@
     </button>
   </div>
 </header>
+
+<nav class="library" aria-label={$_('catalog.navigation')}>
+  <a href="#/collections"><Layers3 size={18} aria-hidden="true" /><span>{$_('catalog.collection.title')}</span></a>
+  <a href="#/read-lists"><BookOpen size={18} aria-hidden="true" /><span>{$_('catalog.readList.title')}</span></a>
+</nav>
 
 <main>
   <ErrorNotice {error} />
@@ -106,6 +111,25 @@
     background: none;
     color: var(--text);
     cursor: pointer;
+  }
+  .library {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    padding: var(--space-4) var(--gutter-right) 0 var(--gutter-left);
+  }
+  .library a {
+    display: flex;
+    min-width: 0;
+    min-height: var(--touch-target);
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface-inset);
+    font-size: var(--font-sm);
+    font-weight: 600;
   }
   main {
     padding: var(--space-4) var(--gutter-right) var(--space-5) var(--gutter-left);

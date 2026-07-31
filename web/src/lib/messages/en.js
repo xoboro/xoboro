@@ -271,6 +271,55 @@ export default {
     },
   },
 
+  catalog: {
+    navigation: 'My library',
+    metadata: {
+      seriesTitle: 'Edit series metadata',
+      lockNote:
+        'A lock does not prevent editing. It stops a metadata refresh from overwriting the field.',
+      lockField: 'Protect from refresh',
+      title: 'Title',
+      summary: 'Summary',
+      status: 'Status',
+      readingDirection: 'Reading direction',
+      publisher: 'Publisher',
+      language: 'Language',
+      ageRating: 'Age rating',
+      genres: 'Genres (comma separated)',
+      tags: 'Tags (comma separated)',
+      unset: 'Not set',
+    },
+    grouping: {
+      name: 'Name',
+      summary: 'Summary',
+      ordered: 'Keep a fixed order',
+      orderedHint: 'With a fixed order, the stored order is the reading order.',
+      members: 'Members',
+      noMembers: 'No members',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      removeMember: 'Remove',
+      visibleCount: '{count} visible to you',
+      orderedBadge: 'Ordered',
+      visibilityNote:
+        'Only members you can see are listed. Saving replaces the whole list, so anything invisible to you is dropped.',
+      deleteTitle: 'Delete this?',
+      deleteSummary: 'This removes \u201c{name}\u201d. The works inside are not deleted.',
+    },
+    collection: {
+      title: 'Collections',
+      createTitle: 'New collection',
+      editTitle: 'Edit collection',
+      none: 'No collections yet',
+    },
+    readList: {
+      title: 'Read lists',
+      createTitle: 'New read list',
+      editTitle: 'Edit read list',
+      none: 'No read lists yet',
+    },
+  },
+
   stream: {
     live: 'Live',
     connecting: 'Connecting…',
