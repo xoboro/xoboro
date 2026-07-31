@@ -134,6 +134,71 @@ describe('duplicate pages', () => {
     await waitFor(() => expect(screen.getByTestId('inspect-hash-0')).toBeInTheDocument())
   })
 
+  it('does not report a page number past the end when the listing empties', async () => {
+    // The paging summary is what an operator reads to work out where their rows went, so
+    // it is the worst place to print something impossible. Deciding the last candidate
+    // from page 2 used to leave "0 of 0 · page 2 of 1" because the clamp was skipped
+    // whenever the listing came back empty — precisely this case.
+    let emptied = false
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const requested = Number(new URL(url, 'http://x').searchParams.get('page') ?? 0)
+      const empty = { items: [], page: requested, size: 50, totalItems: 0, totalPages: 0, hasPrevious: false, hasNext: false }
+      let body
+      if (init.method === 'PUT') {
+        emptied = true
+        body = {}
+      } else if (url.includes('/decided') || emptied) {
+        body = empty
+      } else {
+        body = {
+          items: [{ pageHash: `h${requested}`, sizeBytes: 1 }],
+          page: requested,
+          size: 50,
+          totalItems: 2,
+          totalPages: 2,
+          hasPrevious: requested > 0,
+          hasNext: requested < 1,
+        }
+      }
+      const text = JSON.stringify(body)
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      }
+    })
+    const { container } = render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('inspect-h0')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('page-next-candidates'))
+    await waitFor(() => expect(screen.getByTestId('inspect-h1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('record-IGNORE-h1'))
+
+    // Settle first, then assert — not both inside one `waitFor`. The paging summary is
+    // already consistent *before* the re-read lands, so a `waitFor` wrapping the
+    // assertion succeeded on its first attempt against the old state and reported
+    // nothing about the new one. That is what made the first version of this test pass
+    // with the defect still present.
+    await waitFor(() => expect(screen.queryByTestId('inspect-h1')).toBeNull())
+
+    // A number relation rather than the sentence, which is translated: whatever the
+    // wording, no summary may claim a page beyond the total.
+    const summaries = [...container.querySelectorAll('.total')]
+    expect(summaries.length).toBeGreaterThan(0)
+    for (const node of summaries) {
+      const pairs = [...node.textContent.matchAll(/(\d+)\s*(?:\/|of)\s*(\d+)/g)].map((match) => [
+        Number(match[1]),
+        Number(match[2]),
+      ])
+      // The pattern has to have matched something, or this loop asserts nothing at all.
+      expect(pairs.length, `no page indicator in ${JSON.stringify(node.textContent)}`).toBeGreaterThan(0)
+      const [shownPage, totalPages] = pairs.at(-1)
+      expect(shownPage, `claimed page ${shownPage} of ${totalPages}`).toBeLessThanOrEqual(totalPages)
+    }
+  })
+
   it('keys candidate rows by hash rather than by position', async () => {
     // An index is not an identity: on a screen where acting on a row removes it, keying by
     // position makes Svelte reuse the departed row's DOM for the survivor.
