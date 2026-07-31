@@ -3767,8 +3767,10 @@ components:
         totalProgression: { type: number, format: float }
         koboSpan:
           type: string
-          nullable: true
-          description: Present only for a KEPUB; what Kobo devices anchor to.
+          description: >-
+            Present only for a KEPUB; what Kobo devices anchor to. **Absent**, not null, when there
+            is none: the server serializes with `explicitNulls = false`, so it omits the key rather
+            than sending `null`. Declaring it `nullable` described a value this API cannot emit.
     XoboroApiError:
       type: object
       required: [code, message]
@@ -3796,10 +3798,11 @@ components:
         sizeBytes:
           type: integer
           format: int64
-          nullable: true
           description: >-
             Optional. A hash whose pages differ in size has no single size, and the candidate listing
-            reports null for it.
+            **omits** the key for it rather than sending `null` - the server serializes with
+            `explicitNulls = false`. A consumer has to treat absent as "no single size" rather than
+            as zero.
     XoboroOAuth2Configuration:
       type: object
       description: >-

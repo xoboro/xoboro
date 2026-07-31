@@ -78,6 +78,26 @@ none of them looked wrong:
   synchronously. Do not put the settle and the assertion in one `waitFor`.
 - Asserting through a component's own happy path. A shared safety component needs
   tests for the inputs its current callers never send — that is where its holes are.
+- A value asserted against a fake that accepts anything. Every discovery feed answered
+  `500 Unsupported catalog sort property` while a route test asserted the exact sort the
+  route passed on: the fake catalog records whatever property it is given, and only the
+  SQL layer rejects an unknown one. A test that pins what a component *sends* needs a
+  receiver that can refuse, or a companion test that reaches the real one.
+- A constant asserted against its own literal. `assertEquals("createdAt", FEED.sortProperty)`
+  is a restatement, not a check — it passed for all five feed definitions while all of
+  them were broken. Worth keeping when the value is a client-facing contract, but say in
+  place what does verify it.
+- A discriminator that does not discriminate. An ordering assertion over two rows sorted
+  `alpha`, `beta` cannot tell "newest first" from "by title, descending": both name the
+  same row. Replacing the sort field with `title` survived. Three rows with the answer in
+  the middle rule out every other ordering the query layer offers.
+- A number matched as a substring. `toContain('5')` for a 5 MB size was satisfied by the
+  "2025" in the date beside it, and passed with the size at zero and with the field
+  missing. Match the figure with its unit, anchored.
+- A field name searched for in the whole document. Checking that a schema describes
+  `items` by searching the component for the word found it in the `required: [...]` line,
+  so deleting every property left it passing. Match the key at its own indentation, inside
+  the block that is supposed to declare it.
 
 Two related traps in reading results rather than writing them: **check the exit
 code, not the summary line** — this suite once printed "224 passed" while exiting `1`
@@ -142,6 +162,28 @@ What this catches that the mocked suite cannot, all of it found this way at leas
 - **Provenance guards.** That a cookie-authenticated mutation is refused with a foreign
   `Origin` **and** with none at all. Failing open on a missing header is the easy mistake
   and a mocked test never sends real headers.
+
+## Two lists agreeing is not a check
+
+Where a rule is written down twice by hand — a description and a client, a reserved list
+and a probe list — a test comparing them passes on whatever both of them leave out. This
+has happened three times here, and each time the guard was working exactly as designed:
+
+- `web/tests/pageEnvelope.test.js` compared a list of paged endpoints against the OpenAPI
+  description while nine endpoints answered the envelope and were documented as
+  `{ type: object }`.
+- `XoboroWebAssetApplicationTest` compared its probe list against the reserved prefix list
+  while `/sse`, `/oauth2/authorization`, `/login/oauth2/code` and `/v3/api-docs` were in
+  neither, and answered the application shell.
+- The discovery feeds' sort fields were pinned by a test that asserted them against
+  themselves.
+
+The fix in each case was to make something that is not a list the authority: the routing
+tree the server builds, or the responses a running server actually sends.
+`XoboroNativePageEnvelopeContractTest` and `reserves every path the server registers` are
+both that shape. When a test cannot reach the authority for part of its subject — a path
+with a template parameter, a route that needs a fixture — say so in the test, and name
+what is still covered by agreement alone.
 
 ## Completion rule
 
