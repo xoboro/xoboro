@@ -132,6 +132,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.KomgaDatabaseImporter
 import io.xoboro.server.persistence.XoboroDatabase
 import java.nio.file.Path
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -260,6 +261,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     databaseBackupRequester = runtime.databaseBackupRequester,
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
+    webDirectory = runtime.webDirectory,
     corsAllowedOrigins = runtime.corsAllowedOrigins,
     trustedProxyHosts = runtime.trustedProxyHosts,
     metricsToken = runtime.metricsToken,
@@ -315,6 +317,7 @@ fun Application.xoboroModule(
   databaseBackupRequester: DatabaseBackupRequester? = null,
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
+  webDirectory: Path? = null,
   corsAllowedOrigins: Set<String> = emptySet(),
   trustedProxyHosts: Set<String> = emptySet(),
   metricsToken: String? = null,
@@ -767,6 +770,9 @@ fun Application.xoboroModule(
           authenticationActivities = authenticationActivityLifecycle,
         )
       }
+      // Last on purpose. This is the only wildcard in the tree, and registering it
+      // before the API routes would let it answer for paths they own.
+      webDirectory?.let(::xoboroWebAssetRoutes)
     }
     if (contextPath == null) {
       routes()
@@ -789,10 +795,21 @@ private fun String.isSpringErrorSurface(): Boolean =
 
 private const val APPLICATION_VERSION = "0.1.0-SNAPSHOT"
 
+/**
+ * The `/health` and `/ready` body.
+ *
+ * Both fields are annotated because kotlinx.serialization omits values equal to
+ * their default, and the installed `Json` does not set `encodeDefaults`. Without
+ * the annotations `/health` answers `{}`, and `/ready` answers `{}` when the
+ * server is up but `{"status":"DOWN"}` when it is not - so a probe checking for
+ * `"status":"UP"` never sees it, and the healthy case is the one that looks
+ * broken. `encodeDefaults` is deliberately not turned on globally: it would
+ * change the shape of every native and Komga-compatible response at once.
+ */
 @Serializable
 data class HealthResponse(
-  val status: String = "UP",
-  val service: String = "xoboro",
+  @EncodeDefault val status: String = "UP",
+  @EncodeDefault val service: String = "xoboro",
 )
 
 @Serializable

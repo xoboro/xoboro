@@ -162,6 +162,7 @@ import io.xoboro.server.tasks.ScheduledLeaseHeartbeat
 import io.xoboro.server.tasks.TaskWorkerPolicy
 import io.xoboro.server.tasks.TaskWorkerPool
 import io.xoboro.server.tasks.TaskWorkerPoolPolicy
+import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.Base64
 import java.util.UUID
@@ -223,6 +224,8 @@ class XoboroRuntime private constructor(
   val libraryRepository: LibraryRepository,
   val effectiveServerPort: Int,
   val effectiveServerContextPath: String?,
+  /** Directory holding the built web UI, or `null` when none is deployed. */
+  val webDirectory: Path?,
   val corsAllowedOrigins: Set<String>,
   val trustedProxyHosts: Set<String>,
   val metricsToken: String?,
@@ -1038,6 +1041,10 @@ class XoboroRuntime private constructor(
           libraryRepository = libraries,
           effectiveServerPort = effectiveServerPort,
           effectiveServerContextPath = effectiveServerContextPath,
+          // Resolved once at start-up rather than checked per request: a UI that
+          // appears while the server runs is not a case worth supporting, and a
+          // per-request stat on every unmatched path would be.
+          webDirectory = config.webDirectory.takeIf(::isServableWebDirectory),
           corsAllowedOrigins = config.corsAllowedOrigins,
           trustedProxyHosts = config.trustedProxyHosts,
           metricsToken = config.metricsToken,

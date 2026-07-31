@@ -20,6 +20,15 @@ data class ServerConfig(
   val oauth2AccountLinking: OAuth2AccountLinking = OAuth2AccountLinking.VERIFIED_EMAIL,
   val fontsDirectory: Path = Path.of("config/fonts"),
   val backupsDirectory: Path = Path.of("config/backups"),
+  /**
+   * Where the built web UI lives.
+   *
+   * Not under `config/`: this is a build product shipped with the release, not
+   * something an operator edits. A missing directory is not an error - the server
+   * runs headless perfectly well, and refusing to start without a UI would make
+   * the API unusable for anyone who only wants the API.
+   */
+  val webDirectory: Path = Path.of("web"),
   val corsAllowedOrigins: Set<String> = emptySet(),
   val trustedProxyHosts: Set<String> = emptySet(),
   val metricsToken: String? = null,
@@ -143,6 +152,12 @@ data class ServerConfig(
             ?.let(Path::of)
             ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
             ?: normalizedWorkingDirectory.resolve("config/backups"),
+        webDirectory =
+          environment[XOBORO_WEB_PATH_KEY]
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
+            ?: normalizedWorkingDirectory.resolve("web"),
         corsAllowedOrigins =
           environment["KOMGA_CORS_ALLOWEDORIGINS"]
             ?.split(',')

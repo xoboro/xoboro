@@ -23,3 +23,20 @@ out/
 /media/
 /cache/
 /config/
+
+# Plugin/tool state, not project source. Untracked and easy to sweep into a
+# `git add -A`. Deliberately unanchored, unlike the runtime directories below:
+# tooling creates one of these per working directory, so an anchored `/.omc/`
+# leaves `web/.omc/` and every future subproject's copy staged. No source package
+# is named `.omc`, so there is nothing for the loose match to catch by accident.
+.omc/
+
+# Web UI build output and installed packages. `web/build/` is not listed because
+# the `build/` rule above is unanchored and already covers it.
+#
+# `node_modules/` is unanchored for the same reason as `.omc/`: an anchored
+# `/web/node_modules/` misses a root-level one, and running a JS tool from the
+# repository root creates exactly that. There is no source package by either name.
+node_modules/
+/web/dist/
+web/dist/

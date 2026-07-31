@@ -97,11 +97,16 @@ A successful bearer response is:
   "user": {
     "id": "01HZX...",
     "email": "reader@example.invalid",
-    "roles": ["USER"]
+    "roles": ["PAGE_STREAMING"]
   },
   "accessToken": "<returned-once>"
 }
 ```
+
+`roles` carries `UserRole` names: `ADMIN`, `FILE_DOWNLOAD`, `PAGE_STREAMING`,
+`KOBO_SYNC`, `KOREADER_SYNC`. There is no `USER` role — a plain reader holds only
+the capability roles it was granted, and an account with none has an empty list.
+`transport` defaults to `COOKIE` when omitted.
 
 Password attempts are limited to ten per minute for each verified client IP by
 default. Rejected attempts consume the same budget as successful attempts.
@@ -332,6 +337,39 @@ verbatim. Indexed paths have already been resolved relative to the EPUB OPF
 directory, so a client that parses the OPF itself and sends its raw hrefs will
 receive 404 responses. Manifest order is stable stored order (the OPF manifest
 order), not reading or spine order.
+
+`GET /api/xoboro/v1/media-items/{mediaItemId}/positions` returns the EPUB's
+spine-derived reading positions, ascending. **This is the only response that
+carries reading order**, and it exists because the resource manifest deliberately
+does not: a reader that followed manifest order would present chapters in
+whatever sequence the packager wrote them.
+
+Each entry has `position` (one-based), `href`, `mediaType`, `progression` within
+that resource, `totalProgression` through the publication, and `koboSpan` for a
+KEPUB. `href` matches a resource-manifest `path` and is what the resource route
+is asked for verbatim. These are the fields a client copies into the `locator` the
+read-progress endpoint accepts.
+
+`totalProgression` is computed as `position / count`, which makes it the progress at
+the **end** of that position rather than at its start: the first of two positions
+reports `0.5` and the last reports `1.0`. A Readium locator's `totalProgression` is
+`0` at the start of a publication, so this value is one position ahead of that
+convention. It is documented rather than corrected because the same number already
+feeds Kobo's `ProgressPercent`, so changing the arithmetic would move reported
+progress for every existing book — a decision on its own rather than a detail of
+adding a reader. Treat it as "how far through the publication this position ends".
+
+The list is returned in stored order without sorting, because `BookMedia` requires
+positions to be exactly `1..n` in sequence — a sort could not reorder anything and
+would only imply a risk the domain has already ruled out.
+
+A non-EPUB media item returns an empty list rather than an error; it has pages, not
+positions. An EPUB whose media is not `READY` is a different case and answers
+`409 media_not_ready` (or `409 media_unsupported`), exactly as `/pages/{pageNumber}`
+does — an empty list for it would tell a reader the book has no content when the
+truth is that its content is not known yet. `PAGE_STREAMING` is required, and an
+unauthorized identifier returns `404 media_item_not_found` like every other delivery
+route.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/resources/{resource...}` returns
 one indexed EPUB-container resource. Send a `path` from the resource manifest
@@ -1047,18 +1085,19 @@ ported to the native surface yet: they are tracked separately under artwork
 and duplicate-detection work in `docs/feature-coverage.md` rather than as
 general "maintenance" commands.
 
-> **Known caveat:** `Application.kt` installs a global `StatusPages
-> status(HttpStatusCode.NotFound, HttpStatusCode.Forbidden)` handler that
-> rewrites every native 404/403 body to a generic `{"code":"not_found"}` or
-> `{"code":"forbidden"}`, discarding the specific code a route already set
-> (`backup_not_found`, `media_item_not_found`, `series_not_found`, and every
-> other existing native `*_not_found`/`*_forbidden` code, including
-> pre-existing routes such as the metadata PATCH endpoints). This was verified
-> against the real production wiring while adding this section and is a
-> pre-existing defect that predates this change; it is not fixed here because
-> correcting it touches the shared error-handling pipeline for the entire
-> native API. Route-level tests intentionally exercise routes directly and
-> therefore still assert the specific codes documented above.
+Route-specific `*_not_found` and `*_forbidden` codes survive the production
+pipeline. `Application.kt` installs a global `StatusPages
+status(HttpStatusCode.Forbidden, HttpStatusCode.NotFound)` handler that would
+otherwise flatten them to a generic `{"code":"forbidden"}` or
+`{"code":"not_found"}`; it is guarded by the `XoboroNativeErrorBodyWritten`
+attribute, so a route that already wrote its own code is left alone and the
+generic body is only used when no route claimed the status.
+
+This is pinned through the real production module rather than through a route in
+isolation, because route-level tests install their own minimal `StatusPages`
+without the flattening handler and so cannot catch the defect class:
+`XoboroNativeErrorContractApplicationTest` for `*_forbidden` and
+`XoboroNativeOpsApplicationTest` for `*_not_found`.
 
 ## Events
 

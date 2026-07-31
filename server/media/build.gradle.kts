@@ -22,6 +22,12 @@ dependencies {
   implementation(libs.jspecify)
   implementation(libs.pdfbox)
   implementation(libs.junrar)
+  // A WebP *reader* for ImageIO, registered by service loader. Pure Java, no native
+  // library. The scanner already offers to discover `cover.webp`, and without a
+  // reader that discovery produced a permanently failing artwork task rather than a
+  // cover. See docs/architecture/0104-webp-support.md - WebP output is declined, and
+  // this library ships no writer to accidentally enable it.
+  runtimeOnly(libs.imageio.webp)
 
   testImplementation(kotlin("test-junit5"))
 }

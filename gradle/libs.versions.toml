@@ -19,8 +19,10 @@ jspecify = "1.0.0"
 pdfbox = "3.0.5"
 junrar = "8.0.0"
 zxing = "3.5.4"
+twelvemonkeys = "3.12.0"
 
 [libraries]
+imageio-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "twelvemonkeys" }
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
 ktor-server-call-logging = { module = "io.ktor:ktor-server-call-logging", version.ref = "ktor" }
