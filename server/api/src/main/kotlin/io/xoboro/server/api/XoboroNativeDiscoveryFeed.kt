@@ -62,8 +62,14 @@ internal enum class XoboroNativeDiscoveryFeed(
    * The next unread item in each series the caller has started, most recently read first.
    *
    * "What do I read next" — as opposed to [KEEP_READING], which is "what am I part-way through".
+   *
+   * Sorted by the **series'** last read time, not the item's. Every item this feed returns is
+   * one the reader has never opened — that is what "unread" means here — so its own
+   * `lastReadAt` is null for all of them, and ordering by it left the whole feed on the
+   * tie-breaker, `b.id ASC`. "Most recently read" for an unread item can only mean the series
+   * it belongs to.
    */
-  ON_DECK("on-deck", "lastReadAt", CatalogSortDirection.DESC, Filter.ON_DECK),
+  ON_DECK("on-deck", "seriesLastReadAt", CatalogSortDirection.DESC, Filter.ON_DECK),
 
   /**
    * Items the caller has started but not finished, most recently read first.

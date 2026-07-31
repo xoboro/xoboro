@@ -152,6 +152,7 @@ private fun NativeMediaItemSort.toCatalogSort(): CatalogSort =
         NativeMediaItemSort.SOURCE_MODIFIED_AT -> "fileLastModified"
         NativeMediaItemSort.FILE_SIZE -> "fileSize"
         NativeMediaItemSort.LAST_READ_AT -> "readProgress.readDate"
+        NativeMediaItemSort.SERIES_LAST_READ_AT -> "readProgress.seriesReadDate"
       },
   )
 
@@ -239,6 +240,15 @@ private enum class NativeMediaItemSort {
   SOURCE_MODIFIED_AT,
   FILE_SIZE,
   LAST_READ_AT,
+
+  /**
+   * When the reader last read anything in the item's **series**.
+   *
+   * Distinct from [LAST_READ_AT], and the distinction is not academic: for an item the
+   * reader has never opened, `lastReadAt` is null. Ordering the on-deck feed by it sorted
+   * every row by nothing at all.
+   */
+  SERIES_LAST_READ_AT,
 }
 
 class XoboroInvalidQueryException(
