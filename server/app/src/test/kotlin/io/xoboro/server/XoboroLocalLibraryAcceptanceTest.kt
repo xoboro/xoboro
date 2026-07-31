@@ -23,12 +23,14 @@ import io.xoboro.server.api.XoboroLibraryAdministrationRequest
 import io.xoboro.server.api.XoboroLibraryResponse
 import io.xoboro.server.api.XoboroLibrarySourceRequest
 import io.xoboro.server.api.XoboroMediaItemResponse
+import io.xoboro.server.api.XoboroMediaPositionResponse
 import io.xoboro.server.api.XoboroMediaProgressRequest
 import io.xoboro.server.api.XoboroPageResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -278,6 +280,186 @@ class XoboroLocalLibraryAcceptanceTest {
         )
       }
     }
+  }
+
+  @Test
+  fun `derives EPUB reading order from the spine, not the manifest`() {
+    // The claim `/positions` exists to make good, tested against a real file for the first time.
+    // `/resources` lists the container in OPF **manifest** order - whatever sequence the packager
+    // happened to write - and this EPUB's manifest is deliberately the reverse of its spine. A reader
+    // that followed the manifest would open chapter two first, so asserting the two listings disagree
+    // is the only way to show the derivation reads the spine rather than the manifest that shadows it.
+    val libraryRoot = Files.createDirectories(tempDirectory.resolve("epub-library"))
+    val series = Files.createDirectories(libraryRoot.resolve("Synthetic Novel"))
+    writeReversedManifestEpub(series.resolve("Synthetic Novel 01.epub"))
+    // A comic alongside it, because an empty position list has to keep meaning "not an EPUB" rather
+    // than "not analysed yet" - the two are what the 409 gate exists to separate.
+    writeComicArchive(series.resolve("Synthetic Comic 01.cbz"), pageCount = 2)
+
+    XoboroRuntime.open(serverConfig(tempDirectory.resolve("epub-acceptance.sqlite"), port = 25_612))
+      .use { runtime ->
+        testApplication {
+          application { xoboroModule(runtime) }
+          val client = createClient { install(ContentNegotiation) { json() } }
+          val token = client.claimAdministrator()
+
+          val libraryId =
+            client
+              .post("$XOBORO_API_PREFIX/libraries") {
+                bearerAuth(token)
+                jsonBody(
+                  XoboroLibraryAdministrationRequest(
+                    name = "Synthetic novels",
+                    source =
+                      XoboroLibrarySourceRequest(
+                        provider = "local",
+                        location = libraryRoot.toUri().toString(),
+                      ),
+                  ),
+                )
+              }.expecting(HttpStatusCode.Created)
+              .body<XoboroLibraryResponse>()
+              .id
+
+          client
+            .post("$XOBORO_API_PREFIX/libraries/$libraryId/scan") { bearerAuth(token) }
+            .expecting(HttpStatusCode.Accepted)
+          val items = client.awaitMediaItems(token, expected = 2)
+          client
+            .post("$XOBORO_API_PREFIX/libraries/$libraryId/analyze") { bearerAuth(token) }
+            .expecting(HttpStatusCode.Accepted)
+
+          val novelId = requireNotNull(items.firstOrNull { it.title.contains("Novel") }).id
+          val comicId = requireNotNull(items.firstOrNull { it.title.contains("Comic") }).id
+
+          val positions = client.awaitPositions(token, novelId)
+          assertEquals(
+            listOf("OEBPS/chapter-1.xhtml", "OEBPS/chapter-2.xhtml"),
+            positions.map { it.href },
+            "positions must follow the spine; the manifest lists these in the opposite order",
+          )
+          assertEquals(listOf(1, 2), positions.map { it.position })
+
+          // The manifest order, from the sibling route, proving the two really do differ here rather
+          // than the fixture having failed to reverse anything.
+          val resources =
+            client
+              .get("$XOBORO_API_PREFIX/media-items/$novelId/resources") { bearerAuth(token) }
+              .expecting(HttpStatusCode.OK)
+              .body<List<JsonObject>>()
+              .mapNotNull { it["path"]?.jsonPrimitive?.content }
+          assertEquals(
+            listOf("OEBPS/chapter-2.xhtml", "OEBPS/chapter-1.xhtml"),
+            resources.filter { it.startsWith("OEBPS/chapter-") },
+            "the fixture's manifest order is the point; if these match the spine the test proves nothing",
+          )
+
+          // An href from the listing, requested verbatim, because that is the contract the reader
+          // relies on: a position's href is a resource path and not an OPF-relative one.
+          client
+            .get("$XOBORO_API_PREFIX/media-items/$novelId/resources/${positions.first().href}") {
+              bearerAuth(token)
+            }.expecting(HttpStatusCode.OK)
+
+          // The comic: analysed, READY, and legitimately position-less.
+          client.awaitAnalyzedPages(token, comicId)
+          val comicPositions =
+            client
+              .get("$XOBORO_API_PREFIX/media-items/$comicId/positions") { bearerAuth(token) }
+              .expecting(HttpStatusCode.OK)
+              .body<List<JsonObject>>()
+          assertTrue(comicPositions.isEmpty(), "a comic has pages, not positions")
+        }
+      }
+  }
+
+  /**
+   * Writes a real EPUB whose manifest order is the **reverse** of its spine order.
+   *
+   * That inversion is the whole point of the fixture. A packager is free to write manifest entries in
+   * any sequence, and `/resources` reports that sequence; only the spine says what order the chapters
+   * are read in. An EPUB whose two orders agree cannot tell a correct derivation from one that reads
+   * the manifest and happens to look right.
+   *
+   * `mimetype` is written first and stored, as the specification requires and as the analyzer checks.
+   */
+  private fun writeReversedManifestEpub(path: Path) {
+    val chapter = { title: String ->
+      """<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml"><head><title>$title</title></head>
+        <body><p>$title</p></body></html>
+      """.trimIndent()
+    }
+    // Manifest: chapter 2 then chapter 1. Spine: chapter 1 then chapter 2.
+    val packageDocument =
+      """<?xml version="1.0" encoding="utf-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="pub-id">synthetic-novel-01</dc:identifier>
+            <dc:title>Synthetic Novel</dc:title>
+            <dc:language>en</dc:language>
+          </metadata>
+          <manifest>
+            <item id="two" href="chapter-2.xhtml" media-type="application/xhtml+xml"/>
+            <item id="one" href="chapter-1.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine>
+            <itemref idref="one"/>
+            <itemref idref="two"/>
+          </spine>
+        </package>
+      """.trimIndent()
+    val container =
+      """<?xml version="1.0" encoding="utf-8"?>
+        <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
+          <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+        </container>
+      """.trimIndent()
+
+    ZipOutputStream(Files.newOutputStream(path)).use { archive ->
+      val mimetype = "application/epub+zip".encodeToByteArray()
+      archive.setLevel(java.util.zip.Deflater.NO_COMPRESSION)
+      ZipEntry("mimetype").also { entry ->
+        entry.method = ZipEntry.STORED
+        entry.size = mimetype.size.toLong()
+        entry.compressedSize = mimetype.size.toLong()
+        entry.crc =
+          java.util.zip.CRC32().apply { update(mimetype) }.value
+        archive.putNextEntry(entry)
+      }
+      archive.write(mimetype)
+      archive.closeEntry()
+      archive.setLevel(java.util.zip.Deflater.DEFAULT_COMPRESSION)
+
+      listOf(
+        "META-INF/container.xml" to container,
+        "OEBPS/content.opf" to packageDocument,
+        "OEBPS/chapter-1.xhtml" to chapter("Chapter one"),
+        "OEBPS/chapter-2.xhtml" to chapter("Chapter two"),
+      ).forEach { (name, body) ->
+        archive.putNextEntry(ZipEntry(name))
+        archive.write(body.encodeToByteArray())
+        archive.closeEntry()
+      }
+    }
+  }
+
+  /** Polls until the EPUB has been analyzed and reports positions. */
+  private suspend fun io.ktor.client.HttpClient.awaitPositions(
+    token: String,
+    mediaItemId: String,
+  ): List<XoboroMediaPositionResponse> {
+    repeat(POLL_ATTEMPTS) {
+      val response = get("$XOBORO_API_PREFIX/media-items/$mediaItemId/positions") { bearerAuth(token) }
+      // 409 while the analyzer has not finished is the documented answer, and waiting through it is
+      // exactly what a reader does. Treating it as a failure here would make the gate untestable.
+      if (response.status == HttpStatusCode.OK) {
+        val positions = response.body<List<XoboroMediaPositionResponse>>()
+        if (positions.isNotEmpty()) return positions
+      }
+      Thread.sleep(POLL_INTERVAL_MILLIS)
+    }
+    error("media item $mediaItemId never reported positions")
   }
 
   private fun serverConfig(
