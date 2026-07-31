@@ -351,7 +351,8 @@ export default {
       visibilityNote:
         '여기에는 내가 볼 수 있는 항목만 나옵니다. 저장하면 목록 전체가 교체되므로, 보이지 않는 항목은 빠집니다.',
       deleteTitle: '삭제할까요?',
-      deleteSummary: '“{name}”을 삭제합니다. 안에 든 작품 자체는 지워지지 않습니다.',
+      deleteSummary:
+        '“{name}”과 그 안의 {count}개 구성을 삭제합니다. 작품 자체는 지워지지 않습니다.',
     },
     collection: {
       title: '컬렉션',

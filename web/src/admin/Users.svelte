@@ -166,6 +166,9 @@
 {/if}
 
 {#if deleting}
+  <!-- The summary is qualitative on purpose. The rule is that a blast radius comes from
+       the server, and no endpoint counts one user's progress rows — so this states what is
+       destroyed rather than inventing a number for it. -->
   <TypedConfirmDialog
     title={$_('admin.users.deleteTitle')}
     expected={deleting.email}

@@ -134,7 +134,9 @@
   <TypedConfirmDialog
     title={$_('catalog.grouping.deleteTitle')}
     expected={deleting.name}
-    summary={$_('catalog.grouping.deleteSummary', { values: { name: deleting.name } })}
+    summary={$_('catalog.grouping.deleteSummary', {
+      values: { name: deleting.name, count: deleting.memberCount ?? 0 },
+    })}
     actionLabel={$_('admin.libraries.delete')}
     {busy}
     onconfirm={confirmDelete}
