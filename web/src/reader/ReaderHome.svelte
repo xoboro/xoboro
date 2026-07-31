@@ -1,22 +1,25 @@
 <script>
   /**
-   * The signed-in surface.
+   * The reader's landing surface.
    *
-   * This is the seam the reader and administrator shells mount into. It currently
-   * shows who is signed in, whether the event stream is live, and the way out —
-   * which is genuinely everything the foundation can answer. Screens are added
-   * behind it, not by replacing it.
+   * Shows who is signed in, whether the event stream is live, the way out, and — for
+   * an administrator — the way into the console. The reading screens themselves are
+   * tracked separately; this is the shell they mount into, not a placeholder for
+   * them.
    */
-  import { Languages, LogOut } from 'lucide-svelte'
+  import { Languages, LogOut, Settings } from '@lucide/svelte'
   import { _, applyLocale, locale } from '../lib/i18n.js'
-  import { isAdministrator, signOut } from '../lib/session.js'
+  import { isAdministrator, session, signOut } from '../lib/session.js'
+  import { eventHub } from '../lib/eventHub.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import StreamIndicator from '../components/StreamIndicator.svelte'
 
-  let { user, streamStatus, resyncReason = null } = $props()
-
   let error = $state(null)
+
+  const streamStore = eventHub.status
+  const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
+  const streamStatus = $derived($streamStore)
 
   function toggleLanguage() {
     applyLocale($locale === 'ko' ? 'en' : 'ko')
@@ -34,25 +37,24 @@
 
 <header>
   <div class="who">
-    <span class="email">{user.email}</span>
+    <span class="email">{user?.email ?? ''}</span>
     {#if administrator}<span class="role">ADMIN</span>{/if}
   </div>
   <div class="actions">
     <StreamIndicator status={streamStatus} />
-    <button type="button" onclick={toggleLanguage} aria-label={$_('common.language')}>
+    {#if administrator}
+      <a class="icon" href="#/admin" aria-label={$_('admin.title')} title={$_('admin.title')}>
+        <Settings size={18} aria-hidden="true" />
+      </a>
+    {/if}
+    <button class="icon" type="button" onclick={toggleLanguage} aria-label={$_('common.language')}>
       <Languages size={18} aria-hidden="true" />
     </button>
-    <button type="button" onclick={leave} aria-label={$_('common.signOut')}>
+    <button class="icon" type="button" onclick={leave} aria-label={$_('common.signOut')}>
       <LogOut size={18} aria-hidden="true" />
     </button>
   </div>
 </header>
-
-<!-- polite: a resync is context, not a failure the user must act on now, so it
-     waits for a pause rather than interrupting whatever is being read. -->
-<div class="announcements" role="status" aria-live="polite">
-  {#if resyncReason}<p>{$_('stream.resynced')}</p>{/if}
-</div>
 
 <main>
   <ErrorNotice {error} />
@@ -76,7 +78,6 @@
   }
   .email {
     overflow: hidden;
-    font-size: var(--font-md);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -95,7 +96,7 @@
     align-items: center;
     gap: var(--space-1);
   }
-  .actions button {
+  .icon {
     display: grid;
     width: var(--touch-target);
     height: var(--touch-target);
@@ -105,12 +106,6 @@
     background: none;
     color: var(--text);
     cursor: pointer;
-  }
-  .announcements p {
-    margin: 0;
-    padding: var(--space-2) var(--gutter-left);
-    color: var(--text-muted);
-    font-size: var(--font-sm);
   }
   main {
     padding: var(--space-4) var(--gutter-right) var(--space-5) var(--gutter-left);
