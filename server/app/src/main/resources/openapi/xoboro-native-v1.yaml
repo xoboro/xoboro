@@ -1364,7 +1364,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: Invalid request body or query parameter.
           content:
@@ -1422,7 +1422,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -1455,7 +1455,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -1488,7 +1488,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -1521,7 +1521,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -1554,7 +1554,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -2734,7 +2734,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -2767,7 +2767,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
@@ -2800,7 +2800,7 @@ paths:
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema: { $ref: "#/components/schemas/XoboroPage" }
         "400":
           description: >-
             Invalid paging, or a `sort` parameter - a named feed owns its ordering and rejects an
