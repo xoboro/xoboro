@@ -141,6 +141,41 @@ fun Route.xoboroNativeDeliveryRoutes(
               },
           )
         }
+        get("/{mediaItemId}/positions") {
+          val user = call.nativeUser()
+          if (UserRole.PAGE_STREAMING !in user.roles) {
+            call.respondPageStreamingForbidden()
+            return@get
+          }
+          val item =
+            catalog.findBookByIdOrNull(
+              BookId(call.requiredParameter("mediaItemId")),
+              user.catalogAccess(),
+            )
+          if (item == null) {
+            call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+            return@get
+          }
+          // Not sorted here. `BookMedia` requires positions to be exactly 1..n in
+          // order, so a sort could never reorder anything - it would only imply a risk
+          // that the domain has already ruled out. An empty list is a legitimate answer
+          // for anything that is not an EPUB.
+          call.respond(
+            item.media
+              ?.positions
+              .orEmpty()
+              .map { position ->
+                XoboroMediaPositionResponse(
+                  position = position.position,
+                  href = position.href,
+                  mediaType = position.mediaType,
+                  progression = position.progression,
+                  totalProgression = position.totalProgression,
+                  koboSpan = position.koboSpan,
+                )
+              },
+          )
+        }
         get("/{mediaItemId}/resources/{resource...}") {
           val user = call.nativeUser()
           if (UserRole.PAGE_STREAMING !in user.roles) {

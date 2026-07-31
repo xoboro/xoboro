@@ -274,6 +274,10 @@ export default {
   reader: {
     title: 'My library',
     controls: 'Reader controls',
+    chapter: 'Chapter',
+    fontSize: 'Text size',
+    lineHeight: 'Line spacing',
+    margin: 'Margin',
     position: 'Page {page} of {total}',
     previousItem: 'Previous',
     nextItem: 'Next',

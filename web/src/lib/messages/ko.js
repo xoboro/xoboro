@@ -276,6 +276,10 @@ export default {
   reader: {
     title: '내 서재',
     controls: '읽기 도구',
+    chapter: '본문',
+    fontSize: '글자 크기',
+    lineHeight: '줄 간격',
+    margin: '여백',
     position: '{total}쪽 중 {page}쪽',
     previousItem: '이전 화',
     nextItem: '다음 화',

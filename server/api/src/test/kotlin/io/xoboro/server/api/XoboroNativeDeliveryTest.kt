@@ -41,6 +41,7 @@ import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaFile
 import io.xoboro.core.domain.MediaFileKind
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadata
@@ -1090,6 +1091,58 @@ class XoboroNativeDeliveryTest {
     }
   }
 
+  @Test
+  fun `positions are returned in reading order`() {
+    // The resource manifest is in OPF manifest order - the order the packager happened
+    // to write - so an EPUB reader that followed it would show chapters in whatever
+    // sequence the file was built in. Positions come from the spine, and this is the
+    // only response that carries reading order.
+    //
+    // The ordering itself is a domain invariant rather than something this route
+    // arranges: BookMedia refuses positions that are not exactly 1..n in sequence.
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      assertEquals(HttpStatusCode.OK, response.status)
+
+      val positions = response.body<List<XoboroMediaPositionResponse>>()
+      assertEquals(listOf(1, 2), positions.map(XoboroMediaPositionResponse::position))
+      assertEquals("OEBPS/text/chapter-1.xhtml", positions.first().href)
+      // The href is what the resource route is asked for verbatim, so it has to match a
+      // manifest path exactly rather than being an OPF-relative href.
+      assertEquals(RESOURCE_ARCHIVE_PATH, positions.first().href)
+    }
+  }
+
+  @Test
+  fun `positions require the page streaming role`() {
+    testApplication {
+      // FILE_DOWNLOAD without PAGE_STREAMING: allowed to download the original file,
+      // not to stream what is inside it.
+      val fixture = Fixture.downloadable()
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      assertEquals(HttpStatusCode.Forbidden, response.status)
+      assertEquals("page_streaming_forbidden", response.body<XoboroApiError>().code)
+    }
+  }
+
+  @Test
+  fun `positions hide an unauthorized media item behind a not found`() {
+    // Same answer as a missing item, so a grant cannot be probed by the difference.
+    testApplication {
+      val fixture = Fixture.restricted()
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+    }
+  }
+
   companion object {
     private const val PAGE_COUNT = 2
     private val MEDIA_ID = BookId("media-delivery")
@@ -1106,6 +1159,8 @@ class XoboroNativeDeliveryTest {
     private const val RESOURCES_PATH =
       "$XOBORO_API_PREFIX/media-items/media-delivery/resources"
     private const val RESOURCE_PATH = "$RESOURCES_PATH/$RESOURCE_ARCHIVE_PATH"
+    private const val POSITIONS_PATH =
+      "$XOBORO_API_PREFIX/media-items/media-delivery/positions"
     private const val FILE_PATH = "$XOBORO_API_PREFIX/media-items/media-delivery/file"
 
     private fun syntheticUser(
@@ -1196,6 +1251,25 @@ class XoboroNativeDeliveryTest {
                   mediaType = "application/xml",
                   fileSize = 456,
                   kind = MediaFileKind.GENERAL,
+                ),
+              ),
+            // In order, because BookMedia rejects anything else: positions must be
+            // exactly 1..n in sequence. That invariant is why the route does not sort.
+            positions =
+              listOf(
+                MediaPosition(
+                  href = "OEBPS/text/chapter-1.xhtml",
+                  mediaType = "application/xhtml+xml",
+                  progression = 0F,
+                  position = 1,
+                  totalProgression = 0F,
+                ),
+                MediaPosition(
+                  href = "OEBPS/text/chapter-2.xhtml",
+                  mediaType = "application/xhtml+xml",
+                  progression = 0F,
+                  position = 2,
+                  totalProgression = 0.5F,
                 ),
               ),
             createdAtMillis = 1_735_689_600_000,
