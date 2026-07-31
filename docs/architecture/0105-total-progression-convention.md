@@ -33,34 +33,56 @@ noticed.
 
 ## What actually depends on it
 
-Established rather than assumed, because the blast radius is what decides whether
-this is urgent:
+An earlier revision of this ADR claimed the value was purely presentational and
+"does not lose anyone's place". **That was wrong**, and an adversarial review caught
+it. The corrected account:
 
-- **Resume is unaffected.** `EpubReader` resumes through
-  `resumePage(readProgress, order.length)`, which works from the stored page /
-  position. No client places a reader by `totalProgression`, so nothing lands on
-  the wrong chapter.
+- **The first-party EPUB reader is unaffected.** It resumes through
+  `resumePage(readProgress, order.length)`, which works from the stored page. It
+  copies `totalProgression` into the locator it writes but never reads it back to
+  decide where to open.
 - **Kobo's reported percentage is affected.** `KoboRoutes` sets
-  `ProgressPercent = totalProgression * 100`, so a Kobo device opening chapter one
-  of a two-chapter KEPUB is told 50%. On a twenty-chapter book it is 5% — smaller,
-  still wrong. `KoboRoutes` also builds its own locator from a stored position, so
-  the same skew is in what it reports back.
+  `ProgressPercent = totalProgression * 100`, so a device opening chapter one of a
+  two-chapter KEPUB is told 50%.
+- **KOReader turns it back into a stored page.** This is the part that was missed.
+  `KoreaderSyncRoutes.pageFor` is `round(pageCount * position.totalProgression)`,
+  its result becomes `mapped.page`, and that is persisted through
+  `updateBookProgression`. So the value reaches durable read progress rather than
+  stopping at a display.
 
-So the defect is confined to a reported percentage. It misinforms; it does not lose
-anyone's place.
+The coupling runs the opposite way to what a first reading suggests, which is why
+this needs stating precisely. `pageFor` multiplies by `pageCount` immediately after
+`totalProgression` divided by the position count, so the two partly cancel: with the
+**current** convention the last position maps to the last page. Under the Readium
+convention `(position - 1) / n`, `pageFor` would map the last position to
+`pageCount - 1` — a KOReader user finishing a book would never reach its final page.
+
+The cancellation is only partial, because `pageCount` and `positions.size` are not
+the same number: positions are chunked by `knownSize` (uncompressed) while
+`pageCount` sums `ceil(compressedSize / POSITION_BYTES)`, so `pageCount ≤ n` for any
+compressed EPUB. The residual error in a stored KOReader page is bounded by about
+one page, and rounds to zero when `pageCount` is much smaller than `n`.
+
+So: the defect is small and bounded, but it is **durable, not presentational**, and
+correcting `totalProgression` alone would introduce a worse bug than it fixes.
 
 ## Decision
 
 **Leave the arithmetic alone on this branch. Do not paper over it in clients.**
 
-The deciding factor is not the compat surface — it is the stored data. Positions
-are persisted, and they are recomputed only when a book is analyzed. Changing the
-formula would leave every already-analyzed EPUB on the old convention and every
-newly analyzed one on the new, in the same table, with no way to tell them apart:
-a mixed-semantics database, which is worse than a consistent documented skew. That
-conflicts directly with this project's rule that migrations be backward
-compatible, because the reconciling migration is not a schema change at all — it
-is a forced re-analysis of every EPUB in every library.
+The deciding factor is **not** migration cost. An earlier revision said it was, and
+that argument does not survive scrutiny either: `totalProgression` is a pure function
+of `position` and `positions.size`, both stored and both correct, so it could be
+recomputed at the read boundary in `JooqBookMediaRepository` with no migration and no
+re-analysis. The stored column would simply stop being the source of truth.
+
+The real reason is that the arithmetic is not independent. `KoreaderSyncRoutes.pageFor`
+inverts it, so changing one without the other moves every KOReader user's stored page
+and costs them the last page of every book. A correction is therefore a coordinated
+change across the analyzer, the KOReader mapping and Kobo's percentage — three
+surfaces, two of them device protocols with no round-trip acceptance coverage — for a
+bounded sub-one-page error. That is a piece of work with its own acceptance criteria,
+not a detail of adding a web reader, and doing it half-way is worse than leaving it.
 
 Two things follow, and both are deliberate:
 
@@ -80,24 +102,34 @@ Two things follow, and both are deliberate:
 The correction is `(position - 1 + progression) / count`, and it needs, in one
 change:
 
-1. the analyzer formula;
-2. a re-analysis of existing EPUBs, because stored positions do not migrate
-   themselves — on a large library this is the expensive part and the reason this
-   is not a drive-by fix;
+1. the analyzer formula — or, cheaper and with no migration, a recomputation at the
+   read boundary in `JooqBookMediaRepository`, since the inputs are already stored;
+2. `KoreaderSyncRoutes.pageFor`, which inverts the current convention and would
+   otherwise map the last position to `pageCount - 1`. This is the item that makes
+   the change coordinated rather than local, and it was missed in the first version
+   of this ADR;
 3. `EpubMediaAnalyzerTest.kt:53`, which asserts the last position's
    `totalProgression` is `1F` and so pins the current convention — under the
    correction the last of two positions is `0.5` — plus the delivery-route fixture;
-4. a decision about Kobo devices that have already synced a percentage under the
-   old convention and will see it move backwards.
+4. a decision about Kobo and KOReader devices that have already synced under the old
+   convention and will see their position move.
 
-Item 4 is the one that makes this a product decision rather than a bug fix, and
-item 2 is what makes it a task of its own.
+Item 2 is the technical blocker and item 4 is the product one. Neither is expensive
+on its own; what makes this a task of its own is that a round-trip through both device
+protocols has no acceptance coverage today, so there would be nothing to tell you the
+coordinated change was right.
 
 ## Consequences
 
 - A reader or client reading these values should treat `totalProgression` as "how
   far through the publication this position ends", which is what it is.
-- Nobody's reading position is at risk; only a displayed percentage is wrong.
-- The next person to look at this finds the arithmetic, the reason, and the list
-  above, instead of rediscovering it from a test fixture that disagreed with
-  production.
+- A KOReader user's stored page can sit up to about one page ahead of where they
+  were. A Kobo user's reported percentage is wrong by one position. Neither loses a
+  chapter, and the first-party reader is unaffected.
+- The next person to look at this finds the arithmetic, the coupling to `pageFor`,
+  and the list above, instead of rediscovering it from a test fixture that disagreed
+  with production.
+- Two claims in the first version of this ADR were wrong and are corrected above:
+  that the value never reaches durable state, and that migration was the obstacle.
+  Both were found by adversarial review, not by writing the document more carefully —
+  which is the argument for having the review.
