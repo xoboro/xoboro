@@ -273,6 +273,25 @@ export default {
     },
   },
 
+  reader: {
+    title: '내 서재',
+    keepReading: '이어보기',
+    onDeck: '다음에 읽을 것',
+    recentlyAdded: '새로 추가',
+    recentlyUpdated: '최근 갱신',
+    allSeries: '전체 작품',
+    noSeries: '작품이 없습니다',
+    noItems: '항목이 없습니다',
+    items: '{count}편',
+    unread: '안 읽음',
+    read: '완독',
+    inProgress: '{page}쪽까지 읽음',
+    conflictTitle: '다른 기기가 더 앞까지 읽었습니다',
+    conflictBody: '{page}쪽까지 읽은 기록이 있습니다. 거기로 이동할까요?',
+    conflictJump: '거기로 이동',
+    conflictStay: '여기 계속 보기',
+  },
+
   catalog: {
     navigation: '내 서재',
     metadata: {

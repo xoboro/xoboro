@@ -14,15 +14,37 @@ function reply({ status = 200, body = null } = {}) {
   }
 }
 
-/** Answers each native path with a canned reply, keyed by the path itself. */
+const EMPTY_PAGE = {
+  items: [],
+  page: 0,
+  size: 20,
+  totalItems: 0,
+  totalPages: 0,
+  hasPrevious: false,
+  hasNext: false,
+}
+
+/**
+ * Answers each native path with a canned reply, keyed by the path itself.
+ *
+ * Anything unmatched gets an empty page. This file tests the session gate, and the
+ * screens behind it fetch their own data - listing every one of their requests here
+ * would make the gate's tests fail whenever a screen started asking for something
+ * else.
+ */
 function router(routes) {
   return vi.fn(async (url) => {
     for (const [path, response] of Object.entries(routes)) {
       if (url.startsWith(`/api/xoboro/v1${path}`)) return response
     }
-    throw new Error(`unexpected request: ${url}`)
+    return reply({ body: EMPTY_PAGE })
   })
 }
+
+/** The reader shell is what renders once a session exists. */
+const signedIn = (container) => container.querySelector('a[href="#/collections"]')
+/** Only an administrator is offered the console. */
+const consoleLink = (container) => container.querySelector('a[href="#/admin"]')
 
 beforeEach(() => {
   session.set({ status: SessionStatus.UNKNOWN, user: null })
@@ -75,7 +97,7 @@ describe('session gate', () => {
     expect(screen.getByRole('status')).toBeInTheDocument()
 
     resolveSession(reply({ body: { user: { id: 'u1', email: 'a@example.invalid', roles: [] } } }))
-    await waitFor(() => expect(screen.getByText('a@example.invalid')).toBeInTheDocument())
+    await waitFor(() => expect(signedIn(container)).toBeTruthy())
   })
 
   it('never asks for the setup state once a session exists', async () => {
@@ -85,31 +107,33 @@ describe('session gate', () => {
       '/session': reply({ body: { user: { id: 'u1', email: 'a@example.invalid', roles: [] } } }),
     })
     globalThis.fetch = fetchImpl
-    render(App)
+    const { container } = render(App)
 
-    await waitFor(() => expect(screen.getByText('a@example.invalid')).toBeInTheDocument())
+    await waitFor(() => expect(signedIn(container)).toBeTruthy())
     const asked = fetchImpl.mock.calls.map(([url]) => url)
     expect(asked.some((url) => url.includes('/setup'))).toBe(false)
   })
 
-  it('marks an administrator in the shell', async () => {
+  it('offers the console to an administrator', async () => {
     globalThis.fetch = router({
       '/session': reply({
         body: { user: { id: 'u1', email: 'admin@example.invalid', roles: ['ADMIN'] } },
       }),
     })
-    render(App)
-    await waitFor(() => expect(screen.getByText('ADMIN')).toBeInTheDocument())
+    const { container } = render(App)
+    await waitFor(() => expect(consoleLink(container)).toBeTruthy())
   })
 
-  it('does not mark a reader as an administrator', async () => {
+  it('does not offer the console to a reader', async () => {
+    // Presentation, not protection - the server refuses those routes regardless - but
+    // showing a door that only answers 403 is a worse experience than not showing it.
     globalThis.fetch = router({
       '/session': reply({
         body: { user: { id: 'u2', email: 'reader@example.invalid', roles: ['PAGE_STREAMING'] } },
       }),
     })
-    render(App)
-    await waitFor(() => expect(screen.getByText('reader@example.invalid')).toBeInTheDocument())
-    expect(screen.queryByText('ADMIN')).toBeNull()
+    const { container } = render(App)
+    await waitFor(() => expect(signedIn(container)).toBeTruthy())
+    expect(consoleLink(container)).toBeNull()
   })
 })
