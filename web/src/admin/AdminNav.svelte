@@ -11,13 +11,33 @@
   // but fails the production build with MISSING_EXPORT — so the build is the thing
   // that catches it, not the tests.
   import { router } from 'svelte-spa-router'
-  import { Activity, Library, ListChecks } from '@lucide/svelte'
+  import {
+    Activity,
+    Archive,
+    Copy,
+    History,
+    KeyRound,
+    Library,
+    ListChecks,
+    Settings,
+    ShieldCheck,
+    Trash2,
+    Users,
+  } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
 
   const items = [
     { path: '/admin', key: 'admin.nav.overview', icon: Activity },
     { path: '/admin/libraries', key: 'admin.nav.libraries', icon: Library },
+    { path: '/admin/trash', key: 'admin.nav.trash', icon: Trash2 },
     { path: '/admin/tasks', key: 'admin.nav.tasks', icon: ListChecks },
+    { path: '/admin/users', key: 'admin.nav.users', icon: Users },
+    { path: '/admin/api-keys', key: 'admin.nav.apiKeys', icon: KeyRound },
+    { path: '/admin/security', key: 'admin.nav.security', icon: ShieldCheck },
+    { path: '/admin/duplicates', key: 'admin.nav.duplicates', icon: Copy },
+    { path: '/admin/history', key: 'admin.nav.history', icon: History },
+    { path: '/admin/backups', key: 'admin.nav.backups', icon: Archive },
+    { path: '/admin/settings', key: 'admin.nav.settings', icon: Settings },
   ]
 </script>
 

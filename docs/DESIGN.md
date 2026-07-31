@@ -289,6 +289,16 @@ native API, which is what keeps this section from being wishful:
 | History | historical activity paging |
 | Backups | create, list, delete |
 
+Eleven of these are built. **Metadata and Collections & read lists are not**, and
+they are deliberately the two that are least like the rest: both are editing
+surfaces over content the caller can already see, and metadata editing is
+explicitly *not* administrator-gated on the server. They belong with the catalog
+screens rather than with the operational console, and are tracked separately.
+
+The console navigation lists only the screens that exist. An entry for an unbuilt
+screen is a promise the console does not keep, and it costs an operator a click to
+find that out.
+
 ### Layout
 
 Sidebar navigation, single content column, no nested scroll regions. Tables get
