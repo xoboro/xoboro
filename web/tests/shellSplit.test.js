@@ -29,7 +29,7 @@ describe('shell split', () => {
   it('keeps the reader path free of admin imports', () => {
     // A shared component pulled from admin/ into the reader would drag the chunk back
     // into the entry bundle just as effectively as a static route import.
-    const reader = readFileSync(join(SOURCE_ROOT, 'reader/ReaderHome.svelte'), 'utf8')
+    const reader = readFileSync(join(SOURCE_ROOT, 'reader/Home.svelte'), 'utf8')
     expect(reader).not.toContain('../admin/')
   })
 
