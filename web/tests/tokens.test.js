@@ -45,8 +45,14 @@ describe('design tokens', () => {
     const missing = new Set()
     for (const file of [...filesUnder(SOURCE_ROOT, '.svelte'), join(SOURCE_ROOT, 'styles/global.css')]) {
       const source = readFileSync(file, 'utf8')
+      // A property the file sets itself is component-local, not a design token — the
+      // reader's column width is set inline per instance and has no business in
+      // tokens.css. It still has to be declared *somewhere*, which is what catches a
+      // typo: a misspelled name is declared neither here nor there.
+      const local = new Set([...source.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]))
       for (const [, name] of source.matchAll(/var\((--[a-z0-9-]+)/gi)) {
-        if (!declared.has(name)) missing.add(`${file.replace(SOURCE_ROOT, 'src')}: ${name}`)
+        if (declared.has(name) || local.has(name)) continue
+        missing.add(`${file.replace(SOURCE_ROOT, 'src')}: ${name}`)
       }
     }
     expect([...missing]).toEqual([])

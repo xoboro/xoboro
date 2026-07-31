@@ -273,6 +273,23 @@ export default {
 
   reader: {
     title: 'My library',
+    controls: 'Reader controls',
+    position: 'Page {page} of {total}',
+    previousItem: 'Previous',
+    nextItem: 'Next',
+    mode: 'Layout',
+    direction: 'Direction',
+    fit: 'Fit',
+    displayWidth: 'Width',
+    modes: {
+      scroll: 'Scroll',
+      paged: 'One page',
+      split: 'Split spreads',
+      'split-scroll': 'Split, scrolling',
+    },
+    directions: { ltr: 'Left to right', rtl: 'Right to left' },
+    fits: { width: 'Width', height: 'Height' },
+    widths: { '600': 'Narrow', '760': 'Normal', '1000': 'Wide', full: 'Full' },
     keepReading: 'Keep reading',
     onDeck: 'On deck',
     recentlyAdded: 'Recently added',

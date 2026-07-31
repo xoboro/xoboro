@@ -275,6 +275,23 @@ export default {
 
   reader: {
     title: '내 서재',
+    controls: '읽기 도구',
+    position: '{total}쪽 중 {page}쪽',
+    previousItem: '이전 화',
+    nextItem: '다음 화',
+    mode: '보기 방식',
+    direction: '방향',
+    fit: '맞춤',
+    displayWidth: '표시 너비',
+    modes: {
+      scroll: '스크롤',
+      paged: '한 장씩',
+      split: '펼침 분할',
+      'split-scroll': '분할 스크롤',
+    },
+    directions: { ltr: '왼→오', rtl: '오→왼' },
+    fits: { width: '너비', height: '높이' },
+    widths: { '600': '좁게', '760': '보통', '1000': '넓게', full: '가득' },
     keepReading: '이어보기',
     onDeck: '다음에 읽을 것',
     recentlyAdded: '새로 추가',
