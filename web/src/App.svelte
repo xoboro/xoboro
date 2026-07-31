@@ -19,28 +19,21 @@
     session,
     watchForLostSession,
   } from './lib/session.js'
-  import { StreamStatus, createEventHub } from './lib/sse.js'
+  import { eventHub } from './lib/eventHub.js'
   import ErrorNotice from './components/ErrorNotice.svelte'
   import SignIn from './routes/SignIn.svelte'
   import Setup from './routes/Setup.svelte'
-  import SignedIn from './routes/SignedIn.svelte'
-
-  const hub = createEventHub()
+  import AppShell from './AppShell.svelte'
 
   let claimed = $state(null)
   let error = $state(null)
-  let streamStatus = $state(StreamStatus.IDLE)
-  let resyncReason = $state(null)
 
   const status = $derived($session.status)
-  const user = $derived($session.user)
 
   onMount(() => {
     const stopWatching = watchForLostSession()
-    const stopStatus = hub.status.subscribe((value) => (streamStatus = value))
 
-    const stopResync = hub.onResync(async (message) => {
-      resyncReason = message.reason
+    const stopResync = eventHub.onResync(async (message) => {
       // `revoked` means this subscriber's authorization changed and the server
       // closed the stream. Re-reading the session is the only way to find out
       // whether they may still have one at all, so reconnecting before that
@@ -52,9 +45,8 @@
 
     return () => {
       stopWatching()
-      stopStatus()
       stopResync()
-      hub.stop()
+      eventHub.stop()
     }
   })
 
@@ -63,8 +55,8 @@
   // the server allows four concurrent streams per user and evicts the oldest past
   // that, so per-screen connections would spend their time evicting each other.
   $effect(() => {
-    if (status === SessionStatus.AUTHENTICATED) hub.start()
-    else hub.stop()
+    if (status === SessionStatus.AUTHENTICATED) eventHub.start()
+    else eventHub.stop()
   })
 
   // The setup state is only consulted while nobody is signed in. Asking for it
@@ -91,7 +83,7 @@
     <ErrorNotice {error} />
   {/if}
 {:else}
-  <SignedIn {user} {streamStatus} {resyncReason} />
+  <AppShell />
 {/if}
 
 <style>

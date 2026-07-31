@@ -6,7 +6,7 @@
    * colour communicates is invisible to a portion of users, and "is this console
    * showing me current data" is not optional information.
    */
-  import { Radio, RadioTower, Loader, Unplug } from 'lucide-svelte'
+  import { Radio, RadioTower, Loader, Unplug } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import { StreamStatus } from '../lib/sse.js'
 
