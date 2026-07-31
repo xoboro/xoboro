@@ -145,6 +145,7 @@ export default {
       noDecisions: 'No decisions recorded',
       carriersTitle: 'Items carrying this hash',
       page: 'page {number}',
+      carriersTruncated: 'Showing {shown} of {total} items carrying this hash.',
       noCarriers: 'No items found',
       action: {
         IGNORE: 'Record as ignored',
@@ -163,8 +164,13 @@ export default {
       filter: 'Library',
       allLibraries: 'All',
       series: 'Series',
-      items: 'Items',
-      none: 'The trash is empty',
+      trashedSeries: 'Trashed series',
+      trashedItems: 'Trashed items',
+      seriesItemCount: 'Items in series',
+      item: 'Item',
+      itemSeries: 'Series',
+      noSeries: 'No trashed series',
+      noItems: 'No trashed items',
     },
     backups: {
       create: 'Create a backup',
@@ -263,10 +269,15 @@ export default {
       deleteTitle: 'Delete this library?',
       deleteSummary:
         'This removes {series} series and {mediaItems} items from the catalog for {name}. The files on disk are left alone.',
+      deleteSummaryUnknown:
+        'This removes every catalog entry for {name}. How many could not be counted, so treat it as more than you can afford to lose. The files on disk are left alone.',
       recheckFirst: 'Re-check availability before a force delete becomes available',
       refusedTitle: 'Refused: the storage cannot be reached',
       refusedExplain:
         'The storage for {name} cannot be read. If the mount has only dropped out, this should not be deleted. Re-check availability first.',
+      recheckTitle: 'Re-check the storage?',
+      recheckExplain:
+        'The storage for {name} is marked unreachable. Re-checking asks the server to look again, and clears the flag if the mount is back.',
       forceDeleteTitle: 'Delete while the storage is unreachable?',
       forceDeleteAction: 'Force delete',
       forceDeleteWarning:

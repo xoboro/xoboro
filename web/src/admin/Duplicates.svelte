@@ -29,19 +29,24 @@
   } from '../lib/api/admin.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Dialog from '../components/Dialog.svelte'
+  import DataTable from './DataTable.svelte'
 
-  let candidates = $state([])
-  let decisions = $state([])
+  /**
+   * Both listings are server-paged, so both hold the page envelope rather than an
+   * array and both render through the console's one list pattern.
+   */
+  let candidates = $state(null)
+  let decisions = $state(null)
   let error = $state(null)
   let busy = $state(false)
-  /** `{ candidate, carriers }` while the carrier list is open. */
+  /** `{ candidate, carriers }` while the carrier list is open; `carriers` is a page. */
   let inspecting = $state(null)
 
-  async function load() {
+  async function load(candidatePage = candidates?.page ?? 0, decisionPage = decisions?.page ?? 0) {
     try {
       const [pending, decided] = await Promise.all([
-        listDuplicateCandidates(),
-        listDuplicateDecisions(),
+        listDuplicateCandidates({ page: candidatePage }),
+        listDuplicateDecisions({ page: decisionPage }),
       ])
       candidates = pending
       decisions = decided
@@ -51,7 +56,7 @@
     }
   }
 
-  onMount(load)
+  onMount(() => load(0, 0))
 
   async function inspect(candidate) {
     busy = true
@@ -68,6 +73,9 @@
     busy = true
     try {
       await recordDuplicateDecision(candidate.pageHash, action, candidate.sizeBytes ?? null)
+      // Recording removes the hash from the candidate list, so a decision taken on the
+      // last row of a page would otherwise leave the operator on a page that no longer
+      // exists. Both listings are re-read at their current page.
       await load()
     } catch (caught) {
       error = caught
@@ -87,92 +95,82 @@
 <ErrorNotice {error} onretry={load} />
 
 <h2>{$_('admin.duplicates.candidates')}</h2>
-<div class="scroller">
-  <table>
-    <caption class="visually-hidden">{$_('admin.duplicates.candidates')}</caption>
-    <thead>
-      <tr>
-        <th scope="col">{$_('admin.duplicates.hash')}</th>
-        <th scope="col">{$_('admin.duplicates.size')}</th>
-        <th scope="col">{$_('admin.duplicates.decide')}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each candidates as candidate (candidate.pageHash)}
-        <tr>
-          <th scope="row">
+<DataTable
+  caption={$_('admin.duplicates.candidates')}
+  columns={[
+    $_('admin.duplicates.hash'),
+    $_('admin.duplicates.size'),
+    $_('admin.duplicates.decide'),
+  ]}
+  page={candidates}
+  onpage={(next) => load(next, decisions?.page ?? 0)}
+  emptyLabel={$_('admin.duplicates.noCandidates')}
+>
+  {#snippet row(candidate)}
+    <tr>
+      <th scope="row">
+        <button
+          class="hash"
+          type="button"
+          disabled={busy}
+          data-testid={`inspect-${candidate.pageHash}`}
+          onclick={() => inspect(candidate)}
+        >
+          {candidate.pageHash}
+        </button>
+      </th>
+      <td>
+        <!-- A hash whose pages differ in size has no single size, and the listing
+             reports null for it. Rendering "0 bytes" would invent a fact. -->
+        {candidate.sizeBytes ?? $_('admin.duplicates.mixedSize')}
+      </td>
+      <td>
+        <div class="actions">
+          {#each DUPLICATE_ACTIONS as action (action)}
             <button
-              class="hash"
               type="button"
               disabled={busy}
-              data-testid={`inspect-${candidate.pageHash}`}
-              onclick={() => inspect(candidate)}
+              data-testid={`record-${action}-${candidate.pageHash}`}
+              data-performed={UNPERFORMED_ACTIONS.includes(action) ? 'false' : 'true'}
+              onclick={() => record(candidate, action)}
             >
-              {candidate.pageHash}
+              {$_(`admin.duplicates.action.${action}`)}
             </button>
-          </th>
-          <td>
-            <!-- A hash whose pages differ in size has no single size, and the listing
-                 reports null for it. Rendering "0 bytes" would invent a fact. -->
-            {candidate.sizeBytes ?? $_('admin.duplicates.mixedSize')}
-          </td>
-          <td>
-            <div class="actions">
-              {#each DUPLICATE_ACTIONS as action (action)}
-                <button
-                  type="button"
-                  disabled={busy}
-                  data-testid={`record-${action}-${candidate.pageHash}`}
-                  data-performed={UNPERFORMED_ACTIONS.includes(action) ? 'false' : 'true'}
-                  onclick={() => record(candidate, action)}
-                >
-                  {$_(`admin.duplicates.action.${action}`)}
-                </button>
-              {/each}
-            </div>
-          </td>
-        </tr>
-      {/each}
-      {#if candidates.length === 0}
-        <tr><td colspan="3" class="empty">{$_('admin.duplicates.noCandidates')}</td></tr>
-      {/if}
-    </tbody>
-  </table>
-</div>
+          {/each}
+        </div>
+      </td>
+    </tr>
+  {/snippet}
+</DataTable>
 
 <h2>{$_('admin.duplicates.decisions')}</h2>
-<div class="scroller">
-  <table>
-    <caption class="visually-hidden">{$_('admin.duplicates.decisions')}</caption>
-    <thead>
-      <tr>
-        <th scope="col">{$_('admin.duplicates.hash')}</th>
-        <th scope="col">{$_('admin.duplicates.recorded')}</th>
-        <th scope="col">{$_('admin.duplicates.effect')}</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each decisions as decision (decision.pageHash)}
-        <tr>
-          <th scope="row">{decision.pageHash}</th>
-          <td>{$_(`admin.duplicates.action.${decision.action}`)}</td>
-          <td>
-            {#if UNPERFORMED_ACTIONS.includes(decision.action)}
-              <span class="not-performed" data-testid={`not-performed-${decision.pageHash}`}>
-                {$_('admin.duplicates.intentOnly')}
-              </span>
-            {:else}
-              <span>{$_('admin.duplicates.excludedFromList')}</span>
-            {/if}
-          </td>
-        </tr>
-      {/each}
-      {#if decisions.length === 0}
-        <tr><td colspan="3" class="empty">{$_('admin.duplicates.noDecisions')}</td></tr>
-      {/if}
-    </tbody>
-  </table>
-</div>
+<DataTable
+  caption={$_('admin.duplicates.decisions')}
+  columns={[
+    $_('admin.duplicates.hash'),
+    $_('admin.duplicates.recorded'),
+    $_('admin.duplicates.effect'),
+  ]}
+  page={decisions}
+  onpage={(next) => load(candidates?.page ?? 0, next)}
+  emptyLabel={$_('admin.duplicates.noDecisions')}
+>
+  {#snippet row(decision)}
+    <tr>
+      <th scope="row">{decision.pageHash}</th>
+      <td>{$_(`admin.duplicates.action.${decision.action}`)}</td>
+      <td>
+        {#if UNPERFORMED_ACTIONS.includes(decision.action)}
+          <span class="not-performed" data-testid={`not-performed-${decision.pageHash}`}>
+            {$_('admin.duplicates.intentOnly')}
+          </span>
+        {:else}
+          <span>{$_('admin.duplicates.excludedFromList')}</span>
+        {/if}
+      </td>
+    </tr>
+  {/snippet}
+</DataTable>
 
 {#if inspecting}
   <Dialog
@@ -182,16 +180,28 @@
     {#snippet children()}
       <p class="hash-detail">{inspecting.candidate.pageHash}</p>
       <ul>
-        {#each inspecting.carriers as carrier, index (`${carrier.mediaItemId}-${carrier.pageNumber}-${index}`)}
+        {#each inspecting.carriers.items ?? [] as carrier, index (`${carrier.mediaItemId}-${carrier.pageNumber}-${index}`)}
           <li>
             <span>{carrier.mediaItemTitle ?? carrier.mediaItemId}</span>
             <span class="page">{$_('admin.duplicates.page', { values: { number: carrier.pageNumber } })}</span>
           </li>
         {/each}
-        {#if inspecting.carriers.length === 0}
+        {#if (inspecting.carriers.items ?? []).length === 0}
           <li class="empty">{$_('admin.duplicates.noCarriers')}</li>
         {/if}
       </ul>
+      {#if (inspecting.carriers.totalItems ?? 0) > (inspecting.carriers.items ?? []).length}
+        <!-- Said rather than silently truncated: a hash carried by more pages than one
+             listing holds would otherwise look like the whole answer. -->
+        <p class="more" data-testid="carriers-truncated">
+          {$_('admin.duplicates.carriersTruncated', {
+            values: {
+              shown: (inspecting.carriers.items ?? []).length,
+              total: inspecting.carriers.totalItems,
+            },
+          })}
+        </p>
+      {/if}
     {/snippet}
   </Dialog>
 {/if}
@@ -212,28 +222,9 @@
     border-radius: var(--radius);
     font-size: var(--font-sm);
   }
-  .scroller {
-    overflow-x: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: var(--font-sm);
-  }
-  th,
-  td {
-    padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--line-subtle);
-    text-align: left;
-  }
-  thead th {
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
+  /* The table chrome lives in DataTable now; only what is specific to these rows is
+     here. Scoping still applies: a snippet's markup is authored in this file, so it
+     carries this component's scope even though DataTable renders it. */
   .hash {
     padding: 0;
     border: 0;
@@ -268,6 +259,11 @@
   }
   .not-performed {
     color: var(--warning);
+  }
+  .more {
+    margin: var(--space-3) 0 0;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
   }
   ul {
     margin: 0;
