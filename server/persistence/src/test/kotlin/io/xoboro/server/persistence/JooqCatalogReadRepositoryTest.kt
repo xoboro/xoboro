@@ -932,6 +932,151 @@ class JooqCatalogReadRepositoryTest {
   }
 
   @Test
+  fun `orders on deck by when the reader last read anything in that series`() {
+    withCatalog("on-deck-order") { database ->
+      val userId = UserId("on-deck-reader")
+      JooqUserRepository(database).insert(
+        User(
+          id = userId,
+          email = "on-deck-reader@example.invalid",
+          passwordHash = "synthetic-password-hash",
+          createdAtMillis = 1,
+        ),
+      )
+      val libraryId = LibraryId("library-1")
+      val seriesRepository = JooqSeriesRepository(database)
+      val bookRepository = JooqBookRepository(database)
+
+      // Three series, each with one already-read book and one unread candidate - the one on-deck
+      // can return. Recency, id, and the candidate's own number/title are all arranged to
+      // disagree with one another, the same discrimination the discovery-feed test applies to
+      // `new`: the expected answer here is not what id order, number order, or title order (in
+      // either direction) would also produce.
+      //
+      // That matters because the candidate book is unread by definition, so its own
+      // `readProgress.readDate` is null for every row on-deck returns. Before the fix, ordering
+      // by that always-null column collapsed to the SQL tie-breaker, `b.id ASC`. A fixture whose
+      // ids already happened to sort into the expected order would pass whether or not the
+      // series-recency join was there; this one only passes with it.
+      data class SeriesFixture(
+        val id: String,
+        val candidateId: String,
+        val candidateTitle: String,
+        val candidateNumber: Int,
+        val lastReadAtMillis: Long,
+      )
+      val fixtures =
+        listOf(
+          SeriesFixture(
+            id = "on-deck-alpha",
+            candidateId = "on-deck-alpha-2",
+            candidateTitle = "Synthetic mango chapter",
+            candidateNumber = 20,
+            lastReadAtMillis = 100,
+          ),
+          SeriesFixture(
+            id = "on-deck-beta",
+            candidateId = "on-deck-beta-2",
+            candidateTitle = "Synthetic cherry chapter",
+            candidateNumber = 30,
+            lastReadAtMillis = 300,
+          ),
+          SeriesFixture(
+            id = "on-deck-gamma",
+            candidateId = "on-deck-gamma-2",
+            candidateTitle = "Synthetic apple chapter",
+            candidateNumber = 10,
+            lastReadAtMillis = 200,
+          ),
+        )
+
+      fixtures.forEach { fixture ->
+        val seriesId = SeriesId(fixture.id)
+        seriesRepository.insert(
+          Series(
+            id = seriesId,
+            libraryId = libraryId,
+            name = "Synthetic ${fixture.id}",
+            relativePath = fixture.id,
+            sourceItemId = "file:///synthetic/${fixture.id}",
+            fileModifiedAtMillis = 1,
+            bookCount = 2,
+            createdAtMillis = 1,
+          ),
+        )
+        bookRepository.insert(
+          Book(
+            id = BookId("${fixture.id}-1"),
+            libraryId = libraryId,
+            seriesId = seriesId,
+            name = "Synthetic ${fixture.id} chapter 1",
+            relativePath = "${fixture.id}/${fixture.id}-1.cbz",
+            sourceItemId = "file:///synthetic/${fixture.id}-1.cbz",
+            mediaKind = MediaKind.COMIC_ARCHIVE,
+            fileModifiedAtMillis = 1,
+            number = 1,
+            createdAtMillis = 1,
+          ),
+        )
+        bookRepository.insert(
+          Book(
+            id = BookId(fixture.candidateId),
+            libraryId = libraryId,
+            seriesId = seriesId,
+            name = fixture.candidateTitle,
+            relativePath = "${fixture.id}/${fixture.candidateId}.cbz",
+            sourceItemId = "file:///synthetic/${fixture.candidateId}.cbz",
+            mediaKind = MediaKind.COMIC_ARCHIVE,
+            fileModifiedAtMillis = 1,
+            number = fixture.candidateNumber,
+            createdAtMillis = 1,
+          ),
+        )
+      }
+
+      // Marking the first book of each series completed is what makes that series eligible for
+      // on-deck (books_read_count > 0, books_in_progress_count = 0) and it is what seeds
+      // read_progress_series.last_read_at_ms, via the repository's own recomputation.
+      JooqReadProgressRepository(database).upsertAll(
+        fixtures.map { fixture ->
+          ReadProgress(
+            bookId = BookId("${fixture.id}-1"),
+            userId = userId,
+            page = 1,
+            completed = true,
+            readAtMillis = fixture.lastReadAtMillis,
+          )
+        },
+      )
+
+      val catalog = JooqCatalogReadRepository(database)
+      val onDeck =
+        catalog.findBooks(
+          query = BookCatalogQuery(onDeck = true),
+          access = CatalogAccess(userId = userId),
+          page =
+            CatalogPageRequest(
+              sorts =
+                listOf(CatalogSort("readProgress.seriesReadDate", CatalogSortDirection.DESC)),
+            ),
+        )
+      val anonymous =
+        catalog.findBooks(
+          BookCatalogQuery(onDeck = true),
+          CatalogAccess(),
+          CatalogPageRequest(),
+        )
+
+      assertEquals(3, onDeck.totalElements)
+      assertEquals(
+        listOf("on-deck-beta-2", "on-deck-gamma-2", "on-deck-alpha-2"),
+        onDeck.content.map { it.book.id.value },
+      )
+      assertEquals(0, anonymous.totalElements)
+    }
+  }
+
+  @Test
   fun `indexes normalized metadata with safe unicode prefix queries and atomic refresh`() {
     withCatalog("full-text") { database ->
       val bookId = BookId("book-1")
