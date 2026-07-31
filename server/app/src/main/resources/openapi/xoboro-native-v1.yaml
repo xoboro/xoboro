@@ -2317,14 +2317,18 @@ paths:
       description: >-
         Spine-derived positions, ascending. The resource manifest is in OPF manifest
         order rather than reading order, so this is what an EPUB reader follows. Empty
-        for anything that is not an EPUB.
+        for anything that is not an EPUB; an EPUB whose media is not READY answers 409
+        rather than an empty list, so a reader can tell "no positions" from "not
+        analysed yet".
       operationId: get_media_items_mediaItemId_positions
       responses:
         "200":
           description: Success.
           content:
             application/json:
-              schema: { type: object }
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/XoboroMediaPosition" }
         "401":
           description: Not authenticated.
           content:
@@ -2339,6 +2343,13 @@ paths:
           description: >-
             Not found, or not visible to this user. An unauthorised identifier
             returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "409":
+          description: >-
+            The EPUB's media is not usable yet: `media_not_ready` while it is
+            unanalysed, `media_unsupported` when it cannot be read at all.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
@@ -3736,6 +3747,28 @@ components:
       name: X-API-Key
       description: API key issued through the self-service endpoints.
   schemas:
+    XoboroMediaPosition:
+      type: object
+      required: [position, href, mediaType, progression, totalProgression]
+      description: >-
+        One EPUB reading position. `position` is one-based and ascending order *is*
+        reading order, which no other response carries. `href` matches a resource-manifest
+        `path` and is what the resource route is asked for verbatim. `totalProgression` is
+        `position / count`, so it reports progress at the end of the position rather than
+        at its start — one position ahead of the Readium convention, which
+        `docs/api/native-v1.md` explains. Spelled out as an array of this schema rather
+        than the bare `type: object` used elsewhere in this file, because being an ordered
+        list is the entire value of this endpoint.
+      properties:
+        position: { type: integer }
+        href: { type: string }
+        mediaType: { type: string }
+        progression: { type: number, format: float }
+        totalProgression: { type: number, format: float }
+        koboSpan:
+          type: string
+          nullable: true
+          description: Present only for a KEPUB; what Kobo devices anchor to.
     XoboroApiError:
       type: object
       required: [code, message]

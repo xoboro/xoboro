@@ -63,9 +63,14 @@ architecture, in the release path — to make a thumbnail somewhat smaller than 
 JPEG that already works is not a trade worth making.
 
 `imageio-webp` ships no writer, so the decision holds by construction rather than
-by discipline. **A test asserts the absence**, so a dependency bump that started
-shipping one would fail rather than quietly enabling output no design decision
-asked for.
+by discipline. **A test asserts the absence**, and it is worth being precise about
+what that test guards: it is a tripwire on the dependency graph, not a behavioural
+guard. Even with a writer present nothing could emit WebP, because
+`PageImageFormat` offers JPEG and PNG only and `SafeJpegArtworkProcessor` calls
+`ImageIO.write(target, "jpeg", …)` inside a `check`. So a bump that started
+shipping a writer would fail this test and prompt a decision, rather than silently
+widening what the server can produce — but the reason output stays JPEG is those
+two call sites, not the missing writer.
 
 ## Consequences
 
