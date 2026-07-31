@@ -306,13 +306,25 @@ their own horizontal scroll container; the page body never scrolls sideways.
 
 ### The table is the console
 
-One `DataTable` pattern, used by every list screen: server-side pagination
-(never client-side over a full fetch), sortable columns that map to the native
-sort parameters, a selection column only where a bulk action genuinely exists,
-and a per-row overflow menu for anything beyond the primary action.
+One `DataTable` pattern, for every list screen whose endpoint is **paged**:
+server-side pagination, never client-side over a full fetch. Every table states
+its total from the server's page metadata. "Showing 50" with no denominator is
+the thing an administrator cannot act on.
 
-Every table states its total from the server's page metadata. "Showing 50" with
-no denominator is the thing an administrator cannot act on.
+Sorting, a selection column and a per-row overflow menu were specified here and
+are **not built**. Sorting was speculative — none of these screens has a listing
+long enough for column sort to beat the library filter, and the native sort
+parameters differ per resource; a selection column needs a bulk action to serve,
+and no console action is bulk; an overflow menu hides destructive actions behind
+a click, which works against the rule below that they be visible and separated.
+They are recorded as not built rather than left in as a description of something
+that does not exist.
+
+Screens whose endpoint answers a bare array — libraries, users, API keys,
+backups — have no envelope to page and use a plain table. The dividing line is
+the endpoint's shape, not the screen's importance, and any screen whose endpoint
+is paged belongs on `DataTable`: duplicate pages was written with its own table
+against a paged endpoint, and rendered nothing at all until it was moved over.
 
 ### Destructive actions
 
@@ -573,9 +585,12 @@ names that no longer exist, and the result is a blank page a reload does not fix
 
 Named, with the reason, rather than left as an implied gap:
 
-- **WebP artwork output.** Blocked on a dependency decision; the JDK ships no
-  WebP `ImageIO` writer. The UI requests server-chosen artwork formats and does
-  not offer a format toggle.
+- **WebP artwork output.** Decided, not blocked: WebP is **read** (TwelveMonkeys
+  supplies the `ImageIO` reader, so `.webp` covers decode) and **not written**.
+  Output stays JPEG because `PageImageFormat` offers JPEG and PNG only and the
+  artwork processor writes JPEG unconditionally, so nothing could emit WebP even
+  if a writer were present. See ADR 0104. The UI requests server-chosen artwork
+  formats and does not offer a format toggle.
 - **Duplicate-page removal.** Deliberately unimplemented server-side. The UI
   records decisions and says so.
 - **Backup restore.** CLI-only by design. The UI names the command.
@@ -588,21 +603,19 @@ Named, with the reason, rather than left as an implied gap:
   this UI.
 - **Light theme.** Token layer is ready; the theme is not shipped half-built.
 
-## Open decisions
+## Decisions taken since
 
-These need an answer before the screens they affect are built. Neither blocks
-starting.
+Kept rather than deleted, because the reasoning is what a later reader needs.
 
-1. **How `web/dist` is served.** Ktor `singlePageApplication` from the server
-   jar's resources is the smaller change and gives a single deployable
-   artifact; a reverse proxy serving the directory keeps the server out of the
-   asset business. Recommendation: serve from the server, because a single
-   artifact is what makes the Compose deployment work with no extra moving part.
-2. **Whether the console needs a light theme in the first release.**
-   Recommendation: no — ship dark, keep the token seam.
-3. **`lucide-svelte` is deprecated in favour of `@lucide/svelte`.** The base uses
-   the old package name and it installs and works, but starting a new project on a
-   package whose own maintainer says to use something else is a poor default.
-   Swapping it is a dependency change, so it is not made unilaterally.
-   Recommendation: switch — it is the same project under its current name, and the
-   import sites are mechanical.
+1. **How `web/dist` is served — settled: from the server.** `XoboroWebAssetRoutes`
+   serves a directory named by `XOBORO_WEB_PATH`, not the jar's resources, so the
+   Gradle build gains no npm dependency; the container image copies `web/dist`
+   into it. A single artifact is what makes the Compose deployment work with no
+   extra moving part. The route is registered last and guards a reserved-prefix
+   list, because one wildcard is all it takes for an unmatched API path to answer
+   with the shell. Base paths follow the `contextPath` server setting, which wraps
+   the whole routing tree — not proxy configuration.
+2. **Light theme in the first release — settled: no.** Dark ships, the token seam
+   stays. Listed under "deliberately not designed" above.
+3. **`lucide-svelte` → `@lucide/svelte` — settled: switched.** Same project under
+   its current name; the old package's own maintainer points at the new one.

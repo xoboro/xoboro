@@ -8,6 +8,13 @@
    * missing. The UI therefore offers **re-check availability** first, and only then a
    * separately-labelled override that says what it overrides. `force` is never a
    * pre-ticked box in the first dialog.
+   *
+   * "Only then" is enforced by state rather than by layout: the override is rendered
+   * solely when the open dialog records that a re-check ran and still reported the
+   * storage unreachable. There are two ways into that dialog — a delete that was
+   * refused, and the row's own re-check button — and each is titled for what actually
+   * happened, because heading the second one "refused" would describe an event that
+   * did not occur.
    */
   import { onMount } from 'svelte'
   import { _ } from '../lib/i18n.js'
@@ -35,17 +42,21 @@
   let emptying = $state(null)
   /** `{ library, counts, refused }` while a delete confirmation is open. */
   let deleting = $state(null)
-  /** The library whose refusal is being explained before an override is offered. */
-  let refused = $state(null)
   /**
-   * Whether a re-check has been run and still reported the storage unreachable.
+   * The open availability dialog, as `{ library, afterRefusal, recheckedUnavailable }`.
    *
-   * Forcing is gated on this. Offering re-check and force side by side let an operator
-   * take the override without ever answering the question the refusal asks — and the
-   * refusal exists because a mount that dropped out for a moment must not cost a
-   * catalog.
+   * `recheckedUnavailable` gates the override: offering re-check and force side by side
+   * let an operator take the override without ever answering the question the refusal
+   * asks, and the refusal exists because a mount that dropped out for a moment must not
+   * cost a catalog.
+   *
+   * It lives **inside** this object rather than beside it as its own flag. As a separate
+   * `$state` it survived the dialog closing, so a re-check that confirmed library A was
+   * gone left the override unlocked for library B the next time the dialog opened — a
+   * force offered for a library nothing had checked. A field on a per-dialog object
+   * cannot go stale, because opening a dialog always builds a new one.
    */
-  let recheckedUnavailable = $state(false)
+  let refused = $state(null)
   /** `{ library }` while the create or edit form is open; `library` is null to create. */
   let editing = $state(null)
 
@@ -130,8 +141,7 @@
         // Not shown as a generic failure. The refusal is the server protecting the
         // catalog, and the next step is to find out whether the mount is back — not
         // to try harder.
-        refused = deleting.library
-        recheckedUnavailable = false
+        refused = { library: deleting.library, afterRefusal: true, recheckedUnavailable: false }
         deleting = null
       } else {
         error = caught
@@ -142,16 +152,27 @@
     }
   }
 
+  /**
+   * Opens the availability dialog from the row, with no refusal behind it.
+   *
+   * Titled as a re-check rather than as a refusal: nothing has been refused on this
+   * path, and a dialog headed "the storage cannot be reached" for an operator who only
+   * asked whether the mount is back describes an event that did not happen.
+   */
+  function openRecheck(library) {
+    refused = { library, afterRefusal: false, recheckedUnavailable: false }
+  }
+
   async function recheck() {
     busy = true
+    const afterRefusal = refused.afterRefusal
     try {
-      const updated = await recheckAvailability(refused.id)
+      const updated = await recheckAvailability(refused.library.id)
       await refresh()
       if (updated.unavailable) {
         // Still gone. Only now is an override worth offering, and it is offered as
         // its own decision rather than as a retry of the same button.
-        refused = updated
-        recheckedUnavailable = true
+        refused = { library: updated, afterRefusal, recheckedUnavailable: true }
       } else {
         notice = $_('admin.libraries.availableAgain', { values: { name: updated.name } })
         refused = null
@@ -159,23 +180,23 @@
     } catch (caught) {
       error = caught
       refused = null
-      recheckedUnavailable = false
     } finally {
       busy = false
     }
   }
 
   async function forceDelete() {
-    const library = refused
+    const library = refused.library
     refused = null
-    recheckedUnavailable = false
     busy = true
     try {
       deleting = { library, force: true, counts: await countCatalog(library.id) }
     } catch (caught) {
       // The count is unavailable precisely because the storage is - but the catalog rows
       // are in the database, so this should still answer. If it does not, the override is
-      // still offered without numbers rather than blocked, and says so.
+      // still offered without numbers rather than blocked, and the dialog says the count
+      // is unknown. It must not fall back to zero: "0 series and 0 items" on the one
+      // action that destroys a catalog regardless of storage reads as nothing to lose.
       deleting = { library, force: true, counts: null }
     } finally {
       busy = false
@@ -254,7 +275,12 @@
                 {$_('admin.libraries.edit')}
               </button>
               {#if library.unavailable}
-                <button type="button" disabled={busy} onclick={() => (refused = library)}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-testid={`row-recheck-${library.id}`}
+                  onclick={() => openRecheck(library)}
+                >
                   {$_('admin.libraries.recheck')}
                 </button>
               {/if}
@@ -325,13 +351,15 @@
       ? $_('admin.libraries.forceDeleteTitle')
       : $_('admin.libraries.deleteTitle')}
     expected={deleting.library.name}
-    summary={$_('admin.libraries.deleteSummary', {
-      values: {
-        name: deleting.library.name,
-        series: deleting.counts?.series ?? 0,
-        mediaItems: deleting.counts?.mediaItems ?? 0,
-      },
-    })}
+    summary={deleting.counts
+      ? $_('admin.libraries.deleteSummary', {
+          values: {
+            name: deleting.library.name,
+            series: deleting.counts.series,
+            mediaItems: deleting.counts.mediaItems,
+          },
+        })
+      : $_('admin.libraries.deleteSummaryUnknown', { values: { name: deleting.library.name } })}
     actionLabel={deleting.force
       ? $_('admin.libraries.forceDeleteAction')
       : $_('admin.libraries.delete')}
@@ -350,12 +378,23 @@
 {/if}
 
 {#if refused}
-  <Dialog title={$_('admin.libraries.refusedTitle')} onclose={() => (refused = null)}>
+  <Dialog
+    title={refused.afterRefusal
+      ? $_('admin.libraries.refusedTitle')
+      : $_('admin.libraries.recheckTitle')}
+    onclose={() => (refused = null)}
+  >
     {#snippet children()}
-      <p>{$_('admin.libraries.refusedExplain', { values: { name: refused.name } })}</p>
-      {#if refused.unavailableSinceMillis}
+      <p data-testid="availability-explain">
+        {refused.afterRefusal
+          ? $_('admin.libraries.refusedExplain', { values: { name: refused.library.name } })
+          : $_('admin.libraries.recheckExplain', { values: { name: refused.library.name } })}
+      </p>
+      {#if refused.library.unavailableSinceMillis}
         <p class="since-detail">
-          {$_('admin.libraries.unavailableSince', { values: { at: unavailableSince(refused) } })}
+          {$_('admin.libraries.unavailableSince', {
+            values: { at: unavailableSince(refused.library) },
+          })}
         </p>
       {/if}
     {/snippet}
@@ -373,7 +412,7 @@
       >
         {$_('admin.libraries.recheck')}
       </button>
-      {#if recheckedUnavailable}
+      {#if refused.recheckedUnavailable}
         <!-- Only after a re-check has confirmed the storage is still gone. Before that
              there is nothing to override: the refusal might simply be stale. -->
         <button

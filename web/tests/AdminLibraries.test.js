@@ -273,6 +273,132 @@ describe('Libraries', () => {
     await waitFor(() => expect(screen.queryByTestId('force-delete')).toBeNull())
   })
 
+  it('does not carry a re-check verdict from one library to another', async () => {
+    // The gate used to live in its own `$state`, which survived the dialog closing. A
+    // re-check that confirmed one library was gone therefore left the override unlocked
+    // the next time the dialog opened - a force delete offered for a library nothing had
+    // checked, which is the exact bypass the gate exists to prevent.
+    const OTHER = { ...UNAVAILABLE, id: 'lib-3', name: 'Other Detached' }
+    globalThis.fetch = routes([
+      ['/series?', countPage(3)],
+      ['/media-items?', countPage(9)],
+      ['/libraries/lib-2/availability', reply(UNAVAILABLE)],
+      [
+        '/libraries/lib-2',
+        (url, init) =>
+          init.method === 'DELETE'
+            ? reply({ code: 'library_unavailable', message: 'unavailable' }, 409)
+            : reply(UNAVAILABLE),
+      ],
+      ['/libraries', reply([UNAVAILABLE, OTHER])],
+    ])
+    const { container } = render(Libraries)
+
+    // Unlock the override for lib-2 the legitimate way: delete, get refused, re-check,
+    // still unreachable.
+    await waitFor(() => expect(screen.getByTestId('delete-lib-2')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('delete-lib-2'))
+    await screen.findByTestId('typed-confirm')
+    await fireEvent.input(container.querySelector('.panel input'), {
+      target: { value: 'Detached Library' },
+    })
+    await fireEvent.click(screen.getByTestId('typed-confirm'))
+    await waitFor(() => expect(screen.getByTestId('recheck')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('recheck'))
+    await waitFor(() => expect(screen.getByTestId('force-delete')).toBeInTheDocument())
+
+    // Walk away, then open the other library's availability dialog from its row.
+    await fireEvent.click(screen.getByText(/^Cancel$|^취소$/))
+    await waitFor(() => expect(screen.queryByTestId('force-delete')).toBeNull())
+    await fireEvent.click(screen.getByTestId('row-recheck-lib-3'))
+
+    await screen.findByTestId('availability-explain')
+    expect(screen.queryByTestId('force-delete')).toBeNull()
+    expect(screen.getByTestId('force-gate')).toBeInTheDocument()
+  })
+
+  it('does not present a refusal when nothing was refused', async () => {
+    // The row's button only asks whether the mount is back. Heading that dialog with the
+    // refusal text described a delete that was never attempted.
+    //
+    // The claim is that the two entrances do not share one explanation, so both are
+    // rendered and compared to each other. Matching either against a literal would
+    // assert copy, and against one catalog would assert whichever locale the suite runs
+    // in - this holds in every language.
+    globalThis.fetch = routes([
+      ['/series?', countPage(3)],
+      ['/media-items?', countPage(9)],
+      [
+        '/libraries/lib-2',
+        (url, init) =>
+          init.method === 'DELETE'
+            ? reply({ code: 'library_unavailable', message: 'unavailable' }, 409)
+            : reply(UNAVAILABLE),
+      ],
+      ['/libraries', reply([UNAVAILABLE])],
+    ])
+    const { container } = render(Libraries)
+
+    await waitFor(() => expect(screen.getByTestId('row-recheck-lib-2')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('row-recheck-lib-2'))
+    const fromRow = (await screen.findByTestId('availability-explain')).textContent
+    expect(fromRow.trim().length).toBeGreaterThan(0)
+    // Nothing has been checked on this path either, so there is nothing to override.
+    expect(screen.queryByTestId('force-delete')).toBeNull()
+    await fireEvent.click(screen.getByText(/^Cancel$|^취소$/))
+
+    // Now the real refusal, which is a different situation and says so.
+    await fireEvent.click(screen.getByTestId('delete-lib-2'))
+    await screen.findByTestId('typed-confirm')
+    await fireEvent.input(container.querySelector('.panel input'), {
+      target: { value: 'Detached Library' },
+    })
+    await fireEvent.click(screen.getByTestId('typed-confirm'))
+
+    await waitFor(() => expect(screen.getByTestId('recheck')).toBeInTheDocument())
+    const afterRefusal = screen.getByTestId('availability-explain').textContent
+    expect(afterRefusal).not.toBe(fromRow)
+  })
+
+  it('does not claim a blast radius of zero when the count could not be read', async () => {
+    // Reached only on a forced delete, where the storage is unreachable by definition.
+    // Falling back to `?? 0` printed "0 series and 0 items" on the one action that
+    // destroys a catalog regardless of storage - a confirmation reading as nothing to
+    // lose, on the most destructive thing the console does.
+    globalThis.fetch = routes([
+      ['/libraries/lib-2/availability', reply(UNAVAILABLE)],
+      ['/series?', reply({ code: 'internal_error', message: 'unreadable' }, 500)],
+      ['/media-items?', reply({ code: 'internal_error', message: 'unreadable' }, 500)],
+      [
+        '/libraries/lib-2',
+        (url, init) =>
+          init.method === 'DELETE'
+            ? reply({ code: 'library_unavailable', message: 'unavailable' }, 409)
+            : reply(UNAVAILABLE),
+      ],
+      ['/libraries', reply([UNAVAILABLE])],
+    ])
+    render(Libraries)
+
+    // The counts fail, so the first delete cannot open its dialog; drive the refusal
+    // path from the row instead and re-check to unlock the override.
+    await waitFor(() => expect(screen.getByTestId('row-recheck-lib-2')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('row-recheck-lib-2'))
+    await fireEvent.click(await screen.findByTestId('recheck'))
+    await waitFor(() => expect(screen.getByTestId('force-delete')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('force-delete'))
+
+    // Waited for first, then queried. Capturing the dialog node before the override
+    // dialog replaced the availability one asserted against the removed element's frozen
+    // text, which contains no digits at all - the assertion passed with the fabricated
+    // zeros still in place, and mutation testing is what surfaced that.
+    await screen.findByTestId('force-warning')
+    const summary = screen.getByTestId('confirm-summary')
+    // No fabricated number at all, rather than a plausible-looking zero.
+    expect(summary.textContent).not.toMatch(/\d/)
+    expect(summary.textContent.trim().length).toBeGreaterThan(0)
+  })
+
   it('reports a maintenance trigger as accepted, not finished', async () => {
     // These enqueue durable work and answer 202. Claiming completion would be a claim
     // the server never made.

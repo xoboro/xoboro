@@ -33,21 +33,72 @@ function routes(handlers) {
  * duplicate-page removal is not performed, restore is not available over HTTP, and
  * the restart-required state is two values rather than a flag.
  */
+
+/**
+ * A native page envelope, which is what every duplicate-page route actually answers.
+ *
+ * These tests used to mock bare arrays. That is not a shape the server produces, and
+ * mocking it meant they asserted the honesty of a screen that rendered nothing at all
+ * in production: an envelope is not iterable, and `undefined === 0` is false, so not
+ * even the empty-state row appeared. The fixture has to be the real shape or the
+ * assertions are about a different program.
+ */
+function page(items) {
+  return {
+    items,
+    page: 0,
+    size: 50,
+    totalItems: items.length,
+    totalPages: 1,
+    hasPrevious: false,
+    hasNext: false,
+  }
+}
+
 describe('duplicate pages', () => {
   it('states that removal is not performed', async () => {
-    globalThis.fetch = routes([['/duplicate-pages', reply([])]])
+    globalThis.fetch = routes([['/duplicate-pages', reply(page([]))]])
     render(Duplicates)
 
     const disclosure = await screen.findByTestId('removal-disclosure')
     expect(disclosure).toBeInTheDocument()
   })
 
+  it('renders a candidate row from the page envelope', async () => {
+    // The assertion the suite was missing. Every other test here reached for a testid
+    // that only exists inside a row, so all of them failed the same way for the same
+    // reason and none of them said what it was.
+    globalThis.fetch = routes([
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([{ pageHash: 'abc', sizeBytes: 1024 }]))],
+    ])
+    const { container } = render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('inspect-abc')).toBeInTheDocument())
+    expect(container.querySelectorAll('tbody tr').length).toBeGreaterThan(0)
+  })
+
+  it('asks for a page rather than accepting the server default', async () => {
+    // Without an explicit page the screen sees only the first one and nothing says so.
+    const fetchImpl = routes([
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([]))],
+    ])
+    globalThis.fetch = fetchImpl
+    render(Duplicates)
+
+    await waitFor(() => expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(2))
+    for (const [url] of fetchImpl.mock.calls) {
+      expect(url).toMatch(/[?&]page=/)
+    }
+  })
+
   it('never labels an action as deleting something', async () => {
     // deleteCount is always 0 and nothing executes the delete actions, so a button
     // reading "Delete pages" would be a lie in the interface.
     globalThis.fetch = routes([
-      ['/duplicate-pages/decided', reply([])],
-      ['/duplicate-pages', reply([{ pageHash: 'abc', sizeBytes: 1024 }])],
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([{ pageHash: 'abc', sizeBytes: 1024 }]))],
     ])
     render(Duplicates)
 
@@ -63,8 +114,8 @@ describe('duplicate pages', () => {
 
   it('marks a recorded delete decision as not carried out', async () => {
     globalThis.fetch = routes([
-      ['/duplicate-pages/decided', reply([{ pageHash: 'def', action: 'DELETE_AUTO' }])],
-      ['/duplicate-pages', reply([])],
+      ['/duplicate-pages/decided', reply(page([{ pageHash: 'def', action: 'DELETE_AUTO' }]))],
+      ['/duplicate-pages', reply(page([]))],
     ])
     render(Duplicates)
 
@@ -75,8 +126,8 @@ describe('duplicate pages', () => {
     // A hash whose pages differ in size has no single size and the listing reports
     // null. Rendering "0" would state a fact the server did not.
     globalThis.fetch = routes([
-      ['/duplicate-pages/decided', reply([])],
-      ['/duplicate-pages', reply([{ pageHash: 'ghi', sizeBytes: null }])],
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([{ pageHash: 'ghi', sizeBytes: null }]))],
     ])
     const { container } = render(Duplicates)
 
