@@ -14,6 +14,11 @@ name: CI
 #     branches:
 #       - main
 #   pull_request:
+#
+# Both jobs below - backend and web - are paused by the same missing trigger block. The
+# web project's tests and build do not run anywhere automatic today, which is a real gap
+# rather than an oversight, and it is recorded in docs/releasing.md alongside the same
+# gap for the backend.
 
 on:
   workflow_dispatch:
@@ -45,3 +50,35 @@ jobs:
 
       - name: Verify
         run: ./gradlew check
+
+  web:
+    name: Web UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      # Both, and in this order. The suite once reported "224 passed" while exiting 1 on
+      # unhandled errors, so the exit code is the thing that matters; and the build catches
+      # what the tests structurally cannot - a bad import resolves under Vitest and fails
+      # only when Rolldown links the bundle.
+      - name: Test
+        run: npm test
+        working-directory: web
+
+      - name: Build
+        run: npm run build
+        working-directory: web

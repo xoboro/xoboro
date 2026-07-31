@@ -34,8 +34,14 @@
   let { params } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
-  const FONT_SIZES = ['90', '100', '115', '130']
-  const LINE_HEIGHTS = ['1.4', '1.6', '1.8']
+  // Only settings that actually take effect. `font-size` and `line-height` on the
+  // iframe element do nothing: CSS does not cascade into a separate document, and
+  // injecting a stylesheet would need script inside the frame, which the sandbox and
+  // the server's `script-src 'none'` both refuse. Shipping those two as controls meant
+  // shipping switches that stored a preference and changed nothing on screen.
+  //
+  // Column width and page margin are properties of the *frame box*, so they are real.
+  const WIDTHS = ['34', '42', '52', 'full']
   const MARGINS = ['16', '32', '64']
 
   const stored = (key, fallback) => {
@@ -53,12 +59,10 @@
     }
   }
 
-  let fontSize = $state(stored('fontSize', '100'))
-  let lineHeight = $state(stored('lineHeight', '1.6'))
+  let columnWidth = $state(stored('width', '42'))
   let margin = $state(stored('margin', '32'))
 
-  $effect(() => remember('fontSize', fontSize))
-  $effect(() => remember('lineHeight', lineHeight))
+  $effect(() => remember('width', columnWidth))
   $effect(() => remember('margin', margin))
 
   let item = $state(null)
@@ -259,7 +263,7 @@
 {#if source}
   <div
     class="page"
-    style={`--epub-font-size:${fontSize}%; --epub-line-height:${lineHeight}; --epub-margin:${margin}px`}
+    style={`--epub-width:${columnWidth === 'full' ? '100%' : `${columnWidth}rem`}; --epub-margin:${margin}px`}
   >
     <!-- Sandboxed: user-supplied markup, same-origin so it can be styled and read, but
          with scripts and navigation withheld. The server already sends
@@ -278,37 +282,25 @@
   <Dialog title={$_('common.settings')} onclose={() => (settingsOpen = false)}>
     {#snippet children()}
       <fieldset>
-        <legend>{$_('reader.fontSize')}</legend>
+        <legend>{$_('reader.displayWidth')}</legend>
         <div class="options">
-          {#each FONT_SIZES as value (value)}
+          {#each WIDTHS as value (value)}
             <button
               type="button"
-              class:on={fontSize === value}
-              data-testid={`font-${value}`}
-              aria-pressed={fontSize === value}
-              onclick={() => (fontSize = value)}
+              class:on={columnWidth === value}
+              data-testid={`width-${value}`}
+              aria-pressed={columnWidth === value}
+              onclick={() => (columnWidth = value)}
             >
-              {value}%
+              {$_(`reader.epubWidths.${value}`)}
             </button>
           {/each}
         </div>
       </fieldset>
 
-      <fieldset>
-        <legend>{$_('reader.lineHeight')}</legend>
-        <div class="options">
-          {#each LINE_HEIGHTS as value (value)}
-            <button
-              type="button"
-              class:on={lineHeight === value}
-              aria-pressed={lineHeight === value}
-              onclick={() => (lineHeight = value)}
-            >
-              {value}
-            </button>
-          {/each}
-        </div>
-      </fieldset>
+      <p class="typography-note" data-testid="typography-note">
+        {$_('reader.typographyNote')}
+      </p>
 
       <fieldset>
         <legend>{$_('reader.margin')}</legend>
@@ -439,19 +431,22 @@
     justify-content: center;
     padding: var(--space-6) var(--epub-margin);
   }
+  /* Only the frame box is styleable from here. The chapter inside is a separate
+     document that inherits nothing, so width and margin are real controls and text size
+     is not — the document's own stylesheet decides that, and changing it would need
+     script inside the frame. */
   iframe {
     width: 100%;
-    max-width: 46rem;
+    max-width: var(--epub-width);
     min-height: calc(100dvh - var(--space-7));
     border: 0;
-    /* The chapter document inherits nothing from this page, so the typography controls
-       are applied to the frame box: size through zoom-equivalent width, and the rest by
-       the reader's own choice of viewport. A stylesheet cannot be injected without
-       running script, which is deliberately not permitted. */
-    font-size: var(--epub-font-size);
-    line-height: var(--epub-line-height);
     background: var(--surface);
     color-scheme: dark;
+  }
+  .typography-note {
+    margin: 0 0 var(--space-3);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
   }
   fieldset {
     margin: 0 0 var(--space-3);

@@ -43,7 +43,11 @@
 
   $effect(() => {
     if (!editing) return
-    listMembers(kind, grouping.id, { size: 200 })
+    // Read through the prop each run rather than through a captured local: Svelte warns
+    // that a local reference freezes the initial value, and a re-keyed form would then
+    // load the previous grouping's members.
+    const id = grouping.id
+    listMembers(kind, id, { size: 200 })
       .then((page) => {
         members = page.items.map((item) => ({
           id: item.id,

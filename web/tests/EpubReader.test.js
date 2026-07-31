@@ -153,15 +153,30 @@ describe('EpubReader', () => {
     expect(sent.locator.locations.totalProgression).toBe(0.5)
   })
 
-  it('persists the typography choice', async () => {
+  it('persists the column width, which is a setting that has an effect', async () => {
     globalThis.fetch = novelRoutes()
     render(EpubReader, { params: { id: 'n1' } })
 
     await fireEvent.click(await screen.findByTestId('toggle-chrome'))
     await fireEvent.click(screen.getByTestId('open-settings'))
-    await fireEvent.click(screen.getByTestId('font-130'))
+    await fireEvent.click(screen.getByTestId('width-52'))
 
-    await waitFor(() => expect(localStorage.getItem('xoboro.epub.fontSize')).toBe('130'))
+    await waitFor(() => expect(localStorage.getItem('xoboro.epub.width')).toBe('52'))
+  })
+
+  it('offers no text-size control, and says why', async () => {
+    // Text size and line spacing cannot be changed from here: CSS on the iframe element
+    // does not cascade into the chapter document, and injecting a stylesheet would need
+    // script inside the frame, which the sandbox and the server both refuse. Controls
+    // for them stored a preference and changed nothing on screen.
+    globalThis.fetch = novelRoutes()
+    const { container } = render(EpubReader, { params: { id: 'n1' } })
+
+    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(screen.getByTestId('open-settings'))
+
+    expect(screen.getByTestId('typography-note')).toBeInTheDocument()
+    expect(container.querySelector('[data-testid^="font-"]')).toBeNull()
   })
 
   it('offers a retry only for a failure that can succeed later', async () => {

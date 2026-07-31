@@ -12,6 +12,8 @@ export default {
     cancel: '취소',
     close: '닫기',
     back: '뒤로',
+    settings: '설정',
+    list: '목록',
     save: '저장',
     saving: '저장 중…',
     none: '없음',
@@ -262,7 +264,9 @@ export default {
       emptyTrashSummary:
         '{name}에서 시리즈 {series}개와 항목 {mediaItems}개를 영구 삭제합니다.',
       deleteTitle: '라이브러리를 삭제할까요?',
-      deleteSummary: '{name}의 카탈로그 항목을 모두 삭제합니다. 원본 파일은 지우지 않습니다.',
+      deleteSummary:
+        '{name}에서 시리즈 {series}개와 항목 {mediaItems}개를 카탈로그에서 삭제합니다. 디스크의 원본 파일은 그대로 둡니다.',
+      recheckFirst: '먼저 접근 여부를 다시 확인해야 강제 삭제를 선택할 수 있습니다',
       refusedTitle: '저장소에 접근할 수 없어 거부되었습니다',
       refusedExplain:
         '{name}의 저장소를 읽을 수 없습니다. 마운트가 일시적으로 빠진 것이라면 삭제해서는 안 됩니다. 먼저 접근 여부를 다시 확인하세요.',
@@ -277,8 +281,9 @@ export default {
     title: '내 서재',
     controls: '읽기 도구',
     chapter: '본문',
-    fontSize: '글자 크기',
-    lineHeight: '줄 간격',
+    typographyNote:
+      '글자 크기와 줄 간격은 본문 문서 자체가 정합니다. 이 화면에서는 바꿀 수 없습니다 — 브라우저의 확대/축소를 쓰세요.',
+    epubWidths: { '34': '좁게', '42': '보통', '52': '넓게', full: '가득' },
     margin: '여백',
     position: '{total}쪽 중 {page}쪽',
     previousItem: '이전 화',
