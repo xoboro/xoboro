@@ -38,10 +38,14 @@ data class XoboroResourceResponse(
  * publication at `0`, so this is one position ahead of that convention.
  *
  * Documented rather than corrected because `KoreaderSyncRoutes` inverts it —
- * `round(pageCount * totalProgression)` becomes persisted read progress — and that inversion
- * is only correct against this convention: under Readium's `(position - 1) / count` the last
- * position would map to `pageCount - 1`, so a KOReader user could not reach a book's final
- * page. Kobo's `ProgressPercent` is affected too, as a displayed number.
+ * `round(pageCount * totalProgression)` becomes persisted read progress — so correcting this
+ * formula means correcting that mapping in the same change. Under Readium's
+ * `(position - 1) / count` the last position maps to `round(pageCount * (n - 1) / n)`, which is
+ * no longer `pageCount` by construction, and stored KOReader pages shift by up to about one.
+ * Whether the final page actually becomes unreachable depends on how `pageCount` compares to
+ * `positions.size`: page count is derived from compressed archive size while positions are
+ * chunked on uncompressed size, so the two differ and the expression frequently rounds back up
+ * to `pageCount`. Kobo's `ProgressPercent` is affected too, as a displayed number.
  * `docs/architecture/0105-total-progression-convention.md` has the full account.
  */
 @Serializable

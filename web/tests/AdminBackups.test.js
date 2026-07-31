@@ -62,6 +62,22 @@ describe('Backups', () => {
     expect(summary.textContent).toContain(messages.admin.backups.sizeUnknown)
   })
 
+  it('says the size is unknown when the field is absent rather than null', async () => {
+    // A field that was never sent is not the same shape as one sent as `null`. A guard
+    // written as `bytes === null` passes the case above and still divides `undefined` by
+    // 1 MiB here, rendering "NaN MB" on the confirmation for an irreversible delete.
+    const { sizeBytes, ...withoutSize } = BACKUP
+    globalThis.fetch = vi.fn(async () => reply([withoutSize]))
+    render(Backups)
+
+    await waitFor(() => expect(screen.getByTestId('delete-backup-synthetic-backup-1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('delete-backup-synthetic-backup-1'))
+
+    const summary = await screen.findByTestId('confirm-summary')
+    expect(summary.textContent).not.toMatch(/MB/)
+    expect(summary.textContent).toContain(messages.admin.backups.sizeUnknown)
+  })
+
   it('gates deletion behind typing the backup identifier', async () => {
     globalThis.fetch = vi.fn(async () => reply([BACKUP]))
     const { container } = render(Backups)

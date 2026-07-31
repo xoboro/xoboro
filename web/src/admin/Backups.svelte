@@ -64,9 +64,13 @@
   /**
    * Formats a byte count, and says so when there isn't one.
    *
-   * `null / 1_048_576` is `0`, so an absent size rendered as "0.0 MB" — a stated fact
-   * that nothing measured, on the confirmation for an irreversible delete. An operator
-   * weighing whether to destroy a snapshot is exactly who must not be told it is empty.
+   * `null / 1_048_576` is `0`, so an absent size would render as "0.0 MB" — a stated fact
+   * that nothing measured, on the confirmation for an irreversible delete. The native
+   * server does not send that shape: `XoboroBackupResponse.sizeBytes` is a required
+   * non-null `Long` read from the backup file's own attributes. So this is defensive
+   * against a response the current server cannot produce, not a state that was observed.
+   * It stays because an operator weighing whether to destroy a snapshot is exactly who
+   * must not be told it is empty.
    */
   function megabytes(bytes) {
     if (!Number.isFinite(bytes)) return $_('admin.backups.sizeUnknown')

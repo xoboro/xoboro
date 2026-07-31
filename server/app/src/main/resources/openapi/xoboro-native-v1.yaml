@@ -2316,10 +2316,11 @@ paths:
       summary: EPUB reading positions, in reading order.
       description: >-
         Spine-derived positions, ascending. The resource manifest is in OPF manifest
-        order rather than reading order, so this is what an EPUB reader follows. Empty
-        for anything that is not an EPUB; an EPUB whose media is not READY answers 409
-        rather than an empty list, so a reader can tell "no positions" from "not
-        analysed yet".
+        order rather than reading order, so this is what an EPUB reader follows. The
+        stored positions are returned with no filter by media kind, so anything that is
+        not an EPUB comes back empty in practice because analysis records positions only
+        for EPUBs. An EPUB whose media is not READY answers 409 rather than an empty
+        list, so a reader can tell "no positions" from "not analysed yet".
       operationId: get_media_items_mediaItemId_positions
       responses:
         "200":
