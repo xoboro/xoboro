@@ -2,10 +2,13 @@
   /**
    * A cover image, or the absence of one.
    *
-   * Artwork is produced during scanning and there is no page-render fallback on the
-   * server, so a `404` here is a real state rather than a failure to retry. The
-   * placeholder is drawn locally instead of asking the server to synthesize an image
-   * on every request for something it has already decided does not exist.
+   * Artwork is produced during analysis: the first page for a comic or PDF, the cover
+   * image declared in the OPF manifest for an EPUB that has one. An EPUB with no
+   * declared cover, or a page analysis could not decode, is left without artwork
+   * rather than having one synthesized some other way, so a `404` here is a real
+   * state rather than a failure to retry. The placeholder is drawn locally instead of
+   * asking the server to render an image on every request for something it has
+   * already decided does not exist.
    *
    * The image is decorative: the title sits beside it as text, so announcing the same
    * words again from an `alt` would just repeat them.

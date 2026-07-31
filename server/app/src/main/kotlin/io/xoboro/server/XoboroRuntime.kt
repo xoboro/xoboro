@@ -135,6 +135,7 @@ import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
 import io.xoboro.server.tasks.ArchiveMaintenanceTaskEmitter
 import io.xoboro.server.tasks.ArchiveMaintenanceTaskHandler
+import io.xoboro.server.tasks.BookCoverGenerationLifecycle
 import io.xoboro.server.tasks.CatalogSourceFileLifecycle
 import io.xoboro.server.tasks.DeleteBookFileTaskHandler
 import io.xoboro.server.tasks.DeleteSeriesFileTaskHandler
@@ -854,6 +855,15 @@ class XoboroRuntime private constructor(
             zipAnalyzer = ZipMediaAnalyzer(),
             currentTimeMillis = System::currentTimeMillis,
           )
+        val bookCoverGeneration =
+          BookCoverGenerationLifecycle(
+            books = books,
+            media = media,
+            bookMetadata = bookMetadata,
+            series = series,
+            content = bookContentAccess,
+            artwork = artworkLifecycle,
+          )
         val catalogSourceFileLifecycle =
           CatalogSourceFileLifecycle(
             books = books,
@@ -898,8 +908,10 @@ class XoboroRuntime private constructor(
                   },
                   afterAnalyze = { bookId ->
                     refreshMetadataTaskEmitter.refreshBook(bookId)
+                    bookCoverGeneration.generateForBook(bookId)
                     books.findByIdOrNull(bookId)?.let { book ->
                       refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+                      bookCoverGeneration.generateForSeries(book.seriesId)
                     }
                   },
                 ),

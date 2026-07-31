@@ -553,7 +553,13 @@ private fun CatalogBook.toEpubManifest(apiBaseUrl: String): WPPublicationDto {
       },
     resources =
       base.resources +
-        analyzed.files.filter { it.kind == MediaFileKind.EPUB_ASSET }.map { file ->
+        // Everything the publication carries that is not a spine page, which is one list however
+        // many kinds analysis distinguishes within it: an `EPUB_COVER` is the manifest item the OPF
+        // declared as the cover image and is still a resource a reader fetches. Written as "not a
+        // page" rather than as a list of asset kinds so that recognising a new kind of file cannot
+        // silently drop it from the manifest, which is exactly what naming `EPUB_ASSET` alone did
+        // when `EPUB_COVER` was introduced.
+        analyzed.files.filter { it.kind != MediaFileKind.EPUB_PAGE }.map { file ->
           WPLinkDto(
             href = resourceBase + file.fileName,
             type = file.mediaType,
