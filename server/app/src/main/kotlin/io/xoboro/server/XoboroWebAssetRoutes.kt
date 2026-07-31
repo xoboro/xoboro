@@ -42,9 +42,12 @@ internal fun Route.xoboroWebAssetRoutes(
     // get if this route did not exist at all.
     //
     // Matched on segment boundaries, the same way `SecurityHeaders.startsWithPathSegment`
-    // does. A raw `startsWith` also reserved paths the server has no route for - `/ready`
-    // shadowed a SPA route at `/readers` - and needed a second `"/api/"`-style entry per
-    // prefix to express "the prefix itself, too". One rule covers both.
+    // does, so the two agree on what a prefix covers. A raw `startsWith` needed a second
+    // `"/api/"`-style entry per prefix to express "the prefix itself, too", and reserved
+    // any path that merely begins with the string rather than the surface itself. No such
+    // collision exists today - the UI routes on the hash (`#/read/:id`), so a client route
+    // is never a path this handler sees - so one rule replaces the duplicated entries and
+    // rules out a future one.
     if (reservedPrefixes.any { requestPath == it || requestPath.startsWith("$it/") }) return@get
 
     // A decoded segment can hold a character no filesystem accepts - a NUL byte from

@@ -15,16 +15,32 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
+import io.xoboro.core.domain.Library
+import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.Series
+import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.SeriesMetadata
+import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.api.SessionResponse
 import io.xoboro.server.api.SessionTransport
 import io.xoboro.server.api.SetupRequest
 import io.xoboro.server.api.XOBORO_API_PREFIX
+import io.xoboro.server.persistence.DatabaseConfig
+import io.xoboro.server.persistence.JooqLibraryRepository
+import io.xoboro.server.persistence.JooqSeriesMetadataRepository
+import io.xoboro.server.persistence.JooqSeriesRepository
+import io.xoboro.server.persistence.XoboroDatabase
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.jupiter.api.io.TempDir
 
 /**
@@ -42,6 +58,20 @@ import org.junit.jupiter.api.io.TempDir
  * So neither list is the authority here. The server is asked, over HTTP, through the real
  * module: a body is an envelope when it is a JSON object carrying `items` and `totalItems`, and
  * the spec must declare `XoboroPage` for exactly those paths.
+ *
+ * Recognising an envelope from two of its seven keys leaves the rest of the shape unchecked: a
+ * response could answer `items` and `totalItems` while `hasNext` is hardcoded and never told the
+ * truth about a second page, which "does this look like an envelope" cannot see. So every
+ * recognised envelope is also checked for the other five keys and for internal consistency -
+ * `hasPrevious` against `page`, `hasNext` and `totalPages` against `page`/`totalItems`/`size` -
+ * in [assertConsistentEnvelope].
+ *
+ * That consistency check is vacuous against an empty catalog, though: with zero items
+ * `totalPages` is defined as `0`, so `hasNext` is `false` whether it was computed or hardcoded,
+ * and no response in [probeable] can tell the two apart. [seedTwoSeries] gives `/series` two
+ * rows before the probe loop runs, purely so the dedicated check after the loop can request
+ * `size=1` and observe a real second page - `hasNext = true` on the first of them - which a
+ * hardcoded `false` cannot produce.
  *
  * Limits, stated rather than left to be discovered:
  * - Only paths with no template parameter are probed. Filling `{seriesId}` needs a fixture per
@@ -64,9 +94,11 @@ class XoboroNativePageEnvelopeContractTest {
 
     val answered = mutableSetOf<String>()
     val probed = mutableSetOf<String>()
+    val databasePath = temporaryDirectory.resolve("page-envelope.sqlite")
+    seedTwoSeries(databasePath)
 
     testApplication {
-      application { xoboroModule(openRuntime()) }
+      application { xoboroModule(openRuntime(databasePath)) }
       val client =
         createClient {
           install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
@@ -80,8 +112,36 @@ class XoboroNativePageEnvelopeContractTest {
         if (response.status != HttpStatusCode.OK || !isJson) continue
         probed += path
         val body = LENIENT.parseToJsonElement(response.bodyAsText())
-        if (body is JsonObject && "items" in body && "totalItems" in body) answered += path
+        if (body is JsonObject && "items" in body && "totalItems" in body) {
+          answered += path
+          assertConsistentEnvelope(path, body)
+        }
       }
+
+      // The loop above cannot catch a hardcoded `hasNext`: every path it probes answers
+      // `totalPages = 0` against this catalog, so `page + 1 < totalPages` is `false`
+      // whether it was computed or hardcoded. `/series` has the two rows [seedTwoSeries]
+      // planted, so `size=1` forces a real second page here, and the first of the two
+      // must report a `hasNext` that a hardcoded `false` could not.
+      val firstOfTwo =
+        LENIENT
+          .parseToJsonElement(
+            client.get("$XOBORO_API_PREFIX/series?size=1") { bearerAuth(token) }.bodyAsText(),
+          ).jsonObject
+      assertEquals(2L, firstOfTwo.getValue("totalItems").jsonPrimitive.long, "$firstOfTwo")
+      assertEquals(2, firstOfTwo.getValue("totalPages").jsonPrimitive.int, "$firstOfTwo")
+      assertEquals(false, firstOfTwo.getValue("hasPrevious").jsonPrimitive.boolean, "$firstOfTwo")
+      assertEquals(true, firstOfTwo.getValue("hasNext").jsonPrimitive.boolean, "$firstOfTwo")
+
+      val secondOfTwo =
+        LENIENT
+          .parseToJsonElement(
+            client
+              .get("$XOBORO_API_PREFIX/series?size=1&page=1") { bearerAuth(token) }
+              .bodyAsText(),
+          ).jsonObject
+      assertEquals(true, secondOfTwo.getValue("hasPrevious").jsonPrimitive.boolean, "$secondOfTwo")
+      assertEquals(false, secondOfTwo.getValue("hasNext").jsonPrimitive.boolean, "$secondOfTwo")
     }
 
     assertTrue(
@@ -172,11 +232,11 @@ class XoboroNativePageEnvelopeContractTest {
     return requireNotNull(setup.body<SessionResponse>().accessToken)
   }
 
-  private fun openRuntime(): XoboroRuntime =
+  private fun openRuntime(databasePath: Path): XoboroRuntime =
     XoboroRuntime.open(
       ServerConfig(
         port = 25_702,
-        databasePath = temporaryDirectory.resolve("page-envelope.sqlite"),
+        databasePath = databasePath,
         workerCount = 1,
         taskPollMillis = 50,
         taskFailurePollMillis = 50,
@@ -187,10 +247,91 @@ class XoboroNativePageEnvelopeContractTest {
       ),
     )
 
+  /**
+   * Writes two series directly into the database `openRuntime` will then serve from.
+   *
+   * Bypassing the HTTP API and any library scan on purpose: the point of these two rows is
+   * only to give `/series` a second page, and neither route exists to create a series with
+   * no books, nor should a scan be run just to produce one. [XoboroNativeDiscoveryFeedApplicationTest]
+   * seeds its catalog the same way for the same reason - real repositories, no scan.
+   */
+  private fun seedTwoSeries(databasePath: Path) {
+    val libraryId = LibraryId("library-page-envelope")
+    XoboroDatabase.open(DatabaseConfig(databasePath)).use { database ->
+      JooqLibraryRepository(database).insert(
+        Library(
+          id = libraryId,
+          name = "Synthetic library",
+          root = SourceLocation("local", "file:///synthetic-page-envelope"),
+          createdAtMillis = 1,
+        ),
+      )
+      val series = JooqSeriesRepository(database)
+      val seriesMetadata = JooqSeriesMetadataRepository(database)
+      listOf("series-page-envelope-1", "series-page-envelope-2").forEachIndexed { index, identifier ->
+        val seriesId = SeriesId(identifier)
+        series.insert(
+          Series(
+            id = seriesId,
+            libraryId = libraryId,
+            name = "Synthetic series $index",
+            relativePath = "Synthetic series $index",
+            sourceItemId = "file:///synthetic-page-envelope/$identifier",
+            fileModifiedAtMillis = 1,
+            createdAtMillis = (index + 1).toLong(),
+          ),
+        )
+        seriesMetadata.upsert(
+          SeriesMetadata(
+            seriesId = seriesId,
+            title = "Synthetic series $index",
+            createdAtMillis = (index + 1).toLong(),
+          ),
+        )
+      }
+    }
+  }
+
+  /**
+   * Every key the envelope owes a caller must be present, and the pagination fields must
+   * agree with each other for the response actually returned. Recognising an envelope from
+   * `items` and `totalItems` alone would let a response carry both while `hasPrevious`,
+   * `hasNext` or `totalPages` told a caller something false - hardcoded, stale, or simply
+   * wrong - with nothing here noticing.
+   */
+  private fun assertConsistentEnvelope(
+    path: String,
+    body: JsonObject,
+  ) {
+    assertTrue(
+      ENVELOPE_KEYS.all { it in body },
+      "$path: envelope is missing a key; body has ${body.keys.sorted()}",
+    )
+    val page = body.getValue("page").jsonPrimitive.int
+    val size = body.getValue("size").jsonPrimitive.int
+    val totalItems = body.getValue("totalItems").jsonPrimitive.long
+    val totalPages = body.getValue("totalPages").jsonPrimitive.int
+    val hasPrevious = body.getValue("hasPrevious").jsonPrimitive.boolean
+    val hasNext = body.getValue("hasNext").jsonPrimitive.boolean
+    val expectedTotalPages =
+      if (totalItems == 0L) {
+        0
+      } else {
+        ((totalItems - 1) / size + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+      }
+    assertEquals(expectedTotalPages, totalPages, "$path: totalPages disagrees with totalItems/size")
+    assertEquals(page > 0, hasPrevious, "$path: hasPrevious disagrees with page")
+    assertEquals(page + 1 < totalPages, hasNext, "$path: hasNext disagrees with page/totalPages")
+  }
+
   private companion object {
     const val SPEC_RESOURCE = "openapi/xoboro-native-v1.yaml"
     const val ENVELOPE_REFERENCE = "XoboroPage\""
     val LENIENT = Json { ignoreUnknownKeys = true }
+
+    /** Every key [io.xoboro.server.api.XoboroPageResponse] declares, checked by [assertConsistentEnvelope]. */
+    val ENVELOPE_KEYS =
+      setOf("items", "page", "size", "totalItems", "totalPages", "hasPrevious", "hasNext")
     val PATH_LINE = Regex("^ {2}/\\S*:$")
     val OPERATION_LINE = Regex("^ {4}(get|post|put|patch|delete):$")
     val RESPONSE_LINE = Regex("^ {8}\"\\d{3}\":$")
@@ -206,10 +347,12 @@ class XoboroNativePageEnvelopeContractTest {
     /**
      * Paths whose probe must reach the comparison.
      *
-     * Every one of these answered the envelope while documented as a bare object. An empty
-     * catalog is enough for all of them, so a `200` here is not conditional on fixtures - if
-     * one stops answering `200`, that is a change worth failing on rather than a quiet
-     * reduction in what this test covers.
+     * Every one of these answered the envelope while documented as a bare object. A catalog
+     * with no books is enough for all of them to answer `200` - `/series` additionally gets
+     * two bookless rows from [seedTwoSeries], but that is for the `hasNext` check after the
+     * loop, not a precondition for reaching this comparison. So a `200` here is not
+     * conditional on fixtures - if one stops answering `200`, that is a change worth failing
+     * on rather than a quiet reduction in what this test covers.
      */
     val MUST_BE_PROBED =
       setOf(

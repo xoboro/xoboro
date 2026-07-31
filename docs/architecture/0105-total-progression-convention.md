@@ -54,14 +54,18 @@ The coupling runs the opposite way to what a first reading suggests, which is wh
 this needs stating precisely. `pageFor` multiplies by `pageCount` immediately after
 `totalProgression` divided by the position count, so the two partly cancel: with the
 **current** convention the last position maps to the last page. Under the Readium
-convention `(position - 1) / n`, `pageFor` would map the last position to
-`pageCount - 1` — a KOReader user finishing a book would never reach its final page.
+convention `(position - 1) / n`, `pageFor` computes `round(pageCount * (n - 1) / n)`,
+which no longer lands on `pageCount` by construction.
 
 The cancellation is only partial, because `pageCount` and `positions.size` are not
 the same number: positions are chunked by `knownSize` (uncompressed) while
 `pageCount` sums `ceil(compressedSize / POSITION_BYTES)`, so `pageCount ≤ n` for any
 compressed EPUB. The residual error in a stored KOReader page is bounded by about
-one page, and rounds to zero when `pageCount` is much smaller than `n`.
+one page, and rounds to zero when `pageCount` is much smaller than `n`. That is also
+why the Readium convention does not simply cost a reader the final page: when
+`pageCount` is much smaller than `n`, `round(pageCount * (n - 1) / n)` rounds back up
+to `pageCount` and the last page is still reachable. What is guaranteed is that the
+mapping stops being exact, not any particular unreachable page.
 
 So: the defect is small and bounded, but it is **durable, not presentational**, and
 correcting `totalProgression` alone would introduce a worse bug than it fixes.
@@ -78,8 +82,9 @@ re-analysis. The stored column would simply stop being the source of truth.
 
 The real reason is that the arithmetic is not independent. `KoreaderSyncRoutes.pageFor`
 inverts it, so changing one without the other moves every KOReader user's stored page
-and costs them the last page of every book. A correction is therefore a coordinated
-change across the analyzer, the KOReader mapping and Kobo's percentage — three
+by up to about a page, by an amount that depends on the book's own `pageCount`-to-`n`
+ratio. A correction is therefore a coordinated change across the analyzer, the KOReader
+mapping and Kobo's percentage — three
 surfaces, two of them device protocols with no round-trip acceptance coverage — for a
 bounded sub-one-page error. That is a piece of work with its own acceptance criteria,
 not a detail of adding a web reader, and doing it half-way is worse than leaving it.
@@ -105,9 +110,9 @@ change:
 1. the analyzer formula — or, cheaper and with no migration, a recomputation at the
    read boundary in `JooqBookMediaRepository`, since the inputs are already stored;
 2. `KoreaderSyncRoutes.pageFor`, which inverts the current convention and would
-   otherwise map the last position to `pageCount - 1`. This is the item that makes
-   the change coordinated rather than local, and it was missed in the first version
-   of this ADR;
+   otherwise turn corrected values into stored pages that are off by up to about one.
+   This is the item that makes the change coordinated rather than local, and it was
+   missed in the first version of this ADR;
 3. `EpubMediaAnalyzerTest.kt:53`, which asserts the last position's
    `totalProgression` is `1F` and so pins the current convention — under the
    correction the last of two positions is `0.5` — plus the delivery-route fixture;

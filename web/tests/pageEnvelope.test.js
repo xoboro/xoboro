@@ -110,10 +110,30 @@ describe('page envelope', () => {
     // which the `required: [...]` line satisfies on its own — deleting every property
     // left it passing. It also sliced the component with an `indexOf` that returned `-1`,
     // so "the component" was the remainder of the file.
+    //
+    // Presence alone also does not say the field is usable: `totalItems` declared as a
+    // string still fails a consumer that adds it to a page count. Each field's declared
+    // type is asserted too, not just that the key exists.
     const properties = envelopeProperties(spec)
-    for (const field of ['items', 'page', 'size', 'totalItems', 'totalPages', 'hasPrevious', 'hasNext']) {
-      expect(properties, `envelope is missing the ${field} property`).toMatch(
-        new RegExp(`^ {8}${field}:`, 'm'),
+    const lines = properties.split('\n')
+    const fieldTypes = {
+      items: 'array',
+      page: 'integer',
+      size: 'integer',
+      totalItems: 'integer',
+      totalPages: 'integer',
+      hasPrevious: 'boolean',
+      hasNext: 'boolean',
+    }
+    for (const [field, type] of Object.entries(fieldTypes)) {
+      const index = lines.findIndex((line) => new RegExp(`^ {8}${field}:`).test(line))
+      expect(index, `envelope is missing the ${field} property`).toBeGreaterThan(-1)
+      // Most fields declare their type inline (`field: { type: x }`); `items` instead
+      // opens a block and states its own type (as opposed to its elements') on the next
+      // line, so that line is checked when the key's own line has none.
+      const declaration = lines[index].includes('type:') ? lines[index] : lines[index + 1]
+      expect(declaration, `${field} is not declared as type: ${type}`).toMatch(
+        new RegExp(`type: ${type}\\b`),
       )
     }
   })

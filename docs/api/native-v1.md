@@ -166,7 +166,12 @@ coerced.
 Series sorts are `title`, `createdAt`, `updatedAt`, `sourceModifiedAt`,
 `lastReadAt`, and `mediaItemCount`. Media-item sorts are `title`,
 `seriesTitle`, `number`, `createdAt`, `updatedAt`, `sourceModifiedAt`,
-`fileSize`, and `lastReadAt`.
+`fileSize`, `lastReadAt`, and `seriesLastReadAt`.
+
+`lastReadAt` on a media item is when the caller last read **that item**, so it is
+null for anything they have not opened. `seriesLastReadAt` is when they last read
+anything in the item's series, which is the only one of the two that orders items
+the caller has never opened.
 
 ## Libraries
 
@@ -358,12 +363,16 @@ convention. Treat it as "how far through the publication this position ends".
 
 It is documented rather than corrected because KOReader turns it back into a stored
 page: `KoreaderSyncRoutes` computes `round(pageCount * totalProgression)` and persists
-the result as read progress. That inversion is only correct against the current
-convention — under Readium's `(position - 1) / count` the last position would map to
-`pageCount - 1`, so a KOReader user finishing a book would never reach its final page.
-Correcting the analyzer therefore means correcting `pageFor` in the same change.
-Kobo's `ProgressPercent` is the second consumer and is affected too, but only as a
-displayed number. `docs/architecture/0105-total-progression-convention.md` records the
+the result as read progress. That inversion is written against the current convention, so
+correcting the analyzer means correcting `pageFor` in the same change: under Readium's
+`(position - 1) / count` the last position maps to `round(pageCount * (n - 1) / n)`, which
+is no longer `pageCount` by construction, and stored KOReader pages shift by up to about
+one. Whether a reader is actually kept off the final page depends on how `pageCount`
+compares to `positions.size` — page count is derived from compressed archive size while
+positions are chunked on uncompressed size, so the two differ and the expression
+frequently rounds back up to `pageCount`. Kobo's `ProgressPercent` is the second consumer
+and is affected too, but only as a displayed number.
+`docs/architecture/0105-total-progression-convention.md` records the
 whole account, including an earlier claim in this document — that the pair is "what a
 Readium locator carries" — which was the opposite of true, and a migration argument
 that was withdrawn: the value is a pure function of two stored fields and can be
@@ -373,9 +382,11 @@ The list is returned in stored order without sorting, because `BookMedia` requir
 positions to be exactly `1..n` in sequence — a sort could not reorder anything and
 would only imply a risk the domain has already ruled out.
 
-A non-EPUB media item returns an empty list rather than an error, whatever its media
-status: analysis records positions for an EPUB and for nothing else, so a comic has
-none — and refusing would make a reader retry for content that will never exist. An
+A non-EPUB media item is answered rather than refused, whatever its media status. The
+route returns the stored positions verbatim with no filter by media kind, so a comic
+comes back empty because analysis records positions for an EPUB and for nothing else,
+not because the route excludes it; nothing in the domain or the persistence layer
+enforces that. Refusing would make a reader retry for content that will never exist. An
 EPUB whose media is not `READY` is a different case and answers `409 media_not_ready`
 (or `409 media_unsupported`) — an empty list for it would tell a reader the book has no
 content when the truth is that its content is not known yet. That is the same refusal
@@ -805,7 +816,7 @@ work as everywhere else.
 | `new` | `createdAt` descending | Recently added to the catalog. Sorted by when Xoboro created the row, not the file's own timestamp: a decade-old file copied in today is new to *this* library. |
 | `updated` | `updatedAt` descending | Recently changed. Distinct from `new`, because `updatedAt` moves when a volume joins a series that has existed for years — which is the event a reader following it wants. |
 | `recently-read` | `lastReadAt` descending | Per-caller by construction; two readers correctly get different answers. |
-| `on-deck` | `lastReadAt` descending, next-unread filter | "What do I read next." |
+| `on-deck` | `seriesLastReadAt` descending, next-unread filter | "What do I read next." Ordered by the **series'** last read time, because every item the feed returns is one the caller has not opened and so has no last read time of its own. |
 | `keep-reading` | `lastReadAt` descending, started-not-finished filter | "What am I part-way through." |
 
 `on-deck` and `keep-reading` exist on media items only. Both describe what *this
