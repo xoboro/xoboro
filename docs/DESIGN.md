@@ -320,6 +320,13 @@ a click, which works against the rule below that they be visible and separated.
 They are recorded as not built rather than left in as a description of something
 that does not exist.
 
+Two things the component requires from a caller, both learned the hard way when a
+screen first carried two listings. A row's identity comes from `keyOf`, because
+`id` is not universal — duplicate pages are identified by `pageHash` — and keying
+by position makes a survivor inherit a removed row's element. And each listing is
+given a `name`, not derived from its caption, which is translated: it is what makes
+the paging test hooks unambiguous when two tables share a screen.
+
 Screens whose endpoint answers a bare array — libraries, users, API keys,
 backups — have no envelope to page and use a plain table. The dividing line is
 the endpoint's shape, not the screen's importance, and any screen whose endpoint
