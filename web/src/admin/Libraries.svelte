@@ -164,7 +164,7 @@
 <ErrorNotice {error} onretry={refresh} />
 
 {#if notice}
-  <p class="notice" role="status" aria-live="polite">{notice}</p>
+  <p class="notice" role="status" aria-live="polite" data-testid="notice">{notice}</p>
 {/if}
 
 <div class="scroller">
@@ -186,7 +186,9 @@
               <!-- A word, not a red dot. State that only a colour communicates is
                    invisible to a portion of readers, and this state decides whether
                    deleting is even allowed. -->
-              <span class="state unavailable">{$_('admin.libraries.unavailable')}</span>
+              <span class="state unavailable" data-testid={`state-${library.id}`}>
+                {$_('admin.libraries.unavailable')}
+              </span>
               {#if library.unavailableSinceMillis}
                 <span class="since">{unavailableSince(library)}</span>
               {/if}

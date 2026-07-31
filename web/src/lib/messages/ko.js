@@ -273,6 +273,55 @@ export default {
     },
   },
 
+  catalog: {
+    navigation: '내 서재',
+    metadata: {
+      seriesTitle: '시리즈 정보 수정',
+      lockNote:
+        '잠금은 편집을 막지 않습니다. 메타데이터 새로고침이 그 항목을 덮어쓰지 않게만 합니다.',
+      lockField: '새로고침에서 보호',
+      title: '제목',
+      summary: '설명',
+      status: '연재 상태',
+      readingDirection: '읽기 방향',
+      publisher: '출판사',
+      language: '언어',
+      ageRating: '연령 등급',
+      genres: '장르 (쉼표로 구분)',
+      tags: '태그 (쉼표로 구분)',
+      unset: '지정 안 함',
+    },
+    grouping: {
+      name: '이름',
+      summary: '설명',
+      ordered: '순서를 고정합니다',
+      orderedHint: '순서를 고정하면 저장한 순서가 그대로 읽기 순서가 됩니다.',
+      members: '구성 항목',
+      noMembers: '구성 항목이 없습니다',
+      moveUp: '위로',
+      moveDown: '아래로',
+      removeMember: '제거',
+      visibleCount: '{count}개(내가 볼 수 있는 것)',
+      orderedBadge: '순서 고정',
+      visibilityNote:
+        '여기에는 내가 볼 수 있는 항목만 나옵니다. 저장하면 목록 전체가 교체되므로, 보이지 않는 항목은 빠집니다.',
+      deleteTitle: '삭제할까요?',
+      deleteSummary: '“{name}”을 삭제합니다. 안에 든 작품 자체는 지워지지 않습니다.',
+    },
+    collection: {
+      title: '컬렉션',
+      createTitle: '컬렉션 만들기',
+      editTitle: '컬렉션 수정',
+      none: '컬렉션이 없습니다',
+    },
+    readList: {
+      title: '읽기 목록',
+      createTitle: '읽기 목록 만들기',
+      editTitle: '읽기 목록 수정',
+      none: '읽기 목록이 없습니다',
+    },
+  },
+
   stream: {
     live: '실시간 연결됨',
     connecting: '연결 중…',
