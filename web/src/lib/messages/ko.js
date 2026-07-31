@@ -233,7 +233,9 @@ export default {
       edit: '수정',
       createTitle: '라이브러리 추가',
       editTitle: '라이브러리 수정',
-      location: '경로',
+      location: '위치 URI',
+      locationHint:
+        '경로가 아니라 파일 URI입니다 \u2014 예: file:///media/comics. 로컬 소스는 file: 스킴이 없으면 거부합니다.',
       scanning: '스캔 대상',
       scanInterval: '스캔 주기',
       scanOnStartup: '시작할 때 스캔',

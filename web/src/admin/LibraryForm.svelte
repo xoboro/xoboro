@@ -104,12 +104,21 @@
       {/if}
 
       <label for="library-location">{$_('admin.libraries.location')}</label>
+      <!-- The requirement is stated in a hint, not only in the placeholder. The local
+           source rejects anything without a `file:` scheme, so a bare `/media/comics`
+           answers 400 - and the server's message carries no `field`, so the field-level
+           error below never fires for the most likely mistake and the operator gets a
+           generic notice with no clue which input was wrong. A placeholder does not
+           serve here either: it disappears the moment they start typing. -->
+      <p class="hint" id="library-location-hint">{$_('admin.libraries.locationHint')}</p>
       <input
         id="library-location"
         data-testid="library-location"
         bind:value={location}
         aria-invalid={locationError ? 'true' : undefined}
-        aria-describedby={locationError ? 'library-location-error' : undefined}
+        aria-describedby={locationError
+          ? 'library-location-error library-location-hint'
+          : 'library-location-hint'}
         placeholder="file:///media/comics"
         required
       />
@@ -178,6 +187,13 @@
     color: var(--text-secondary);
     font-size: var(--font-sm);
     font-weight: 600;
+  }
+  /* Sits between the label and its input, so it is read before the field is filled in
+     rather than after it has been got wrong. Muted, like every other hint. */
+  .hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
   }
   input:not([type='checkbox']),
   select {

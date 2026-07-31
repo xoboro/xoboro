@@ -230,7 +230,9 @@ export default {
       edit: 'Edit',
       createTitle: 'Add a library',
       editTitle: 'Edit library',
-      location: 'Path',
+      location: 'Location URI',
+      locationHint:
+        'A file URI, not a bare path \u2014 for example file:///media/comics. The local source refuses anything without a file: scheme.',
       scanning: 'What to scan',
       scanInterval: 'Scan interval',
       scanOnStartup: 'Scan on startup',
