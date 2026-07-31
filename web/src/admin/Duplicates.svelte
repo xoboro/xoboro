@@ -39,6 +39,24 @@
   let decisions = $state(null)
   let error = $state(null)
   let busy = $state(false)
+  /**
+   * The page each listing is *asked* for, held separately from the page it last returned.
+   *
+   * Reading the requested page off the committed envelope (`decisions?.page ?? 0`) was
+   * wrong while a load was outstanding: paging one table read the other's pre-request
+   * value, so clicking Next on both in quick succession sent the second table forward and
+   * silently pulled the first one back. Nothing indicated the loss, because `load` never
+   * set `busy` and the paging buttons are gated only on `hasPrevious`/`hasNext`.
+   */
+  let candidatePage = $state(0)
+  let decisionPage = $state(0)
+  /**
+   * Discards a response that is no longer the newest request.
+   *
+   * Two loads in flight can land in either order, and the older one committing last would
+   * put the screen on a page nobody asked for. Only the newest may commit.
+   */
+  let loadToken = 0
   /** `{ candidate, carriers }` while the carrier list is open; `carriers` is a page. */
   let inspecting = $state(null)
 
@@ -62,21 +80,40 @@
     return fetchPage(last)
   }
 
-  async function load(candidatePage = candidates?.page ?? 0, decisionPage = decisions?.page ?? 0) {
+  async function load() {
+    const token = ++loadToken
     try {
       const [pending, decided] = await Promise.all([
         readPage((page) => listDuplicateCandidates({ page }), candidatePage),
         readPage((page) => listDuplicateDecisions({ page }), decisionPage),
       ])
+      if (token !== loadToken) return
       candidates = pending
       decisions = decided
+      // Re-synced to what came back, because `readPage` may have clamped a request past
+      // the end. Leaving the requested page out of range would make the next paging click
+      // move relative to a page that does not exist.
+      candidatePage = pending.page ?? candidatePage
+      decisionPage = decided.page ?? decisionPage
       error = null
     } catch (caught) {
+      if (token !== loadToken) return
       error = caught
     }
   }
 
-  onMount(() => load(0, 0))
+  /** Moves one listing without touching the other's requested page. */
+  function goToCandidatePage(next) {
+    candidatePage = next
+    return load()
+  }
+
+  function goToDecisionPage(next) {
+    decisionPage = next
+    return load()
+  }
+
+  onMount(load)
 
   async function inspect(candidate) {
     busy = true
@@ -124,7 +161,7 @@
     $_('admin.duplicates.decide'),
   ]}
   page={candidates}
-  onpage={(next) => load(next, decisions?.page ?? 0)}
+  onpage={goToCandidatePage}
   emptyLabel={$_('admin.duplicates.noCandidates')}
   keyOf={(candidate) => candidate.pageHash}
 >
@@ -175,7 +212,7 @@
     $_('admin.duplicates.effect'),
   ]}
   page={decisions}
-  onpage={(next) => load(candidates?.page ?? 0, next)}
+  onpage={goToDecisionPage}
   emptyLabel={$_('admin.duplicates.noDecisions')}
   keyOf={(decision) => decision.pageHash}
 >
