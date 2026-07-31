@@ -82,13 +82,22 @@ class EpubMediaAnalyzer(
           return@use encryptedMedia(bookId, createdAtMillis, updatedAtMillis)
         }
 
+        // Declared, not rendered: the cover comes from the manifest (an EPUB3
+        // `properties="cover-image"` item, or the EPUB2 `<meta name="cover">` fallback), never
+        // from rasterizing spine markup - this server has no browser engine to render XHTML with.
+        val coverItem = findCoverItem(packageDocument, manifest)
         val files =
           manifest.values.map { item ->
             MediaFile(
               fileName = item.path,
               mediaType = item.mediaType,
               fileSize = archive.getEntry(item.path)?.knownSize(),
-              kind = if (item in spine) MediaFileKind.EPUB_PAGE else MediaFileKind.EPUB_ASSET,
+              kind =
+                when {
+                  item in spine -> MediaFileKind.EPUB_PAGE
+                  item == coverItem -> MediaFileKind.EPUB_COVER
+                  else -> MediaFileKind.EPUB_ASSET
+                },
             )
           }
         val isKepub =
@@ -188,6 +197,28 @@ class EpubMediaAnalyzer(
           ?.attr("URI")
           ?.let { runCatching { resolveArchivePath("", it) }.getOrNull() }
       }
+  }
+
+  /**
+   * The manifest item the OPF declares as the cover image, if any.
+   *
+   * EPUB3 flags it with `properties="cover-image"` on the manifest item. EPUB2 has no such
+   * property, so a book packaged for the older spec instead points to it indirectly with
+   * `<meta name="cover" content="{manifest-item-id}"/>` in the metadata block. Either way the
+   * result must actually be an image: a `cover-image` property or `cover` meta pointed at
+   * markup would hand the generator a document to decode as a bitmap, which it cannot do.
+   */
+  private fun findCoverItem(
+    packageDocument: Document,
+    manifest: Map<String, ManifestItem>,
+  ): ManifestItem? {
+    val declared =
+      manifest.values.firstOrNull { "cover-image" in it.properties }
+        ?: packageDocument
+          .selectFirst("*|metadata > *|meta[name=cover]")
+          ?.attr("content")
+          ?.let(manifest::get)
+    return declared?.takeIf { it.mediaType.startsWith("image/", ignoreCase = true) }
   }
 
   private fun encryptedMedia(
