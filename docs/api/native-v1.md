@@ -338,6 +338,26 @@ directory, so a client that parses the OPF itself and sends its raw hrefs will
 receive 404 responses. Manifest order is stable stored order (the OPF manifest
 order), not reading or spine order.
 
+`GET /api/xoboro/v1/media-items/{mediaItemId}/positions` returns the EPUB's
+spine-derived reading positions, ascending. **This is the only response that
+carries reading order**, and it exists because the resource manifest deliberately
+does not: a reader that followed manifest order would present chapters in
+whatever sequence the packager wrote them.
+
+Each entry has `position` (one-based), `href`, `mediaType`, `progression` within
+that resource, `totalProgression` through the publication, and `koboSpan` for a
+KEPUB. `href` matches a resource-manifest `path` and is what the resource route
+is asked for verbatim. `progression` and `totalProgression` are what a Readium
+locator carries, so this is also how a client builds the `locator` the read-progress
+endpoint accepts.
+
+The list is returned in stored order without sorting, because `BookMedia` requires
+positions to be exactly `1..n` in sequence — a sort could not reorder anything and
+would only imply a risk the domain has already ruled out. A non-EPUB media item
+returns an empty list rather than an error; it has pages, not positions.
+`PAGE_STREAMING` is required, and an unauthorized identifier returns
+`404 media_item_not_found` like every other delivery route.
+
 `GET /api/xoboro/v1/media-items/{mediaItemId}/resources/{resource...}` returns
 one indexed EPUB-container resource. Send a `path` from the resource manifest
 verbatim; a raw OPF-relative href does not resolve. The endpoint is EPUB-only:

@@ -2303,6 +2303,45 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/positions:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      summary: EPUB reading positions, in reading order.
+      description: >-
+        Spine-derived positions, ascending. The resource manifest is in OPF manifest
+        order rather than reading order, so this is what an EPUB reader follows. Empty
+        for anything that is not an EPUB.
+      operationId: get_media_items_mediaItemId_positions
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/media-items/{mediaItemId}/resources:
     parameters:
       - name: mediaItemId
