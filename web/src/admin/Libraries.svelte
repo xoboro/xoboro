@@ -13,6 +13,7 @@
   import { _ } from '../lib/i18n.js'
   import { Treatment } from '../lib/errors.js'
   import {
+    countCatalog,
     countTrashed,
     deleteLibrary,
     listLibraries,
@@ -36,6 +37,15 @@
   let deleting = $state(null)
   /** The library whose refusal is being explained before an override is offered. */
   let refused = $state(null)
+  /**
+   * Whether a re-check has been run and still reported the storage unreachable.
+   *
+   * Forcing is gated on this. Offering re-check and force side by side let an operator
+   * take the override without ever answering the question the refusal asks — and the
+   * refusal exists because a mount that dropped out for a moment must not cost a
+   * catalog.
+   */
+  let recheckedUnavailable = $state(false)
   /** `{ library }` while the create or edit form is open; `library` is null to create. */
   let editing = $state(null)
 
@@ -96,7 +106,16 @@
   }
 
   async function openDelete(library) {
-    deleting = { library, force: false }
+    busy = true
+    try {
+      // Counted before the dialog opens. "Removes every catalog entry" is not a blast
+      // radius; "1,204 series and 15,050 items" is something an operator can weigh.
+      deleting = { library, force: false, counts: await countCatalog(library.id) }
+    } catch (caught) {
+      error = caught
+    } finally {
+      busy = false
+    }
   }
 
   async function confirmDelete() {
@@ -112,6 +131,7 @@
         // catalog, and the next step is to find out whether the mount is back — not
         // to try harder.
         refused = deleting.library
+        recheckedUnavailable = false
         deleting = null
       } else {
         error = caught
@@ -131,6 +151,7 @@
         // Still gone. Only now is an override worth offering, and it is offered as
         // its own decision rather than as a retry of the same button.
         refused = updated
+        recheckedUnavailable = true
       } else {
         notice = $_('admin.libraries.availableAgain', { values: { name: updated.name } })
         refused = null
@@ -138,14 +159,27 @@
     } catch (caught) {
       error = caught
       refused = null
+      recheckedUnavailable = false
     } finally {
       busy = false
     }
   }
 
-  function forceDelete() {
-    deleting = { library: refused, force: true }
+  async function forceDelete() {
+    const library = refused
     refused = null
+    recheckedUnavailable = false
+    busy = true
+    try {
+      deleting = { library, force: true, counts: await countCatalog(library.id) }
+    } catch (caught) {
+      // The count is unavailable precisely because the storage is - but the catalog rows
+      // are in the database, so this should still answer. If it does not, the override is
+      // still offered without numbers rather than blocked, and says so.
+      deleting = { library, force: true, counts: null }
+    } finally {
+      busy = false
+    }
   }
 
   function unavailableSince(library) {
@@ -291,7 +325,13 @@
       ? $_('admin.libraries.forceDeleteTitle')
       : $_('admin.libraries.deleteTitle')}
     expected={deleting.library.name}
-    summary={$_('admin.libraries.deleteSummary', { values: { name: deleting.library.name } })}
+    summary={$_('admin.libraries.deleteSummary', {
+      values: {
+        name: deleting.library.name,
+        series: deleting.counts?.series ?? 0,
+        mediaItems: deleting.counts?.mediaItems ?? 0,
+      },
+    })}
     actionLabel={deleting.force
       ? $_('admin.libraries.forceDeleteAction')
       : $_('admin.libraries.delete')}
@@ -333,15 +373,21 @@
       >
         {$_('admin.libraries.recheck')}
       </button>
-      <button
-        class="quiet-danger"
-        type="button"
-        data-testid="force-delete"
-        disabled={busy}
-        onclick={forceDelete}
-      >
-        {$_('admin.libraries.forceDeleteAction')}
-      </button>
+      {#if recheckedUnavailable}
+        <!-- Only after a re-check has confirmed the storage is still gone. Before that
+             there is nothing to override: the refusal might simply be stale. -->
+        <button
+          class="quiet-danger"
+          type="button"
+          data-testid="force-delete"
+          disabled={busy}
+          onclick={forceDelete}
+        >
+          {$_('admin.libraries.forceDeleteAction')}
+        </button>
+      {:else}
+        <p class="gate" data-testid="force-gate">{$_('admin.libraries.recheckFirst')}</p>
+      {/if}
     {/snippet}
   </Dialog>
 {/if}
@@ -450,6 +496,12 @@
     font: inherit;
     font-weight: 700;
     cursor: pointer;
+  }
+  .gate {
+    margin: 0;
+    align-self: center;
+    color: var(--text-muted);
+    font-size: var(--font-xs);
   }
   .override {
     margin: 0 0 var(--space-3);

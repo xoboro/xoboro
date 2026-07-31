@@ -93,3 +93,18 @@ export async function countTrashed(libraryId) {
 export function listTrashed({ libraryId = null, page = 0, size = 50 } = {}) {
   return request('/series', { query: { libraryId, trashed: true, page, size } })
 }
+
+/**
+ * Counts what deleting a library would remove from the catalog.
+ *
+ * Read from `totalItems` on a one-row page, so the number in a confirmation is the
+ * server's count rather than the length of whatever page the screen had loaded. Live
+ * entries only: trashed rows are counted separately, by {@link countTrashed}.
+ */
+export async function countCatalog(libraryId) {
+  const [series, mediaItems] = await Promise.all([
+    request('/series', { query: { libraryId, size: 1 } }),
+    request('/media-items', { query: { libraryId, size: 1 } }),
+  ])
+  return { series: series.totalItems, mediaItems: mediaItems.totalItems }
+}

@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { KNOWN_CODES } from '../src/lib/errors.js'
 import { LOCALES, applyLocale } from '../src/lib/i18n.js'
@@ -65,5 +67,48 @@ describe('applyLocale', () => {
       },
     }
     expect(applyLocale('en', hostile)).toBe(true)
+  })
+})
+
+describe('referenced keys', () => {
+  /**
+   * Every `$_('…')` in a component must exist in the catalog.
+   *
+   * This is the assertion whose absence let `common.settings` and `common.list` ship
+   * referenced but undeclared: `svelte-i18n` renders the key path itself when a key is
+   * missing, so the reader's settings button was labelled "common.settings" — visible
+   * copy and an accessible name, both wrong, and nothing failed.
+   *
+   * Parity between `ko` and `en` did not catch it, because the key was missing from
+   * both. Reading the components is the only way to know what is actually asked for.
+   */
+  const componentFiles = () => {
+    const walk = (directory) =>
+      readdirSync(directory).flatMap((entry) => {
+        const path = join(directory, entry)
+        return statSync(path).isDirectory()
+          ? walk(path)
+          : path.endsWith('.svelte')
+            ? [path]
+            : []
+      })
+    return walk(join(process.cwd(), 'src'))
+  }
+
+  it('are all declared in the catalog', () => {
+    const declared = new Set(flatten(ko))
+    const offenders = []
+
+    for (const file of componentFiles()) {
+      const source = readFileSync(file, 'utf8')
+      // Only literal keys can be checked. A computed one - $_(`a.${b}`) - is skipped
+      // deliberately rather than guessed at, and its prefix is asserted separately by
+      // the screen that builds it.
+      for (const [, key] of source.matchAll(/\$_\(\s*'([A-Za-z][\w.]*)'/g)) {
+        if (!declared.has(key)) offenders.push(`${file.split('/src/')[1]}: ${key}`)
+      }
+    }
+
+    expect(offenders).toEqual([])
   })
 })

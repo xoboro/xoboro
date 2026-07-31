@@ -77,6 +77,13 @@ upgrading**, and treat a downgrade as a restore rather than as a version change.
   second thing to keep in agreement with it. Release notes are generated per release from the range.
 - **CI is currently paused.** `.github/workflows/{ci,container,differential}.yml` have their triggers
   commented out and run only on `workflow_dispatch`, because GitHub Actions is unavailable on this
-  account (#128). Until that is resolved, "confirm `main` is green" means a local `./gradlew check`, and
-  the container image has to be built by hand or by a manual workflow run. This is a real gap in the
-  release process, recorded rather than glossed over.
+  account (#128). Until that is resolved, "confirm `main` is green" means a local `./gradlew check` **and
+  a local `npm test && npm run build` in `web/`**, and the container image has to be built by hand or by a
+  manual workflow run. This is a real gap in the release process, recorded rather than glossed over.
+
+  The web job exists in `ci.yml` and is paused by the same missing trigger block as the backend one, so
+  the UI's tests and build do not run anywhere automatic today either. Two things make the local run
+  non-optional: `npm test` once reported "224 passed" while exiting `1` on unhandled errors, so the exit
+  code is what has to be checked rather than the summary line; and the production build catches what the
+  tests structurally cannot, because a bad import resolves under Vitest and fails only when the bundle is
+  linked.
