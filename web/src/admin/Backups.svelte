@@ -61,7 +61,15 @@
     }
   }
 
+  /**
+   * Formats a byte count, and says so when there isn't one.
+   *
+   * `null / 1_048_576` is `0`, so an absent size rendered as "0.0 MB" — a stated fact
+   * that nothing measured, on the confirmation for an irreversible delete. An operator
+   * weighing whether to destroy a snapshot is exactly who must not be told it is empty.
+   */
   function megabytes(bytes) {
+    if (!Number.isFinite(bytes)) return $_('admin.backups.sizeUnknown')
     return `${(bytes / 1_048_576).toFixed(1)} MB`
   }
 

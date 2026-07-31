@@ -179,6 +179,7 @@ export default {
       create: '백업 만들기',
       created: '만든 시각',
       size: '크기',
+      sizeUnknown: '크기를 알 수 없음',
       none: '백업이 없습니다',
       restoreTitle: '복원',
       restoreExplain:
