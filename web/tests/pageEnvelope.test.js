@@ -25,11 +25,16 @@ import { describe, expect, it } from 'vitest'
 const SPEC = join(process.cwd(), '..', 'server/app/src/main/resources/openapi/xoboro-native-v1.yaml')
 
 /**
- * Every native endpoint that answers the page envelope, as the client understands it.
+ * Every native endpoint that answers the page envelope.
  *
- * A path here has a consumer that must read `.items` and must send `page`. A path
- * absent from here returns a bare array, and its consumer iterates the response
- * directly.
+ * A path here answers `items`/`totalItems`, so a consumer must read `.items` rather than
+ * iterating the response. A path absent from here returns a bare array.
+ *
+ * The bottom nine arrived after the server was asked instead of the description. All of
+ * them answered the envelope while documented as `{ type: object }`, and this test passed
+ * throughout, because a missing entry here and a missing declaration there are the same
+ * omission written twice. `XoboroNativePageEnvelopeContractTest` probes the parameterless
+ * ones against a real server, which is the check this file cannot perform.
  */
 const PAGED = [
   '/api/xoboro/v1/series',
@@ -43,6 +48,15 @@ const PAGED = [
   '/api/xoboro/v1/collections/{collectionId}/series',
   '/api/xoboro/v1/read-lists/{readListId}/media-items',
   '/api/xoboro/v1/facets/authors',
+  '/api/xoboro/v1/me/authentication-activity',
+  '/api/xoboro/v1/media-items/feeds/keep-reading',
+  '/api/xoboro/v1/media-items/feeds/new',
+  '/api/xoboro/v1/media-items/feeds/on-deck',
+  '/api/xoboro/v1/media-items/feeds/recently-read',
+  '/api/xoboro/v1/media-items/feeds/updated',
+  '/api/xoboro/v1/series/feeds/new',
+  '/api/xoboro/v1/series/feeds/recently-read',
+  '/api/xoboro/v1/series/feeds/updated',
 ]
 
 /** Paths whose GET declares the shared envelope as its 200 body. */
@@ -90,10 +104,35 @@ describe('page envelope', () => {
   it('describes the envelope with the fields a consumer depends on', () => {
     // `items` and `totalItems` are the two a screen cannot work without: one to iterate,
     // one to state the total rather than showing "50" with no denominator.
-    const component = spec.slice(spec.indexOf('    XoboroPage:'))
-    const body = component.slice(0, component.indexOf('\n    Xoboro', 1))
+    //
+    // The `properties:` block alone, and each field matched as a key at its own
+    // indentation. An earlier version searched the whole component for the field name,
+    // which the `required: [...]` line satisfies on its own — deleting every property
+    // left it passing. It also sliced the component with an `indexOf` that returned `-1`,
+    // so "the component" was the remainder of the file.
+    const properties = envelopeProperties(spec)
     for (const field of ['items', 'page', 'size', 'totalItems', 'totalPages', 'hasPrevious', 'hasNext']) {
-      expect(body, `envelope is missing ${field}`).toContain(field)
+      expect(properties, `envelope is missing the ${field} property`).toMatch(
+        new RegExp(`^ {8}${field}:`, 'm'),
+      )
     }
   })
 })
+
+/** The `properties:` block of the `XoboroPage` component, and nothing else. */
+function envelopeProperties(spec) {
+  const lines = spec.split('\n')
+  const start = lines.indexOf('    XoboroPage:')
+  expect(start, 'the spec has no XoboroPage component').toBeGreaterThan(-1)
+  const propertiesAt = lines.indexOf('      properties:', start)
+  expect(propertiesAt, 'XoboroPage declares no properties').toBeGreaterThan(start)
+  const body = []
+  for (const line of lines.slice(propertiesAt + 1)) {
+    // Ends at the first line that is not inside the block: a shallower key, or the next
+    // component. A blank line is kept, so a gap between properties does not truncate it.
+    if (line.trim() !== '' && !line.startsWith('        ')) break
+    body.push(line)
+  }
+  expect(body.length, 'the properties block came out empty').toBeGreaterThan(0)
+  return body.join('\n')
+}
