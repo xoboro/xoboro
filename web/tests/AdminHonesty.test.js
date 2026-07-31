@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import Backups from '../src/admin/Backups.svelte'
 import Duplicates from '../src/admin/Duplicates.svelte'
@@ -91,6 +91,91 @@ describe('duplicate pages', () => {
     for (const [url] of fetchImpl.mock.calls) {
       expect(url).toMatch(/[?&]page=/)
     }
+  })
+
+  it('falls back to the last page that exists after a decision empties one', async () => {
+    // Recording a decision removes the hash, so deciding the last row of the last page
+    // shrinks the listing by a page. Re-reading at the page the screen was on returns an
+    // empty one, and the remaining candidates are then hidden behind a Previous button
+    // the operator has no reason to suspect.
+    let decided = false
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      const body = () => {
+        if (init.method === 'PUT') return {}
+        if (url.includes('/decided')) return page([])
+        const requested = Number(new URL(url, 'http://x').searchParams.get('page'))
+        // Two pages before the decision, one after.
+        const totalPages = decided ? 1 : 2
+        if (requested > totalPages - 1) {
+          return { ...page([]), page: requested, totalItems: 1, totalPages }
+        }
+        return { ...page([{ pageHash: `hash-${requested}`, sizeBytes: 1 }]), page: requested, totalItems: 1, totalPages }
+      }
+      if (init.method === 'PUT') decided = true
+      const text = JSON.stringify(body())
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      }
+    })
+    globalThis.fetch = fetchImpl
+    render(Duplicates)
+
+    // Move to the second page, then decide its only row.
+    await waitFor(() => expect(screen.getByTestId('inspect-hash-0')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('page-next-candidates'))
+    await waitFor(() => expect(screen.getByTestId('inspect-hash-1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('record-IGNORE-hash-1'))
+
+    // The surviving candidate is on screen, not stranded behind a Previous button.
+    await waitFor(() => expect(screen.getByTestId('inspect-hash-0')).toBeInTheDocument())
+  })
+
+  it('keys candidate rows by hash rather than by position', async () => {
+    // An index is not an identity: on a screen where acting on a row removes it, keying by
+    // position makes Svelte reuse the departed row's DOM for the survivor.
+    //
+    // Asserted as node identity, which is the only thing keying changes. Comparing
+    // rendered content cannot see this - Svelte updates the text either way, so a test
+    // that checked a row's hash matched its own buttons would pass under both keys. That
+    // was this test's first version.
+    let decided = false
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      const body = () => {
+        if (init.method === 'PUT') return {}
+        if (url.includes('/decided')) return page([])
+        return decided
+          ? page([{ pageHash: 'second', sizeBytes: 2 }])
+          : page([
+              { pageHash: 'first', sizeBytes: 1 },
+              { pageHash: 'second', sizeBytes: 2 },
+            ])
+      }
+      if (init.method === 'PUT') decided = true
+      const text = JSON.stringify(body())
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      }
+    })
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('inspect-second')).toBeInTheDocument())
+    const secondRow = screen.getByTestId('inspect-second').closest('tr')
+
+    // Decide the first row away; "second" moves from position 1 to position 0.
+    await fireEvent.click(screen.getByTestId('record-IGNORE-first'))
+    await waitFor(() => expect(screen.queryByTestId('inspect-first')).toBeNull())
+
+    // Keyed by hash, "second" keeps its own row element. Keyed by index it would now be
+    // rendered into the element that used to be "first".
+    expect(screen.getByTestId('inspect-second').closest('tr')).toBe(secondRow)
   })
 
   it('never labels an action as deleting something', async () => {
