@@ -48,8 +48,12 @@ class XoboroNativeDiscoveryFeedTest {
     // volume joins a series that has existed for years.
     assertEquals("updatedAt", XoboroNativeDiscoveryFeed.UPDATED.sortField)
     assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.RECENTLY_READ.sortField)
-    assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.ON_DECK.sortField)
     assertEquals("lastReadAt", XoboroNativeDiscoveryFeed.KEEP_READING.sortField)
+    // On-deck is the series' last read time, not the item's, and the difference is the whole
+    // feed: every item it returns is one the caller has not opened, so the item's own
+    // `lastReadAt` is null for all of them and ordering by it left the feed on the query's
+    // tie-breaker, the identifier.
+    assertEquals("seriesLastReadAt", XoboroNativeDiscoveryFeed.ON_DECK.sortField)
 
     // Every feed is newest-first. A discovery shelf that put the oldest thing first would be a list, not
     // a shelf.

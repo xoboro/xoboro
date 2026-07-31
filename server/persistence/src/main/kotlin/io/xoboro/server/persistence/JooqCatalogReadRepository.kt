@@ -658,6 +658,22 @@ class JooqCatalogReadRepository(
           AND sort_progress.user_id = ?
         """.trimIndent()
       }
+    // The reader's progress through the book's *series*, which is a different question from
+    // their progress through the book. On-deck is the case that needs it: it selects the
+    // first book of a series that has **no** progress row, so `sort_progress.read_at_ms` is
+    // null for every row it returns and ordering by it collapsed to the tie-breaker,
+    // `b.id ASC`. A feed documented as "most recently read first" was ordered by identifier.
+    val seriesProgressJoin =
+      if (userId == null) {
+        "LEFT JOIN read_progress_series sort_series_progress ON 1 = 0"
+      } else {
+        bindings += userId.value
+        """
+        LEFT JOIN read_progress_series sort_series_progress
+          ON sort_series_progress.series_id = b.series_id
+          AND sort_series_progress.user_id = ?
+        """.trimIndent()
+      }
     val keepReadingJoins =
       if (query.keepReading && userId != null) {
         bindings += userId.value
@@ -673,6 +689,8 @@ class JooqCatalogReadRepository(
       } else {
         ""
       }
+    // Join order matches the order bindings were added above, which is what makes the
+    // positional parameters line up.
     return SqlFrom(
       sql =
         """
@@ -682,6 +700,7 @@ class JooqCatalogReadRepository(
         JOIN series_metadata sm ON sm.series_id = s.id
         LEFT JOIN media sort_media ON sort_media.book_id = b.id
         $progressJoin
+        $seriesProgressJoin
         $keepReadingJoins
         """.trimIndent(),
       bindings = bindings,
@@ -866,6 +885,10 @@ class JooqCatalogReadRepository(
         "metadata.releaseDate" to "bm.release_date",
         "readProgress.lastModified" to "sort_progress.updated_at_ms",
         "readProgress.readDate" to "sort_progress.read_at_ms",
+        // When the reader last read anything in this book's series, as opposed to this book.
+        // The two differ for any book the reader has not opened, which is the whole of the
+        // on-deck feed.
+        "readProgress.seriesReadDate" to "sort_series_progress.last_read_at_ms",
         "readList.number" to
           """
           (
