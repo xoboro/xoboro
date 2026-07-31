@@ -156,10 +156,20 @@ fun Route.xoboroNativeDeliveryRoutes(
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
           }
+          // An EPUB that has not been analyzed yet is not an EPUB without positions -
+          // it is one whose positions are not known. Answering `200 []` for it made
+          // "still scanning" indistinguishable from "not an EPUB", and a reader that
+          // cannot tell them apart renders an empty book instead of waiting. Gated the
+          // same way `/pages/{pageNumber}` is, so the two agree.
+          val media = item.media
+          if (item.book.mediaKind == MediaKind.EPUB && (media == null || media.status != MediaStatus.READY)) {
+            call.respondMediaUnusable(media?.status)
+            return@get
+          }
           // Not sorted here. `BookMedia` requires positions to be exactly 1..n in
           // order, so a sort could never reorder anything - it would only imply a risk
-          // that the domain has already ruled out. An empty list is a legitimate answer
-          // for anything that is not an EPUB.
+          // that the domain has already ruled out. An empty list stays the answer for
+          // anything that is not an EPUB: a comic has pages, not positions.
           call.respond(
             item.media
               ?.positions
