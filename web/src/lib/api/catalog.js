@@ -130,3 +130,48 @@ export function pageUrl(mediaItemId, pageNumber, { format = null, maxDimension =
 export function listPages(mediaItemId) {
   return request(`/media-items/${mediaItemId}/pages`)
 }
+
+/**
+ * The EPUB's reading positions, in reading order.
+ *
+ * The only response that carries it. `/resources` lists container entries in stored
+ * order, which is OPF **manifest** order — the sequence the packager happened to write
+ * — so a reader that followed it would present chapters in an arbitrary order. Each
+ * position's `href` matches a resource-manifest path and is requested verbatim.
+ *
+ * A non-EPUB item answers with an empty list: it has pages, not positions.
+ */
+export function listPositions(mediaItemId) {
+  return request(`/media-items/${mediaItemId}/positions`)
+}
+
+/**
+ * One EPUB container resource.
+ *
+ * The path must come from the resource manifest or a position's `href` and be sent
+ * **verbatim**. Indexed paths are already resolved relative to the OPF directory, so a
+ * client that parses the OPF itself and sends its raw hrefs gets 404s. Resolution is an
+ * exact index lookup rather than a filesystem join, which is why traversal is
+ * structurally impossible rather than merely filtered.
+ */
+export function resourceUrlFor(mediaItemId, path) {
+  // Each segment is encoded separately so the slashes that make up the archive path
+  // survive; encoding the whole string would turn them into %2F and miss the index.
+  const encoded = path.split('/').map(encodeURIComponent).join('/')
+  return resourceUrl(`/media-items/${mediaItemId}/resources/${encoded}`)
+}
+
+/**
+ * What a delivery failure means for a retry.
+ *
+ * Only `media_not_ready` is worth trying again: the item is still being analyzed.
+ * `media_unsupported` means the file can never be delivered as it stands — an
+ * encrypted archive or document — and `page_not_decodable` means this particular page
+ * is broken. Presenting all three as "try again" would send a reader back to a page
+ * that will never load.
+ */
+export const RETRYABLE_DELIVERY_CODES = Object.freeze(['media_not_ready'])
+
+export function isRetryableDeliveryFailure(error) {
+  return RETRYABLE_DELIVERY_CODES.includes(error?.code)
+}
