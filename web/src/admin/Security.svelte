@@ -54,7 +54,7 @@
 
 <ErrorNotice {error} onretry={() => { loadConfig(); loadActivity(0) }} />
 
-<section>
+<section data-testid="external-login-section">
   <h2>{$_('admin.security.externalLogin')}</h2>
   <p class="hint" data-testid="readonly-reason">{$_('admin.security.readOnlyReason')}</p>
 

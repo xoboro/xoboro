@@ -114,7 +114,7 @@
   </table>
 </div>
 
-<section class="restore">
+<section class="restore" data-testid="restore-section">
   <h2>{$_('admin.backups.restoreTitle')}</h2>
   <p>{$_('admin.backups.restoreExplain')}</p>
   <!-- The command, verbatim and selectable. Describing restore without naming how to

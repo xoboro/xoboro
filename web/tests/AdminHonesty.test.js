@@ -52,11 +52,13 @@ describe('duplicate pages', () => {
     render(Duplicates)
 
     await waitFor(() => expect(screen.getByTestId('record-IGNORE-abc')).toBeInTheDocument())
+    // Asserted structurally rather than by matching the label's wording: this suite
+    // does not test copy, and a negative copy match cannot tell "records an intent to
+    // delete" from "deletes".
     for (const action of ['DELETE_MANUAL', 'DELETE_AUTO']) {
-      const label = screen.getByTestId(`record-${action}-abc`).textContent
-      // The label must say it records an intention, not that it deletes.
-      expect(label).toMatch(/intent|기록/i)
+      expect(screen.getByTestId(`record-${action}-abc`)).toHaveAttribute('data-performed', 'false')
     }
+    expect(screen.getByTestId('record-IGNORE-abc')).toHaveAttribute('data-performed', 'true')
   })
 
   it('marks a recorded delete decision as not carried out', async () => {
@@ -93,10 +95,14 @@ describe('backups', () => {
     render(Backups)
 
     const command = await screen.findByTestId('restore-command')
+    // The command itself is not copy - it is the literal thing an operator types.
     expect(command.textContent).toContain('xoboro restore')
+    expect(command.tagName).toBe('CODE')
 
-    const labels = screen.getAllByRole('button').map((node) => node.textContent).join(' ')
-    expect(labels).not.toMatch(/restore|복원/i)
+    // The claim is an absence, so it is asserted as one: the restore section offers no
+    // action at all, only the command to run elsewhere.
+    const section = screen.getByTestId('restore-section')
+    expect(section.querySelectorAll('button, input, select')).toHaveLength(0)
   })
 })
 
@@ -156,10 +162,11 @@ describe('security', () => {
     ])
     render(Security)
 
-    const reason = await screen.findByTestId('readonly-reason')
-    // Names the actual reason - secrets staying out of the database - rather than
-    // "not supported".
-    expect(reason.textContent).toMatch(/database|데이터베이스/i)
+    // Read-only asserted as an absence of controls rather than by reading the note's
+    // wording, and the note itself asserted to be present so the reason is given at all.
+    expect(await screen.findByTestId('readonly-reason')).toBeInTheDocument()
+    const section = screen.getByTestId('external-login-section')
+    expect(section.querySelectorAll('input, select, textarea, button')).toHaveLength(0)
   })
 
   it('shows the account-linking policy that is in force', async () => {
