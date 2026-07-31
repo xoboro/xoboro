@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { GROUPINGS, groupingBody, moveMember } from '../src/lib/api/groupings.js'
 import { SessionStatus, session } from '../src/lib/session.js'
 import GroupingForm from '../src/catalog/GroupingForm.svelte'
+import Groupings from '../src/catalog/Groupings.svelte'
 
 function reply(body, status = 200) {
   const text = body === null ? '' : JSON.stringify(body)
@@ -71,6 +72,23 @@ describe('moveMember', () => {
 
   it('returns the same order for a no-op move', () => {
     expect(moveMember(['a', 'b'], 1, 1)).toEqual(['a', 'b'])
+  })
+})
+
+describe('grouping deletion', () => {
+  it('states how many members it removes', async () => {
+    // Learned the hard way one screen over: a confirmation that stops naming numbers is
+    // caught by nothing unless something asserts the numbers.
+    globalThis.fetch = routes([
+      ['/collections', reply([{ id: 'c1', name: 'Synthetic', memberCount: 7, ordered: true }])],
+    ])
+    render(Groupings, { kind: 'collection' })
+
+    await waitFor(() => expect(screen.getByTestId('delete-grouping-c1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('delete-grouping-c1'))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('7')
   })
 })
 
