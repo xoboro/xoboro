@@ -96,6 +96,23 @@ describe('LibraryForm', () => {
     expect(sent.source.location).toBe('file:///new')
   })
 
+  it('states the location format before the operator gets it wrong', async () => {
+    // The local source refuses anything without a `file:` scheme, and the server's 400
+    // carries no `field`, so the field-level error cannot fire for the most likely
+    // mistake — a bare path. The requirement is therefore stated up front, and in a hint
+    // rather than only in the placeholder, which vanishes on the first keystroke.
+    globalThis.fetch = vi.fn().mockResolvedValue(reply([]))
+    render(LibraryForm, { library: null, onsaved: vi.fn(), onclose: vi.fn() })
+
+    const hint = document.getElementById('library-location-hint')
+    expect(hint).toBeTruthy()
+    expect(hint.textContent).toContain('file:')
+    // Associated with the input, not merely nearby, so it is announced with the field.
+    expect(
+      screen.getByTestId('library-location').getAttribute('aria-describedby')?.split(/\s+/),
+    ).toContain('library-location-hint')
+  })
+
   it('puts a path failure on the path field', async () => {
     // As a toast, "that path overlaps another library root" leaves the operator to
     // guess which of the two fields is wrong.
@@ -116,7 +133,11 @@ describe('LibraryForm', () => {
 
     const location = screen.getByTestId('library-location')
     await waitFor(() => expect(location).toHaveAttribute('aria-invalid', 'true'))
-    expect(location).toHaveAttribute('aria-describedby', 'library-location-error')
+    // The error id is among the descriptions rather than the whole attribute: the field
+    // also points at its format hint, and an accessible name may reference several.
+    expect(location.getAttribute('aria-describedby')?.split(/\s+/)).toContain(
+      'library-location-error',
+    )
     expect(screen.getByTestId('library-name')).not.toHaveAttribute('aria-invalid')
     expect(container.querySelector('#library-location-error')).toBeInTheDocument()
   })
