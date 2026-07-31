@@ -1112,8 +1112,14 @@ class XoboroNativeDeliveryTest {
       // The whole ordered list, not just its first entry. The previous version asserted
       // the first href twice - RESOURCE_ARCHIVE_PATH is that same literal - so it looked
       // like two checks and was one.
+      //
+      // The second href sorts lexically *before* the first - see the fixture's positions
+      // - so a route that sorted by href instead of returning spine order would answer
+      // `aaa-out-of-lexical-order.xhtml` first here, not `chapter-1.xhtml`. The earlier
+      // fixture used `chapter-1.xhtml` then `chapter-2.xhtml`, where the two orders agree
+      // and a sort could not have been told apart from no sort at all.
       assertEquals(
-        listOf("OEBPS/text/chapter-1.xhtml", "OEBPS/text/chapter-2.xhtml"),
+        listOf("OEBPS/text/chapter-1.xhtml", "OEBPS/text/aaa-out-of-lexical-order.xhtml"),
         positions.map(XoboroMediaPositionResponse::href),
       )
       // The href is what the resource route is asked for verbatim, so it has to match a
@@ -1317,6 +1323,13 @@ class XoboroNativeDeliveryTest {
             // In order, because BookMedia rejects anything else: positions must be
             // exactly 1..n in sequence. That invariant is why the route does not sort.
             //
+            // The second href sorts lexically *before* the first one ("aaa-..." precedes
+            // "chapter-1..."), so spine order and lexical href order disagree here on
+            // purpose. Reusing `chapter-1.xhtml` then `chapter-2.xhtml`, as an earlier
+            // version of this fixture did, made the two orders coincide, so a route that
+            // sorted positions by href instead of returning them as stored answered this
+            // test correctly by accident.
+            //
             // totalProgression is 0.5 then 1.0, which is `position / count` - what
             // EpubMediaAnalyzer actually computes. The fixture used to read 0 then 0.5,
             // the `(position - 1) / count` convention, which described an API that does
@@ -1331,7 +1344,7 @@ class XoboroNativeDeliveryTest {
                   totalProgression = 0.5F,
                 ),
                 MediaPosition(
-                  href = "OEBPS/text/chapter-2.xhtml",
+                  href = "OEBPS/text/aaa-out-of-lexical-order.xhtml",
                   mediaType = "application/xhtml+xml",
                   progression = 0F,
                   position = 2,

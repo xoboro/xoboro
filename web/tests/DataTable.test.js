@@ -43,11 +43,17 @@ describe('DataTable', () => {
     const onpage = vi.fn()
     render(DataTableHarness, { page: envelope({ page: 1 }), name: 'candidates', onpage })
 
+    // Call count is asserted alongside the argument: `toHaveBeenCalledWith(2)` is
+    // satisfied by a handler that also fires a spurious extra call (e.g. `onpage(999)`
+    // right after), because the matcher only checks that *some* call matched, not that
+    // it was the only one.
     await fireEvent.click(screen.getByTestId('page-next-candidates'))
-    expect(onpage).toHaveBeenCalledWith(2)
+    expect(onpage).toHaveBeenCalledTimes(1)
+    expect(onpage).toHaveBeenNthCalledWith(1, 2)
 
     await fireEvent.click(screen.getByTestId('page-previous-candidates'))
-    expect(onpage).toHaveBeenCalledWith(0)
+    expect(onpage).toHaveBeenCalledTimes(2)
+    expect(onpage).toHaveBeenNthCalledWith(2, 0)
   })
 
   it('does not offer a page that is not there', () => {
@@ -55,5 +61,32 @@ describe('DataTable', () => {
 
     expect(screen.getByTestId('page-previous-only')).toBeDisabled()
     expect(screen.getByTestId('page-next-only')).toBeDisabled()
+  })
+
+  it('offers only next on the first page of many', () => {
+    // page 0 of 3: hasPrevious is false and hasNext is true. A single-page fixture
+    // (page 0 of 1) cannot distinguish `disabled={!page.hasNext}` from
+    // `disabled={page.page === 0}` — both leave Next disabled there. This is the page
+    // where they disagree: Next must stay enabled even though `page === 0`.
+    render(DataTableHarness, { page: envelope({ page: 0, totalPages: 3 }), name: 'first' })
+
+    expect(screen.getByTestId('page-previous-first')).toBeDisabled()
+    expect(screen.getByTestId('page-next-first')).not.toBeDisabled()
+  })
+
+  it('offers both directions on a middle page', () => {
+    render(DataTableHarness, { page: envelope({ page: 1, totalPages: 3 }), name: 'middle' })
+
+    expect(screen.getByTestId('page-previous-middle')).not.toBeDisabled()
+    expect(screen.getByTestId('page-next-middle')).not.toBeDisabled()
+  })
+
+  it('offers only previous on the last page of many', () => {
+    // page 2 of 3: hasNext is false but page !== 0, so a guard keyed off `page === 0`
+    // would wrongly leave Next enabled here while Previous must be enabled too.
+    render(DataTableHarness, { page: envelope({ page: 2, totalPages: 3 }), name: 'last' })
+
+    expect(screen.getByTestId('page-previous-last')).not.toBeDisabled()
+    expect(screen.getByTestId('page-next-last')).toBeDisabled()
   })
 })

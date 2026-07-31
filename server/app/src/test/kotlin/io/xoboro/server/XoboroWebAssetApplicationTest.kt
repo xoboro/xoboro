@@ -171,6 +171,39 @@ class XoboroWebAssetApplicationTest {
   }
 
   @Test
+  fun `reserves the bare prefix, not only one with segments appended`() {
+    // The probe above only ever asks for a prefix plus two extra segments, so
+    // `requestPath == it` never mattered to it - `startsWith("$it/")` alone accounts for
+    // every request it makes. A bare prefix, with nothing appended at all, is the one
+    // shape only the `==` branch covers, and it is exactly what a client asks for when it
+    // requests `/opds` or `/sse` with nothing after it.
+    //
+    // Not every entry below can tell the branch apart from its absence, though. `/health`,
+    // `/ready` and `/v3/api-docs` answer from their own route before the asset route is
+    // ever reached - Ktor prefers a concrete match over the wildcard - so those three pass
+    // whether `requestPath == it` exists or not; they are probed anyway because the
+    // invariant ("the shell never answers for a reserved surface") still has to hold for
+    // them, just not because of this line. The other nine - `/api`, `/opds`, `/sse`,
+    // `/oauth2/authorization`, `/login/oauth2/code`, `/metrics`, `/kobo`, `/koreader` and
+    // `/actuator` - have no route of their own at the bare path in this fixture, so they
+    // reach the wildcard and are what actually exercises `requestPath == it`: deleting it
+    // serves the shell for every one of them.
+    val web = webDirectory()
+
+    testApplication {
+      application { xoboroModule(openRuntime(web)) }
+
+      for (prefix in RESERVED_PREFIXES_UNDER_TEST) {
+        val response = client.get(prefix)
+        assertFalse(
+          "xoboro-shell" in response.bodyAsText(),
+          "the shell answered for bare $prefix with ${response.status}",
+        )
+      }
+    }
+  }
+
+  @Test
   fun `probes every reserved prefix`() {
     // The list above is the reserved list, not a sample of it. A surface added to
     // XoboroWebAssetRoutes without a probe here would otherwise be shadowed silently,
@@ -189,10 +222,14 @@ class XoboroWebAssetApplicationTest {
 
   @Test
   fun `reserves a prefix only on a segment boundary`() {
-    // The guard used a raw `startsWith`, which reserved every path merely beginning with
-    // a prefix's characters. `/ready` shadowed a client route at `/readers`, and the
-    // symptom is a 404 on one page of the UI with every other route working - which reads
-    // as a broken link rather than as server routing.
+    // The guard used a raw `startsWith`, which reserved every path merely beginning with a
+    // prefix's characters: `/readers` was claimed by `/ready`, `/apidocs` by `/api`.
+    //
+    // No such path is reachable in the UI today, and an earlier version of this comment
+    // said one was - the application routes on the hash (`#/read/:id`, see AppShell), so a
+    // client route is never a path this handler sees. What is pinned here is that the guard
+    // claims the surfaces it names and nothing that merely starts with their letters, which
+    // is what lets the reserved list hold one entry per prefix instead of two.
     val web = webDirectory()
 
     testApplication {
