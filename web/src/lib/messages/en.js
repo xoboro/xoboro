@@ -6,6 +6,8 @@ export default {
     cancel: 'Cancel',
     close: 'Close',
     back: 'Back',
+    settings: 'Settings',
+    list: 'Contents',
     save: 'Save',
     saving: 'Saving…',
     none: 'None',
@@ -260,7 +262,8 @@ export default {
         'This destroys {series} series and {mediaItems} items in {name}.',
       deleteTitle: 'Delete this library?',
       deleteSummary:
-        'This removes every catalog entry for {name}. The files on disk are left alone.',
+        'This removes {series} series and {mediaItems} items from the catalog for {name}. The files on disk are left alone.',
+      recheckFirst: 'Re-check availability before a force delete becomes available',
       refusedTitle: 'Refused: the storage cannot be reached',
       refusedExplain:
         'The storage for {name} cannot be read. If the mount has only dropped out, this should not be deleted. Re-check availability first.',
@@ -275,8 +278,9 @@ export default {
     title: 'My library',
     controls: 'Reader controls',
     chapter: 'Chapter',
-    fontSize: 'Text size',
-    lineHeight: 'Line spacing',
+    typographyNote:
+      'Text size and line spacing are set by the chapter document itself and cannot be changed from here. Use the browser\u2019s zoom.',
+    epubWidths: { '34': 'Narrow', '42': 'Normal', '52': 'Wide', full: 'Full' },
     margin: 'Margin',
     position: 'Page {page} of {total}',
     previousItem: 'Previous',

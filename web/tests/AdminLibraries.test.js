@@ -13,6 +13,9 @@ function reply(body, status = 200) {
   }
 }
 
+/** A one-row page, which is what the count helpers ask for. */
+const countPage = (total) => reply({ items: [], totalItems: total })
+
 const AVAILABLE = {
   id: 'lib-1',
   name: 'Synthetic Library',
@@ -55,7 +58,11 @@ describe('Libraries', () => {
 
   it('gates deletion behind typing the library name', async () => {
     // A checkbox is not friction, it is a reflex. This destroys catalog rows.
-    globalThis.fetch = routes([['/libraries', reply([AVAILABLE])]])
+    globalThis.fetch = routes([
+      ['/series?', countPage(12)],
+      ['/media-items?', countPage(340)],
+      ['/libraries', reply([AVAILABLE])],
+    ])
     const { container } = render(Libraries)
 
     await waitFor(() => expect(screen.getByTestId('delete-lib-1')).toBeInTheDocument())
@@ -92,11 +99,32 @@ describe('Libraries', () => {
     expect(dialog.textContent).toContain('1004')
   })
 
+  it('states the delete blast radius using server counts', async () => {
+    // "Removes every catalog entry" is not a blast radius. Removing the numbers from the
+    // summary was not caught by any assertion until this one existed, which is exactly
+    // how a confirmation quietly stops saying what it destroys.
+    globalThis.fetch = routes([
+      ['/series?', countPage(12)],
+      ['/media-items?', countPage(340)],
+      ['/libraries', reply([AVAILABLE])],
+    ])
+    render(Libraries)
+
+    await waitFor(() => expect(screen.getByTestId('delete-lib-1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('delete-lib-1'))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('12')
+    expect(dialog.textContent).toContain('340')
+  })
+
   it('offers a re-check before any override when deletion is refused', async () => {
     // The server refuses with library_unavailable so a catalog is not destroyed
     // because a mount went missing. The next step is to find out whether the mount is
     // back — not to try harder.
     globalThis.fetch = routes([
+      ['/series?', countPage(3)],
+      ['/media-items?', countPage(9)],
       [
         '/libraries/lib-2',
         (url, init) =>
@@ -110,22 +138,28 @@ describe('Libraries', () => {
 
     await waitFor(() => expect(screen.getByTestId('delete-lib-2')).toBeInTheDocument())
     await fireEvent.click(screen.getByTestId('delete-lib-2'))
+    // The dialog opens only once the blast-radius counts have come back.
+    await screen.findByTestId('typed-confirm')
     await fireEvent.input(container.querySelector('.panel input'), {
       target: { value: 'Detached Library' },
     })
     await fireEvent.click(screen.getByTestId('typed-confirm'))
 
     await waitFor(() => expect(screen.getByTestId('recheck')).toBeInTheDocument())
-    // The override exists but is not the primary action, and nothing is pre-selected.
-    expect(screen.getByTestId('force-delete')).toBeInTheDocument()
+    // Forcing is not offered yet. Offering it beside the re-check let an operator take
+    // the override without ever answering "is the mount back?", which is the question
+    // the refusal asks.
+    expect(screen.queryByTestId('force-delete')).toBeNull()
+    expect(screen.getByTestId('force-gate')).toBeInTheDocument()
     expect(screen.getByTestId('recheck').classList.contains('primary')).toBe(true)
-    expect(screen.getByTestId('force-delete').classList.contains('primary')).toBe(false)
   })
 
   it('does not send force on an ordinary delete', async () => {
     // The word "force" must not appear in a request that is not forcing anything —
     // that is the log line someone later misreads.
     const fetchImpl = routes([
+      ['/series?', countPage(1)],
+      ['/media-items?', countPage(2)],
       ['/libraries/lib-1', reply(null, 204)],
       ['/libraries', reply([AVAILABLE])],
     ])
@@ -134,6 +168,7 @@ describe('Libraries', () => {
 
     await waitFor(() => expect(screen.getByTestId('delete-lib-1')).toBeInTheDocument())
     await fireEvent.click(screen.getByTestId('delete-lib-1'))
+    await screen.findByTestId('typed-confirm')
     await fireEvent.input(container.querySelector('.panel input'), {
       target: { value: 'Synthetic Library' },
     })
@@ -148,6 +183,8 @@ describe('Libraries', () => {
 
   it('sends force only after the override is chosen, and re-asks for the name', async () => {
     const fetchImpl = routes([
+      ['/series?', countPage(3)],
+      ['/media-items?', countPage(9)],
       [
         '/libraries/lib-2/availability',
         reply(UNAVAILABLE),
@@ -168,12 +205,18 @@ describe('Libraries', () => {
 
     await waitFor(() => expect(screen.getByTestId('delete-lib-2')).toBeInTheDocument())
     await fireEvent.click(screen.getByTestId('delete-lib-2'))
+    // The dialog opens only once the blast-radius counts have come back.
+    await screen.findByTestId('typed-confirm')
     await fireEvent.input(container.querySelector('.panel input'), {
       target: { value: 'Detached Library' },
     })
     await fireEvent.click(screen.getByTestId('typed-confirm'))
 
     await waitFor(() => expect(screen.getByTestId('recheck')).toBeInTheDocument())
+    // The re-check has to run first, and has to still report the storage unreachable,
+    // before the override appears at all.
+    await fireEvent.click(screen.getByTestId('recheck'))
+    await waitFor(() => expect(screen.getByTestId('force-delete')).toBeInTheDocument())
     await fireEvent.click(screen.getByTestId('force-delete'))
 
     // A second typed confirmation, with the override stated. Forcing is a separate
@@ -198,6 +241,8 @@ describe('Libraries', () => {
 
   it('clears the refusal when the storage is reachable again', async () => {
     const fetchImpl = routes([
+      ['/series?', countPage(3)],
+      ['/media-items?', countPage(9)],
       ['/libraries/lib-2/availability', reply({ ...UNAVAILABLE, unavailable: false })],
       [
         '/libraries/lib-2',
@@ -213,6 +258,8 @@ describe('Libraries', () => {
 
     await waitFor(() => expect(screen.getByTestId('delete-lib-2')).toBeInTheDocument())
     await fireEvent.click(screen.getByTestId('delete-lib-2'))
+    // The dialog opens only once the blast-radius counts have come back.
+    await screen.findByTestId('typed-confirm')
     await fireEvent.input(container.querySelector('.panel input'), {
       target: { value: 'Detached Library' },
     })
