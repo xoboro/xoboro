@@ -176,6 +176,7 @@ export default {
       create: 'Create a backup',
       created: 'Created',
       size: 'Size',
+      sizeUnknown: 'Size unknown',
       none: 'No backups yet',
       restoreTitle: 'Restoring',
       restoreExplain:
