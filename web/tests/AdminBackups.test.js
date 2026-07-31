@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import Backups from '../src/admin/Backups.svelte'
+import messages from '../src/lib/messages/ko.js'
 
 function reply(body, status = 200) {
   const text = body === null ? '' : JSON.stringify(body)
@@ -36,12 +37,29 @@ describe('Backups', () => {
     await fireEvent.click(screen.getByTestId('delete-backup-synthetic-backup-1'))
 
     const summary = await screen.findByTestId('confirm-summary')
-    // 5 MiB, so the megabyte figure has to appear rather than a raw byte count an
-    // operator cannot weigh.
-    expect(summary.textContent).toContain('5')
+    // 5 MiB, so the megabyte figure has to appear rather than a raw byte count an operator
+    // cannot weigh. Matched as a number next to its unit: `toContain('5')` was satisfied by
+    // the "2025" in the date, and passed with `sizeBytes: 0` and with the field absent.
+    expect(summary.textContent).toMatch(/\b5\.0 MB\b/)
     // The creation time is rendered through the locale, so the year is asserted rather
     // than a formatted string this suite would then be pinning as copy.
     expect(summary.textContent).toContain('2025')
+  })
+
+  it('says the size is unknown rather than reporting zero', async () => {
+    // A `null` divided by 1 MiB is 0, so an absent size rendered as "0.0 MB" — a measured
+    // fact that was never measured, on the confirmation for an irreversible delete.
+    globalThis.fetch = vi.fn(async () => reply([{ ...BACKUP, sizeBytes: null }]))
+    render(Backups)
+
+    await waitFor(() => expect(screen.getByTestId('delete-backup-synthetic-backup-1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('delete-backup-synthetic-backup-1'))
+
+    const summary = await screen.findByTestId('confirm-summary')
+    expect(summary.textContent).not.toMatch(/MB/)
+    // Read from the catalog rather than written out here: the suite renders in Korean, and a
+    // literal would put translated copy in a test source and pin it as an assertion.
+    expect(summary.textContent).toContain(messages.admin.backups.sizeUnknown)
   })
 
   it('gates deletion behind typing the backup identifier', async () => {
