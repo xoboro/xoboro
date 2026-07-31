@@ -354,20 +354,33 @@ read-progress endpoint accepts.
 the **end** of that position rather than at its start: the first of two positions
 reports `0.5` and the last reports `1.0`. A Readium locator's `totalProgression` is
 `0` at the start of a publication, so this value is one position ahead of that
-convention. It is documented rather than corrected because the same number already
-feeds Kobo's `ProgressPercent`, so changing the arithmetic would move reported
-progress for every existing book — a decision on its own rather than a detail of
-adding a reader. Treat it as "how far through the publication this position ends".
+convention. Treat it as "how far through the publication this position ends".
+
+It is documented rather than corrected because KOReader turns it back into a stored
+page: `KoreaderSyncRoutes` computes `round(pageCount * totalProgression)` and persists
+the result as read progress. That inversion is only correct against the current
+convention — under Readium's `(position - 1) / count` the last position would map to
+`pageCount - 1`, so a KOReader user finishing a book would never reach its final page.
+Correcting the analyzer therefore means correcting `pageFor` in the same change.
+Kobo's `ProgressPercent` is the second consumer and is affected too, but only as a
+displayed number. `docs/architecture/0105-total-progression-convention.md` records the
+whole account, including an earlier claim in this document — that the pair is "what a
+Readium locator carries" — which was the opposite of true, and a migration argument
+that was withdrawn: the value is a pure function of two stored fields and can be
+recomputed without one.
 
 The list is returned in stored order without sorting, because `BookMedia` requires
 positions to be exactly `1..n` in sequence — a sort could not reorder anything and
 would only imply a risk the domain has already ruled out.
 
-A non-EPUB media item returns an empty list rather than an error; it has pages, not
-positions. An EPUB whose media is not `READY` is a different case and answers
-`409 media_not_ready` (or `409 media_unsupported`), exactly as `/pages/{pageNumber}`
-does — an empty list for it would tell a reader the book has no content when the
-truth is that its content is not known yet. `PAGE_STREAMING` is required, and an
+A non-EPUB media item returns an empty list rather than an error, whatever its media
+status: analysis records positions for an EPUB and for nothing else, so a comic has
+none — and refusing would make a reader retry for content that will never exist. An
+EPUB whose media is not `READY` is a different case and answers `409 media_not_ready`
+(or `409 media_unsupported`) — an empty list for it would tell a reader the book has no
+content when the truth is that its content is not known yet. That is the same refusal
+`/pages/{pageNumber}` gives but not the same condition: page delivery refuses any
+media item that is not ready, while this route refuses only an EPUB. `PAGE_STREAMING` is required, and an
 unauthorized identifier returns `404 media_item_not_found` like every other delivery
 route.
 

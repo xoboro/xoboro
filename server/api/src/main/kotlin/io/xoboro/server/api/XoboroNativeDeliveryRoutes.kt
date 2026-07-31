@@ -159,8 +159,12 @@ fun Route.xoboroNativeDeliveryRoutes(
           // An EPUB that has not been analyzed yet is not an EPUB without positions -
           // it is one whose positions are not known. Answering `200 []` for it made
           // "still scanning" indistinguishable from "not an EPUB", and a reader that
-          // cannot tell them apart renders an empty book instead of waiting. Gated the
-          // same way `/pages/{pageNumber}` is, so the two agree.
+          // cannot tell them apart renders an empty book instead of waiting.
+          //
+          // The same refusal `/pages/{pageNumber}` gives, but not the same condition:
+          // this one applies to EPUBs only. A comic has pages rather than positions, so
+          // an empty list is the honest answer for it whatever its analysis state, and
+          // refusing would make a reader retry for content that will never exist.
           val media = item.media
           if (item.book.mediaKind == MediaKind.EPUB && (media == null || media.status != MediaStatus.READY)) {
             call.respondMediaUnusable(media?.status)
@@ -168,8 +172,11 @@ fun Route.xoboroNativeDeliveryRoutes(
           }
           // Not sorted here. `BookMedia` requires positions to be exactly 1..n in
           // order, so a sort could never reorder anything - it would only imply a risk
-          // that the domain has already ruled out. An empty list stays the answer for
-          // anything that is not an EPUB: a comic has pages, not positions.
+          // that the domain has already ruled out.
+          //
+          // Whatever is stored, verbatim, with no filter by media kind. Analysis records
+          // positions for an EPUB and for nothing else, so a comic answers an empty list
+          // because it has none rather than because this route excludes it.
           call.respond(
             item.media
               ?.positions
@@ -353,7 +360,9 @@ private fun ApplicationCall.nativePageImageRequest(): PageImageRequest {
 }
 
 /**
- * Refuses page delivery for media that is not ready, naming which kind of not-ready it is.
+ * Refuses delivery of media that is not ready, naming which kind of not-ready it is.
+ *
+ * Used by page delivery and, for an EPUB only, by `/positions`.
  *
  * `media_not_ready` describes a media item that has not been analyzed yet or failed analysis - a
  * client should come back later. `media_unsupported` describes one that will never be deliverable
