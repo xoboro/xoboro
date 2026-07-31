@@ -103,6 +103,7 @@
 
   <DataTable
     caption={$_('admin.security.authenticationActivity')}
+    name="authentication-activity"
     columns={[
       $_('admin.security.when'),
       $_('session.email'),

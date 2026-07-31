@@ -87,6 +87,7 @@
 <h2>{$_('admin.trash.trashedSeries')}</h2>
 <DataTable
   caption={$_('admin.trash.trashedSeries')}
+  name="trashed-series"
   columns={[$_('admin.trash.series'), $_('admin.trash.seriesItemCount')]}
   page={seriesPage}
   onpage={loadSeries}
@@ -106,6 +107,7 @@
 <h2>{$_('admin.trash.trashedItems')}</h2>
 <DataTable
   caption={$_('admin.trash.trashedItems')}
+  name="trashed-items"
   columns={[$_('admin.trash.item'), $_('admin.trash.itemSeries')]}
   page={itemsPage}
   onpage={loadItems}

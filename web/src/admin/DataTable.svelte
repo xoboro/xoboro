@@ -27,6 +27,26 @@
     caption,
     /** Shown instead of rows when the page is empty. */
     emptyLabel,
+    /**
+     * The stable identity of a row, when it is not `item.id`.
+     *
+     * Defaults to `item.id`, falling back to the array index. An index is not an
+     * identity — it makes Svelte reuse a row's DOM positionally when the list changes
+     * underneath, which matters on a screen where acting on a row removes it. Duplicate
+     * pages are identified by `pageHash` and have no `id`, so every one of those rows
+     * was index-keyed until this existed.
+     */
+    keyOf = (item) => item.id,
+    /**
+     * A stable, non-localized name for this listing, used for the paging test hooks.
+     *
+     * Required in practice: two listings on one screen otherwise both emit
+     * `data-testid="page-next"`, so a test cannot say which table it means and the first
+     * screen with two tables made the hook ambiguous rather than failing loudly. Derived
+     * from the caption would be worse — captions are translated, so the hooks would
+     * change with the locale.
+     */
+    name,
   } = $props()
 
   const items = $derived(page?.items ?? [])
@@ -47,7 +67,7 @@
       </tr>
     </thead>
     <tbody>
-      {#each items as item, index (item.id ?? index)}
+      {#each items as item, index (keyOf(item) ?? index)}
         {@render row(item)}
       {/each}
       {#if items.length === 0}
@@ -67,7 +87,7 @@
     <div class="buttons">
       <button
         type="button"
-        data-testid="page-previous"
+        data-testid={`page-previous-${name}`}
         disabled={!page.hasPrevious}
         aria-label={$_('admin.paging.previous')}
         onclick={() => onpage(page.page - 1)}
@@ -76,7 +96,7 @@
       </button>
       <button
         type="button"
-        data-testid="page-next"
+        data-testid={`page-next-${name}`}
         disabled={!page.hasNext}
         aria-label={$_('admin.paging.next')}
         onclick={() => onpage(page.page + 1)}
