@@ -318,6 +318,8 @@ export default {
     recentlyUpdated: 'Recently updated',
     allSeries: 'All series',
     noSeries: 'Nothing here yet',
+    shelvesFailed:
+      '{count, plural, one {One shelf could not be loaded} other {# shelves could not be loaded}}. They are not empty \u2014 they are unknown.',
     noItems: 'No items',
     items: '{count} items',
     unread: 'Unread',

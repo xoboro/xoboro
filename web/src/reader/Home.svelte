@@ -32,6 +32,8 @@
   let updated = $state([])
   let allSeries = $state(null)
   let error = $state(null)
+  /** How many of the four shelves failed to load. Zero renders nothing. */
+  let shelvesFailed = $state(0)
 
   const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
@@ -49,6 +51,11 @@
     if (deck.status === 'fulfilled') onDeck = deck.value.items ?? []
     if (added.status === 'fulfilled') recent = added.value.items ?? []
     if (changed.status === 'fulfilled') updated = changed.value.items ?? []
+    // Counted and said, not swallowed. Settling the failures kept the page usable and
+    // also hid a total outage: every feed answered `500` for a while, and the only
+    // symptom was four permanently empty shelves - which reads as an empty library.
+    // A shelf that could not be read is not a shelf with nothing on it.
+    shelvesFailed = [keep, deck, added, changed].filter((r) => r.status === 'rejected').length
   }
 
   async function loadSeries() {
@@ -123,6 +130,16 @@
 </nav>
 
 <ErrorNotice {error} onretry={refresh} />
+
+{#if shelvesFailed > 0}
+  <!-- Its own notice rather than the shared one: the series grid below may have loaded
+       perfectly, and reporting the whole page as broken would be as wrong as reporting
+       none of it. -->
+  <p class="shelves-failed" role="status" data-testid="shelves-failed">
+    {$_('reader.shelvesFailed', { values: { count: shelvesFailed } })}
+    <button type="button" onclick={() => loadShelves()}>{$_('common.retry')}</button>
+  </p>
+{/if}
 
 <MediaShelf title={$_('reader.keepReading')} items={keepReading} kind="mediaItem" />
 <MediaShelf title={$_('reader.onDeck')} items={onDeck} kind="mediaItem" />
@@ -229,5 +246,27 @@
   .empty,
   .waiting {
     color: var(--text-muted);
+  }
+  .shelves-failed {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
+    padding: var(--space-3);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius);
+    font-size: var(--font-sm);
+  }
+  .shelves-failed button {
+    min-height: var(--touch-target);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-control);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--font-sm);
+    cursor: pointer;
   }
 </style>
