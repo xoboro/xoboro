@@ -54,9 +54,22 @@ private fun ApplicationCall.trashedFilter(): Boolean = optionalBoolean("trashed"
  * ordering is part of its definition, so allowing an override would put back the disagreement the feed
  * exists to remove - and doing it silently would be worse, because the caller would believe they had
  * changed something.
+ *
+ * There is one builder per collection because the two resolve the same wire field to different
+ * repository properties - `lastReadAt` is `readProgress.readDate` for a media item and `readDate` for a
+ * series. Handing the wire name to the repository unresolved is what made every feed answer `500`.
  */
-internal fun ApplicationCall.nativeFeedPageRequest(
+internal fun ApplicationCall.nativeSeriesFeedPageRequest(
   feed: XoboroNativeDiscoveryFeed,
+): CatalogPageRequest = nativeFeedPageRequest(feed, String::toSeriesSort)
+
+internal fun ApplicationCall.nativeMediaItemFeedPageRequest(
+  feed: XoboroNativeDiscoveryFeed,
+): CatalogPageRequest = nativeFeedPageRequest(feed, String::toMediaItemSort)
+
+private fun ApplicationCall.nativeFeedPageRequest(
+  feed: XoboroNativeDiscoveryFeed,
+  sortMapper: (String) -> CatalogSort,
 ): CatalogPageRequest {
   if (request.queryParameters["sort"] != null) {
     throw XoboroInvalidQueryException(
@@ -64,10 +77,12 @@ internal fun ApplicationCall.nativeFeedPageRequest(
     )
   }
   // Routed through the same helper the general listings use, so page and size bounds have one
-  // definition. The mapper is never reached: a `sort` parameter was rejected above.
+  // definition. The mapper passed on is never reached: a `sort` parameter was rejected above, and the
+  // feed's own field is resolved here instead - through the caller-facing mapper, so a feed cannot name
+  // a field the listing would refuse.
   return nativePageRequest(
     sortMapper = { error("a discovery feed does not accept a sort") },
-    defaultSort = feed.toCatalogSort(),
+    defaultSort = sortMapper(feed.sortField).copy(direction = feed.direction),
   )
 }
 

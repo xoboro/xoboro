@@ -19,10 +19,18 @@ import io.xoboro.core.application.CatalogSortDirection
  * A [filter] of `null` means the feed is defined purely by ordering. `ON_DECK` and `KEEP_READING` are
  * the two that also carry a filter, and both are per-caller by nature — they are about what *this*
  * reader has started.
+ *
+ * [sortField] is the **wire** field name, exactly as a caller would write it in `?sort=`, and it is
+ * resolved to a repository property by the same mapper that resolves a caller's parameter. It used to
+ * be handed to the repository directly, and none of the three values it holds is a property the
+ * repository knows: every feed answered `500 Unsupported catalog sort property`. Nothing caught it,
+ * because the route tests assert the string against a fake catalog that accepts any property, and the
+ * enum's own test asserted the constants against themselves. Going through the mapper means a feed can
+ * only ever name a field the general listing already accepts.
  */
 internal enum class XoboroNativeDiscoveryFeed(
   val path: String,
-  val sortProperty: String,
+  val sortField: String,
   val direction: CatalogSortDirection,
   val filter: Filter? = null,
 ) {
@@ -62,8 +70,6 @@ internal enum class XoboroNativeDiscoveryFeed(
    */
   KEEP_READING("keep-reading", "lastReadAt", CatalogSortDirection.DESC, Filter.KEEP_READING),
   ;
-
-  fun toCatalogSort(): CatalogSort = CatalogSort(property = sortProperty, direction = direction)
 
   internal enum class Filter {
     ON_DECK,

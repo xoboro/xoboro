@@ -79,7 +79,7 @@ fun Route.xoboroNativeCatalogRoutes(
                   .findSeries(
                     query = call.nativeSeriesQuery(),
                     access = user.catalogAccess(),
-                    page = call.nativeFeedPageRequest(feed),
+                    page = call.nativeSeriesFeedPageRequest(feed),
                   ).toNativeSeriesPage(),
               )
             }
@@ -124,7 +124,7 @@ fun Route.xoboroNativeCatalogRoutes(
                 .findBooks(
                   query = call.nativeMediaItemQuery().withFeedFilter(feed),
                   access = user.catalogAccess(),
-                  page = call.nativeFeedPageRequest(feed),
+                  page = call.nativeMediaItemFeedPageRequest(feed),
                 ).toNativeMediaItemPage(),
             )
           }

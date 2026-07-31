@@ -146,8 +146,12 @@ class XoboroNativeCatalogTest {
         HttpStatusCode.OK,
         client.get("$XOBORO_API_PREFIX/series/feeds/new") { bearerAuth(fixture.token) }.status,
       )
+      // The **repository** property, not the wire field. The fake catalog accepts any string, so this
+      // assertion cannot tell a property the repository knows from one it does not - it once read
+      // "createdAt" and passed while the real repository answered `500` for it. What it does pin is that
+      // the feed's field is resolved through the same mapper as `?sort=` rather than passed through.
       assertEquals(
-        listOf(CatalogSort("createdAt", CatalogSortDirection.DESC)),
+        listOf(CatalogSort("created", CatalogSortDirection.DESC)),
         fixture.catalog.lastPage?.sorts,
       )
 
@@ -156,7 +160,7 @@ class XoboroNativeCatalogTest {
         client.get("$XOBORO_API_PREFIX/media-items/feeds/updated") { bearerAuth(fixture.token) }.status,
       )
       assertEquals(
-        listOf(CatalogSort("updatedAt", CatalogSortDirection.DESC)),
+        listOf(CatalogSort("lastModified", CatalogSortDirection.DESC)),
         fixture.catalog.lastPage?.sorts,
       )
     }
