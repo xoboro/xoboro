@@ -321,6 +321,7 @@ export default {
     recentlyUpdated: '최근 갱신',
     allSeries: '전체 작품',
     noSeries: '작품이 없습니다',
+    shelvesFailed: '선반 {count}개를 읽지 못했습니다. 비어 있는 것이 아니라 알 수 없는 상태입니다.',
     noItems: '항목이 없습니다',
     items: '{count}편',
     unread: '안 읽음',
