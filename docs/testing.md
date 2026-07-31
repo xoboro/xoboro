@@ -68,6 +68,14 @@ none of them looked wrong:
   compares an empty set and reports success. On macOS `grep -P` is unsupported and
   fails silently when stderr is discarded, which is indistinguishable from "no
   matches". Put content checks in the suite, not in a one-liner.
+- The same trap inside a test: a loop over elements a selector did not find, or a
+  parse that produced no pairs, asserts nothing. Assert the match count before
+  asserting anything about the matches.
+- An assertion inside `waitFor` that is **already true**. `waitFor` retries until its
+  callback succeeds, so if the property holds before the change lands it succeeds on
+  the first attempt and reports nothing about the state afterwards. Wait for a signal
+  that the change has happened — a row gone, a value replaced — and then assert
+  synchronously. Do not put the settle and the assertion in one `waitFor`.
 - Asserting through a component's own happy path. A shared safety component needs
   tests for the inputs its current callers never send — that is where its holes are.
 
