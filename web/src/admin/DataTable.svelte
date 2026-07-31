@@ -40,14 +40,19 @@
     /**
      * A stable, non-localized name for this listing, used for the paging test hooks.
      *
-     * Required in practice: two listings on one screen otherwise both emit
-     * `data-testid="page-next"`, so a test cannot say which table it means and the first
-     * screen with two tables made the hook ambiguous rather than failing loudly. Derived
-     * from the caption would be worse — captions are translated, so the hooks would
-     * change with the locale.
+     * Two listings on one screen otherwise both emit the same `page-next` hook, so a test
+     * cannot say which table it means, and the first screen with two tables made the hook
+     * ambiguous rather than failing loudly. Deriving it from the caption would be worse —
+     * captions are translated, so the hooks would change with the locale.
      */
     name,
   } = $props()
+
+  // Refused rather than documented as required. Omitting it emitted
+  // `data-testid="page-next-undefined"`, which is a hook that exists, matches nothing a
+  // test asks for, and collides with the next caller that also forgets. A missing name is
+  // a mistake in this file's caller, so it fails here where the caller can see it.
+  if (!name) throw new Error('DataTable requires a name for its paging hooks')
 
   const items = $derived(page?.items ?? [])
   // Displayed one-based: `page` is zero-based in the API, and showing "page 0 of 3"

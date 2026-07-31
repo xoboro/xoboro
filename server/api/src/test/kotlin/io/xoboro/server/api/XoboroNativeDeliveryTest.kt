@@ -867,14 +867,14 @@ class XoboroNativeDeliveryTest {
           status = MediaStatus.READY,
         )
 
-      fun nonEpub(): Fixture =
+      fun nonEpub(status: MediaStatus = MediaStatus.READY): Fixture =
         Fixture(
           user =
             syntheticUser(
               roles = setOf(UserRole.PAGE_STREAMING),
               sharesAllLibraries = true,
             ),
-          status = MediaStatus.READY,
+          status = status,
           mediaKind = MediaKind.COMIC_ARCHIVE,
         )
 
@@ -1139,6 +1139,29 @@ class XoboroNativeDeliveryTest {
       val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
       assertEquals(HttpStatusCode.Conflict, response.status)
       assertEquals("media_not_ready", response.body<XoboroApiError>().code)
+    }
+  }
+
+  @Test
+  fun `positions do not refuse a comic whose media is not ready`() {
+    // The readiness gate is scoped to EPUBs on purpose, and this is the case that says so.
+    // A comic has pages rather than positions, so an empty list is the right answer whatever
+    // its analysis state - refusing with `409` would make a reader retry for content that
+    // is never going to exist.
+    //
+    // Without this, deleting `item.book.mediaKind == MediaKind.EPUB &&` from the guard
+    // passed every other positions test: all of them use an EPUB fixture, where the
+    // condition is true and therefore invisible.
+    testApplication {
+      val fixture = Fixture.nonEpub(MediaStatus.OUTDATED)
+      installDelivery(fixture)
+
+      val response = client.get(POSITIONS_PATH) { bearerAuth(fixture.token) }
+      // The status is the assertion, not the body. This fixture attaches positions to a
+      // media record whatever its kind, which real analysis does not do - so asserting an
+      // empty list here would be asserting the fixture. What the route owes a comic is
+      // "not a 409", and that is what the deleted condition changes.
+      assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
     }
   }
 

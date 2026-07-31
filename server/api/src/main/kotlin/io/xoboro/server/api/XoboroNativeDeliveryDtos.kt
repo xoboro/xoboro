@@ -35,9 +35,14 @@ data class XoboroResourceResponse(
  *
  * [totalProgression] is `position / count`, so it is the progress at the **end** of this
  * position: the first of two positions reports `0.5`, not `0`. A Readium locator starts a
- * publication at `0`, so this is one position ahead of that convention. `docs/api/native-v1.md`
- * records why it is documented rather than corrected — the same value already feeds Kobo's
- * `ProgressPercent`, so the arithmetic is not this endpoint's to change.
+ * publication at `0`, so this is one position ahead of that convention.
+ *
+ * Documented rather than corrected because `KoreaderSyncRoutes` inverts it —
+ * `round(pageCount * totalProgression)` becomes persisted read progress — and that inversion
+ * is only correct against this convention: under Readium's `(position - 1) / count` the last
+ * position would map to `pageCount - 1`, so a KOReader user could not reach a book's final
+ * page. Kobo's `ProgressPercent` is affected too, as a displayed number.
+ * `docs/architecture/0105-total-progression-convention.md` has the full account.
  */
 @Serializable
 data class XoboroMediaPositionResponse(
