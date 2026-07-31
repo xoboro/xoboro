@@ -42,11 +42,27 @@
   /** `{ candidate, carriers }` while the carrier list is open; `carriers` is a page. */
   let inspecting = $state(null)
 
+  /**
+   * Clamps a page request to one that still exists.
+   *
+   * Recording a decision removes the hash from the candidate list, so deciding the last
+   * row of the last page shrinks the listing by a page. Re-reading at the page the screen
+   * was on then returns an empty one, and the operator is left looking at an empty table
+   * with the remaining candidates hidden behind a Previous button they have no reason to
+   * suspect. The listing is re-asked for the last page that exists instead.
+   */
+  async function readPage(fetchPage, requested) {
+    const first = await fetchPage(requested)
+    const last = Math.max(0, (first.totalPages ?? 1) - 1)
+    if (requested <= last || first.totalItems === 0) return first
+    return fetchPage(last)
+  }
+
   async function load(candidatePage = candidates?.page ?? 0, decisionPage = decisions?.page ?? 0) {
     try {
       const [pending, decided] = await Promise.all([
-        listDuplicateCandidates({ page: candidatePage }),
-        listDuplicateDecisions({ page: decisionPage }),
+        readPage((page) => listDuplicateCandidates({ page }), candidatePage),
+        readPage((page) => listDuplicateDecisions({ page }), decisionPage),
       ])
       candidates = pending
       decisions = decided
@@ -97,6 +113,7 @@
 <h2>{$_('admin.duplicates.candidates')}</h2>
 <DataTable
   caption={$_('admin.duplicates.candidates')}
+  name="candidates"
   columns={[
     $_('admin.duplicates.hash'),
     $_('admin.duplicates.size'),
@@ -105,6 +122,7 @@
   page={candidates}
   onpage={(next) => load(next, decisions?.page ?? 0)}
   emptyLabel={$_('admin.duplicates.noCandidates')}
+  keyOf={(candidate) => candidate.pageHash}
 >
   {#snippet row(candidate)}
     <tr>
@@ -146,6 +164,7 @@
 <h2>{$_('admin.duplicates.decisions')}</h2>
 <DataTable
   caption={$_('admin.duplicates.decisions')}
+  name="decisions"
   columns={[
     $_('admin.duplicates.hash'),
     $_('admin.duplicates.recorded'),
@@ -154,6 +173,7 @@
   page={decisions}
   onpage={(next) => load(candidates?.page ?? 0, next)}
   emptyLabel={$_('admin.duplicates.noDecisions')}
+  keyOf={(decision) => decision.pageHash}
 >
   {#snippet row(decision)}
     <tr>

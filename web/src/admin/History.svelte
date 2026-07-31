@@ -38,6 +38,7 @@
 
 <DataTable
   caption={$_('admin.nav.history')}
+  name="history"
   columns={[$_('admin.security.when'), $_('admin.history.type'), $_('admin.history.subject')]}
   {page}
   onpage={load}
