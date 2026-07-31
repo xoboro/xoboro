@@ -82,6 +82,10 @@
 
   async function load() {
     const token = ++loadToken
+    // Set unconditionally: a second click while this request is outstanding is exactly
+    // what disables the paging buttons (see DataTable's `busy`), so both tables go busy
+    // for the duration of any load, not just this one's own.
+    busy = true
     try {
       const [pending, decided] = await Promise.all([
         readPage((page) => listDuplicateCandidates({ page }), candidatePage),
@@ -99,6 +103,11 @@
     } catch (caught) {
       if (token !== loadToken) return
       error = caught
+    } finally {
+      // Only the newest load may clear `busy`, for the same reason only the newest may
+      // commit its data: an older load finishing after a newer one has started would
+      // otherwise re-enable paging while that newer request is still outstanding.
+      if (token === loadToken) busy = false
     }
   }
 
@@ -162,6 +171,7 @@
   ]}
   page={candidates}
   onpage={goToCandidatePage}
+  {busy}
   emptyLabel={$_('admin.duplicates.noCandidates')}
   keyOf={(candidate) => candidate.pageHash}
 >
@@ -213,6 +223,7 @@
   ]}
   page={decisions}
   onpage={goToDecisionPage}
+  {busy}
   emptyLabel={$_('admin.duplicates.noDecisions')}
   keyOf={(decision) => decision.pageHash}
 >
