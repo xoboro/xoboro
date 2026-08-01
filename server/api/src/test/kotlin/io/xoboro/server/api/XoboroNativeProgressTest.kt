@@ -58,6 +58,7 @@ import io.xoboro.core.domain.UserRole
 import io.xoboro.server.security.InMemoryUserSessionRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -298,6 +299,60 @@ class XoboroNativeProgressTest {
       assertEquals("Synthetic reader", body.deviceName)
       assertEquals(request.locator, body.locator)
       assertEquals(body, fixture.storedProgress()?.toNativeProgressResponse())
+    }
+
+  @Test
+  fun `applies a page-only write from a reader that has no locator`() =
+    testApplication {
+      // A comic has no Readium locator - there is no spine and no `href` to point at - so the
+      // comic reader sends a page and nothing else. `locator` used to be a required field, which
+      // made every progress write from that reader answer `400`, and the whole existing suite
+      // missed it because every case here is built from one `validRequest()` that always supplies
+      // one. `ReadProgress.locatorJson` has always been `String?` with the invariant "null or
+      // non-blank", so an absent locator is what the domain already models; it was only this
+      // route's request type that refused to express it.
+      //
+      // Written as raw JSON rather than through the DTO on purpose: constructing
+      // `XoboroMediaProgressRequest(locator = null)` would prove that Kotlin accepts a null, not
+      // that a client omitting the field is accepted. The wire is what the reader speaks.
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response =
+        client.put(PROGRESS_PATH) {
+          bearerAuth(fixture.token)
+          contentType(ContentType.Application.Json)
+          setBody(
+            """
+            {"page":6,"deviceId":"device-1","deviceName":"Synthetic reader","modifiedAtMillis":200}
+            """.trimIndent(),
+          )
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val body = response.body<XoboroMediaProgressResponse>()
+      assertEquals(6, body.page)
+      // Absent, not an empty object: storing `{}` would say a locator was recorded and had no
+      // fields, which is a different claim from "this reader has no locator".
+      assertNull(body.locator)
+      assertNull(fixture.storedProgress()?.locatorJson)
+      // The conflict contract still applies to this reader. Routing a page-only write to the
+      // page-based `updateBook` instead would have been the smaller change and would have silently
+      // dropped `modifiedAtMillis` ordering, so a second device could rewind a comic reader's place
+      // while an EPUB reader stayed protected.
+      val stale =
+        client.put(PROGRESS_PATH) {
+          bearerAuth(fixture.token)
+          contentType(ContentType.Application.Json)
+          setBody(
+            """
+            {"page":9,"deviceId":"device-2","deviceName":"Other reader","modifiedAtMillis":200}
+            """.trimIndent(),
+          )
+        }
+      assertEquals(HttpStatusCode.Conflict, stale.status)
+      assertEquals("stale_progress", stale.body<XoboroApiError>().code)
+      assertEquals(6, fixture.storedProgress()?.page)
     }
 
   @Test

@@ -141,12 +141,19 @@ class ReadProgressLifecycle(
     modifiedAtMillis: Long,
     deviceId: String,
     deviceName: String,
-    locatorJson: String,
+    locatorJson: String?,
   ): ReadProgressUpdate {
     val book = books.findByIdOrNull(bookId) ?: return ReadProgressUpdate.MediaItemNotFound
     require(book.deletedAtMillis == null) { "Cannot update progress for a deleted book" }
     require(modifiedAtMillis >= 0) { "Progression timestamp must not be negative" }
-    require(locatorJson.isNotBlank()) { "Progression locator must not be blank" }
+    // Null or non-blank, which is the invariant `ReadProgress` itself carries. A locator was
+    // required here while the domain field was already nullable, and the gap was not academic: a
+    // comic has no spine and no `href`, so its reader has no locator to send, and demanding one
+    // made every comic progress write fail. Blank is still refused - an empty string is a locator
+    // that says nothing, which is a different thing from having none.
+    require(locatorJson == null || locatorJson.isNotBlank()) {
+      "Progression locator must be null or non-blank"
+    }
     val analyzed =
       media.findByBookIdOrNull(book.id)
         ?: throw IllegalArgumentException("Book media is not ready")

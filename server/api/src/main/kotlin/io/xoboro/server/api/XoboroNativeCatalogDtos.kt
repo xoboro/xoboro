@@ -113,7 +113,19 @@ data class XoboroMediaResponse(
 @Serializable
 data class XoboroMediaProgressRequest(
   val page: Int,
-  val locator: JsonObject,
+  /**
+   * An opaque Readium locator, stored as given, for a reader that has one.
+   *
+   * Optional because a comic has neither a spine nor an `href` to point at, so its reader sends a
+   * page and nothing else. This field was required, which made every progress write from the comic
+   * reader answer `400`; `ReadProgress.locatorJson` has always been `String?` with the invariant
+   * "null or non-blank", so an absent locator is what the domain already models and only this type
+   * refused to express it.
+   *
+   * `page` stays required. It is not an alternative to the locator but the position this surface
+   * stores and orders by, and an EPUB reader sends both.
+   */
+  val locator: JsonObject? = null,
   val deviceId: String,
   val deviceName: String,
   val modifiedAtMillis: Long,
