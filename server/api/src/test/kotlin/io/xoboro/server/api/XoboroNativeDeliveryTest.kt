@@ -1125,10 +1125,10 @@ class XoboroNativeDeliveryTest {
       // The href is what the resource route is asked for verbatim, so it has to match a
       // manifest path exactly rather than being an OPF-relative href.
       assertEquals(RESOURCE_ARCHIVE_PATH, positions.first().href)
-      // `position / count`, so the first position reports half rather than zero. Pinned
-      // because a reader copies these into a locator, and because it is one position
-      // ahead of the Readium convention - see the DTO's documentation.
-      assertEquals(listOf(0.5F, 1F), positions.map(XoboroMediaPositionResponse::totalProgression))
+      // `(position - 1) / count`, the Readium convention: a position reports where it
+      // starts, so the publication opens at zero and nothing reports 1. Pinned because a
+      // reader copies these into a locator - see the DTO's documentation and ADR 0106.
+      assertEquals(listOf(0F, 0.5F), positions.map(XoboroMediaPositionResponse::totalProgression))
     }
   }
 
@@ -1330,10 +1330,10 @@ class XoboroNativeDeliveryTest {
             // sorted positions by href instead of returning them as stored answered this
             // test correctly by accident.
             //
-            // totalProgression is 0.5 then 1.0, which is `position / count` - what
-            // EpubMediaAnalyzer actually computes. The fixture used to read 0 then 0.5,
-            // the `(position - 1) / count` convention, which described an API that does
-            // not exist and made the deviation from Readium invisible here.
+            // totalProgression is 0 then 0.5, which is `(position - 1) / count` - what
+            // EpubMediaAnalyzer computes since ADR 0106. It read 0.5 then 1.0 while the
+            // analyzer used `position / count`; the fixture has to be the shape the server
+            // actually sends, or the route test describes an API that does not exist.
             positions =
               listOf(
                 MediaPosition(
@@ -1341,14 +1341,14 @@ class XoboroNativeDeliveryTest {
                   mediaType = "application/xhtml+xml",
                   progression = 0F,
                   position = 1,
-                  totalProgression = 0.5F,
+                  totalProgression = 0F,
                 ),
                 MediaPosition(
                   href = "OEBPS/text/aaa-out-of-lexical-order.xhtml",
                   mediaType = "application/xhtml+xml",
                   progression = 0F,
                   position = 2,
-                  totalProgression = 1F,
+                  totalProgression = 0.5F,
                 ),
               ),
             createdAtMillis = 1_735_689_600_000,

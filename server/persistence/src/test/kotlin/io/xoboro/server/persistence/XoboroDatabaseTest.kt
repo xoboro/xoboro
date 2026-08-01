@@ -85,7 +85,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(29, database.migrationResult.migrationsExecuted)
+      assertEquals(30, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -206,7 +206,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(28, database.migrationResult.migrationsExecuted)
+      assertEquals(29, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -264,6 +264,99 @@ class XoboroDatabaseTest {
           )
           ?.get(0, String::class.java),
       )
+    }
+  }
+
+  @Test
+  fun `restates analyzed positions under the Readium total progression convention`() {
+    // V30 rewrites values the analyzer had already written as `position / count`. Counting
+    // migrations cannot show that: the count above would be satisfied by an empty file. This
+    // seeds the old convention at V29 and reads the column back after V30 has run.
+    val path = tempDirectory.resolve("total-progression.sqlite").toAbsolutePath()
+    val legacyDataSource =
+      SQLiteDataSource().apply {
+        url = "jdbc:sqlite:$path"
+      }
+    Flyway.configure()
+      .dataSource(legacyDataSource)
+      .locations("classpath:db/migration")
+      .target("29")
+      .load()
+      .migrate()
+    legacyDataSource.connection.use { connection ->
+      connection.prepareStatement(
+        """
+        INSERT INTO library (id, name, root_uri, created_at_ms, updated_at_ms)
+        VALUES ('library-1', 'Synthetic library', 'file:///synthetic', 1, 1)
+        """.trimIndent(),
+      ).use { it.executeUpdate() }
+      connection.prepareStatement(
+        """
+        INSERT INTO series
+          (id, library_id, relative_uri, source_item_id, name, sort_title,
+           created_at_ms, updated_at_ms)
+        VALUES ('series-1', 'library-1', 'series', 'series', 'Synthetic series',
+                'Synthetic series', 1, 1)
+        """.trimIndent(),
+      ).use { it.executeUpdate() }
+      connection.prepareStatement(
+        """
+        INSERT INTO book (
+          id, library_id, series_id, relative_uri, source_item_id, name, media_kind,
+          file_size, file_modified_ms, created_at_ms, updated_at_ms
+        ) VALUES (?, 'library-1', 'series-1', ?, ?, ?, 'EPUB', 1, 1, 1, 1)
+        """.trimIndent(),
+      ).use { statement ->
+        listOf("book-two", "book-four").forEach { id ->
+          statement.setString(1, id)
+          statement.setString(2, "series/$id.epub")
+          statement.setString(3, "series/$id.epub")
+          statement.setString(4, id)
+          statement.executeUpdate()
+        }
+      }
+      connection.prepareStatement(
+        """
+        INSERT INTO media_position
+          (book_id, position, href, media_type, progression, total_progression)
+        VALUES (?, ?, ?, 'application/xhtml+xml', 0, ?)
+        """.trimIndent(),
+      ).use { statement ->
+        // `position / count` for each book, which is what the analyzer wrote before ADR 0106.
+        // Two books with different position counts, because a migration that divided by the
+        // table's total row count instead of the per-book count would still produce plausible
+        // numbers for a single book.
+        fun seedPositions(
+          bookId: String,
+          count: Int,
+        ) {
+          (1..count).forEach { position ->
+            statement.setString(1, bookId)
+            statement.setInt(2, position)
+            statement.setString(3, "chapter-$position.xhtml")
+            statement.setDouble(4, position.toDouble() / count)
+            statement.executeUpdate()
+          }
+        }
+        seedPositions("book-two", 2)
+        seedPositions("book-four", 4)
+      }
+    }
+
+    XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      assertEquals(1, database.migrationResult.migrationsExecuted)
+
+      fun storedProgressions(bookId: String): List<Double> =
+        database.dsl
+          .fetch(
+            "SELECT total_progression FROM media_position WHERE book_id = ? ORDER BY position",
+            bookId,
+          ).map { requireNotNull(it.get(0, Double::class.java)) }
+
+      // `(position - 1) / count`, per book. The second book is what rules out a global
+      // divisor: over all six rows it would have made `book-two` read 0 then 0.1666...
+      assertEquals(listOf(0.0, 0.5), storedProgressions("book-two"))
+      assertEquals(listOf(0.0, 0.25, 0.5, 0.75), storedProgressions("book-four"))
     }
   }
 

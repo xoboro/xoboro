@@ -50,7 +50,11 @@ class EpubMediaAnalyzerTest {
     assertEquals("Start", media.landmarks.single().title)
     assertEquals("Page one", media.pageList.single().title)
     assertEquals(listOf(1, 2), media.positions.map { it.position })
-    assertEquals(1F, media.positions.last().totalProgression)
+    // `(position - 1) / count`, the Readium convention: a position reports where it starts.
+    // Both ends are pinned deliberately. Asserting only the last value cannot tell this
+    // apart from the `position / count` convention it replaced, because a two-position book
+    // reports 0.5 as its last value under the new rule and as its *first* under the old one.
+    assertEquals(listOf(0F, 0.5F), media.positions.map { it.totalProgression })
   }
 
   @Test
@@ -72,6 +76,17 @@ class EpubMediaAnalyzerTest {
     assertTrue(media.pages.isEmpty())
     assertTrue(media.pageCount > 0)
     assertTrue(media.positions.isNotEmpty())
+    // A reflowable spine item is chunked, so this fixture has more positions than the
+    // fixed-layout one above and does not know how many. Both ends of the Readium
+    // convention are still fixed regardless of n: the publication starts at 0, and 1 is the
+    // end of the publication rather than a position, so nothing reports it. The previous
+    // `position / count` convention violated both.
+    assertEquals(0F, media.positions.first().totalProgression)
+    assertTrue(media.positions.none { it.totalProgression >= 1F })
+    // Page count is derived from compressed entry sizes and positions from uncompressed
+    // ones, so `pageCount <= positions.size`. `KoreaderSyncRoutes.pageFor` relies on that
+    // to guarantee the last position reaches the last page.
+    assertTrue(media.pageCount <= media.positions.size)
   }
 
   @Test

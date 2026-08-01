@@ -67,6 +67,7 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.float
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -203,6 +204,12 @@ class KoboRoutesTest {
                   currentBookmark =
                     KoboBookmarkDto(
                       lastModified = "2026-01-01T00:00:00Z",
+                      // Halfway through a two-position resource resolves to the first of
+                      // them. The reading state read back below reports that position's own
+                      // progress, whatever this request claimed. Kept at the first position
+                      // deliberately: the Kobo write stores `page = position.position`, so
+                      // resolving to the last position would make the book complete and the
+                      // status assertion below would stop covering "Reading".
                       progressPercent = 50F,
                       contentSourceProgressPercent = 50F,
                       location = KoboLocationDto(source = "chapter.xhtml"),
@@ -262,6 +269,22 @@ class KoboRoutesTest {
         assertEquals(
           "Reading",
           state.getValue("StatusInfo").jsonObject.getValue("Status").jsonPrimitive.content,
+        )
+        // `ProgressPercent` is the stored locator's `totalProgression` times 100. The
+        // accepted write resolved to the first position, which under the Readium convention
+        // is 0 - the start of the publication. Two things would have made this 50: the
+        // `position / count` convention this replaced, and the stale write below being
+        // accepted, since 100% of the resource resolves to the second position. So a 0 here
+        // is not the vacuous reading it looks like. What it cannot show is a non-zero value
+        // surviving the round trip; `KoreaderSyncRoutesTest` covers that end.
+        assertEquals(
+          0F,
+          state
+            .getValue("CurrentBookmark")
+            .jsonObject
+            .getValue("ProgressPercent")
+            .jsonPrimitive
+            .float,
         )
         val progressSync =
           client.get("/kobo/$KOBO_TOKEN/v1/library/sync") {
@@ -390,6 +413,11 @@ class KoboRoutesTest {
               kind = MediaFileKind.EPUB_PAGE,
             ),
           ),
+        // Both positions live in the one resource, so `progression` and `totalProgression`
+        // carry the same numbers here - `index / count` either way. That is what the
+        // analyzer produces for a single-resource publication; it also means the
+        // `ProgressPercent` assertion below cannot tell which of the two fields it came
+        // from. `XoboroNativeDeliveryTest` separates them, over a two-resource fixture.
         positions =
           listOf(
             MediaPosition(
@@ -402,9 +430,9 @@ class KoboRoutesTest {
             MediaPosition(
               href = "chapter.xhtml",
               mediaType = "application/xhtml+xml",
-              progression = 1F,
+              progression = 0.5F,
               position = 2,
-              totalProgression = 1F,
+              totalProgression = 0.5F,
             ),
           ),
         createdAtMillis = 1,

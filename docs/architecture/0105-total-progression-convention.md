@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted, with the correction deferred and its precondition named.
+Superseded by ADR 0106, which carried out the correction this ADR deferred.
+
+The analysis below is retained because it is still accurate about the defect and about
+what depended on it — ADR 0106 builds on it rather than replacing it. Two things in it are
+now out of date: the Decision to leave the arithmetic alone, and the correction sketched in
+"Precondition" as `(position - 1 + progression) / count`, which ADR 0106 rejects in favour
+of `(position - 1) / count`. `progression` is measured against the spine item rather than
+the publication, so folding it in pushes a position past its own slot.
 
 ## Context
 

@@ -207,6 +207,10 @@ class JooqBookMediaRepositoryTest {
         listOf(MediaNavigationEntry(title = "Start", href = "chapter.xhtml")),
       pageList =
         listOf(MediaNavigationEntry(title = "Page one", href = "chapter.xhtml")),
+      // Two positions rather than one. Under the Readium convention the first position's
+      // `totalProgression` is 0 for every publication, so a single-position fixture would
+      // round-trip a column that a read returning a constant zero could satisfy. The second
+      // position gives the column a value only storage can supply.
       positions =
         listOf(
           MediaPosition(
@@ -214,8 +218,16 @@ class JooqBookMediaRepositoryTest {
             mediaType = "application/xhtml+xml",
             progression = 0F,
             position = 1,
-            totalProgression = 1F,
+            totalProgression = 0F,
             koboSpan = "kobo.1.1",
+          ),
+          MediaPosition(
+            href = "chapter-2.xhtml",
+            mediaType = "application/xhtml+xml",
+            progression = 0F,
+            position = 2,
+            totalProgression = 0.5F,
+            koboSpan = "kobo.2.1",
           ),
         ),
       createdAtMillis = 1_700_000_000_000L,
