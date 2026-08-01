@@ -98,6 +98,25 @@ none of them looked wrong:
   `items` by searching the component for the word found it in the `required: [...]` line,
   so deleting every property left it passing. Match the key at its own indentation, inside
   the block that is supposed to declare it.
+- **Every case in a class built from one request helper that fills in every field.**
+  `XoboroNativeProgressTest` has eighteen cases and all of them sent a body from one
+  `validRequest()` that always supplies a `locator`. `locator` was a required field, so
+  **every read-progress write from the comic reader answered `400`** — a comic has no spine
+  and no `href`, so its reader sends a page alone — and eighteen passing tests said nothing
+  about it, because not one of them sent the shape that reader actually sends. A shared
+  helper is worth having; what it must not be is the *only* body the class ever sends. Add
+  at least one case per optional field, spelling the body on the wire rather than
+  constructing the DTO: building the request object with `locator = null` proves Kotlin
+  accepts a null, not that a client omitting the key is accepted. Deserialization refuses a
+  missing field before any code you wrote runs, so only the wire form reaches the defect.
+- A client-side fake that agrees with the documentation instead of the server. The comic
+  reader's test fake answered `204` for a progress write because the OpenAPI description
+  said `204`; the server answers `200` with a body. A fake copied from a description
+  inherits whatever that description is wrong about, and a description with no
+  `requestBody` at all — which is what this endpoint had — cannot be inherited from at
+  all. Derive a fake from a real response, and keep the drift test's limits in mind: this
+  repository's OpenAPI check compares `(method, path)` pairs and says nothing about bodies
+  or status codes.
 
 Two related traps in reading results rather than writing them: **check the exit
 code, not the summary line** — this suite once printed "224 passed" while exiting `1`
@@ -162,6 +181,31 @@ What this catches that the mocked suite cannot, all of it found this way at leas
 - **Provenance guards.** That a cookie-authenticated mutation is refused with a foreign
   `Origin` **and** with none at all. Failing open on a missing header is the easy mistake
   and a mocked test never sends real headers.
+- **Content negotiation.** Whether the status a client needs actually reaches it. A
+  browser's `EventSource` sends exactly `Accept: text/event-stream` and cannot be told to
+  send anything else, so the JSON error body could not be negotiated and every
+  unauthenticated subscription to the event stream answered `406` instead of the `401` the
+  description declares — and `EventSource` retries on its own forever, so an expired
+  session left the UI silently disconnected. Note that Ktor's **test** client cannot pose
+  this question through the usual helper: its ContentNegotiation plugin appends
+  `Accept: application/json`, so asking for one type sends two and negotiation succeeds.
+  Use a client without that plugin, or `curl`.
+
+Some defects are only visible with real layout, which jsdom does not have. Measuring the
+DOM in an actual browser — Playwright, or the browser console — is the only way to reach
+them, and an assertion about them in the mocked suite would pass with the bug present:
+
+- **Scroll and snap geometry.** A shelf's first cover was clipped at the window edge on a
+  real library. `scroll-snap-align: start` aligns to the scrollport, which is inside the
+  padding, so a shelf that snapped came to rest at `scrollLeft: 16` and ate its own gutter;
+  `scroll-padding-inline` is what tells snapping about it. `proximity` made it intermittent
+  — two shelves rested at 0 and a third at 16 — so it read as a rendering glitch rather than
+  a rule. Diagnosed by reading `scrollLeft`, `paddingLeft` and `getBoundingClientRect()` off
+  the live page, and verified the same way; in jsdom `scrollLeft` is always 0.
+- **Anything else that needs layout**: overflow at a narrow viewport, an element covering a
+  control, sticky positioning, and focus order that depends on painted position. Record such
+  a finding in the component with a note that the suite does not cover it and why, rather
+  than writing an assertion that cannot fail.
 
 ## Two lists agreeing is not a check
 
