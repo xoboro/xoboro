@@ -2239,9 +2239,29 @@ paths:
     put:
       tags: [Media items]
       operationId: put_media_items_mediaItemId_progress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/XoboroMediaProgressRequest" }
       responses:
-        "204":
-          description: Applied.
+        "200":
+          description: >-
+            Applied. The body is the stored progress, not an echo of the request:
+            `completed` is derived from the page and the analyzed page count, and
+            `updatedAtMillis` is the server's write time rather than the client clock.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroMediaProgressResponse" }
+        "409":
+          description: >-
+            The stored progress is at least as new as this write, so it was refused
+            rather than applied. `modifiedAtMillis` is the client's own clock and the
+            sole ordering key, and equal counts as stale, so a second device cannot
+            silently rewind a reader's place.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
         "400":
           description: Invalid request body or query parameter.
           content:
@@ -2648,6 +2668,50 @@ paths:
         "404":
           description: >-
             Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/read-lists/{readListId}/file:
+    parameters:
+      - name: readListId
+        in: path
+        required: true
+        description: Read-list identifier.
+        schema:
+          type: string
+    get:
+      tags: [Read lists]
+      operationId: get_read_lists_readListId_file
+      description: >-
+        Downloads the read list's media items as one zip archive, in list order.
+        Entries are prefixed with each member's one-based position in the read
+        list. Members the caller may not read are omitted. Requires the
+        FILE_DOWNLOAD role. The archive is streamed as it is assembled, so the
+        response carries no Content-Length, no ETag and no Accept-Ranges;
+        download a member through /media-items/{mediaItemId}/file to resume by
+        byte range.
+      responses:
+        "200":
+          description: Zip archive.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: >-
+            file_download_forbidden when the user lacks the FILE_DOWNLOAD role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            read_list_not_found when the read list does not exist, or when the
+            caller may read none of its media items. An unauthorised identifier
             returns 404 rather than 403 so grants cannot be enumerated.
           content:
             application/json:
@@ -3211,6 +3275,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/file:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_file
+      description: >-
+        Downloads the series' media items as one zip archive, ordered by
+        numberSort. Deleted items, items whose file cannot be opened, and items
+        the caller may not read are omitted; a visible series with no readable
+        items answers an empty archive. Requires the FILE_DOWNLOAD role. The
+        archive is streamed as it is assembled, so the response carries no
+        Content-Length, no ETag and no Accept-Ranges; download a member through
+        /media-items/{mediaItemId}/file to resume by byte range.
+      responses:
+        "200":
+          description: Zip archive.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: >-
+            file_download_forbidden when the user lacks the FILE_DOWNLOAD role.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            series_not_found, or not visible to this user. An unauthorised
+            identifier returns 404 rather than 403 so grants cannot be
+            enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/series/{seriesId}/media-items:
     parameters:
       - name: seriesId
@@ -3748,6 +3856,77 @@ components:
       name: X-API-Key
       description: API key issued through the self-service endpoints.
   schemas:
+    XoboroMediaProgressRequest:
+      type: object
+      required: [page, deviceId, deviceName, modifiedAtMillis]
+      description: >-
+        A read-progress write. `locator` is deliberately **not** required: a comic has
+        neither a spine nor an `href` to point at, so its reader sends a page alone,
+        while an EPUB reader sends both. `page` is required in either case - it is the
+        position this surface stores and orders by, not an alternative to the locator.
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: >-
+            One-based page, within the analyzed page count. A value outside that range is
+            `400` rather than being clamped, so a client cannot quietly store a position
+            the item does not have.
+        locator:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >-
+            An opaque Readium locator, stored and returned as given and never interpreted.
+            Omit it when the reader has none; an empty object is not the same statement,
+            because it claims a locator was recorded and carried no fields.
+        deviceId:
+          type: string
+          description: Which device wrote this, so a conflict can name the other one.
+        deviceName:
+          type: string
+          description: Human-readable device name, shown when a conflict is offered to the reader.
+        modifiedAtMillis:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            The client's own clock, and the sole conflict-ordering key - the server does not
+            substitute its own. A value older than **or equal to** the stored one is refused
+            with `409`, so a client writing twice within one millisecond must supply a
+            strictly increasing value rather than a bare wall-clock reading.
+    XoboroMediaProgressResponse:
+      type: object
+      required: [page, completed, readAtMillis, updatedAtMillis]
+      description: The stored progress after a write, or as currently held.
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        completed:
+          type: boolean
+          description: >-
+            Derived from the page and the analyzed page count rather than sent by the
+            client, so it cannot disagree with the position it accompanies.
+        readAtMillis:
+          type: integer
+          format: int64
+          description: The client clock the write carried, preserved as the ordering key.
+        updatedAtMillis:
+          type: integer
+          format: int64
+          description: When the server stored it, which is a different clock from `readAtMillis`.
+        deviceId:
+          type: string
+          nullable: true
+        deviceName:
+          type: string
+          nullable: true
+        locator:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: Absent when the reader that wrote this had no locator.
     XoboroMediaPosition:
       type: object
       required: [position, href, mediaType, progression, totalProgression]

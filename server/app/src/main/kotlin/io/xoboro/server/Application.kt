@@ -107,12 +107,13 @@ import io.xoboro.core.domain.SeriesCollectionRepository
 import io.xoboro.core.domain.SyncPointRepository
 import io.xoboro.server.api.CrossSiteRequestRejectedException
 import io.xoboro.server.api.XOBORO_API_PREFIX
-import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroInvalidQueryException
 import io.xoboro.server.api.XoboroNativeErrorBodyWritten
 import io.xoboro.server.api.XoboroNativeEventHub
 import io.xoboro.server.api.configureXoboroNativeAuthentication
 import io.xoboro.server.api.configureXoboroNativeRateLimits
+import io.xoboro.server.api.respondNativeError
+import io.xoboro.server.api.xoboroNativeArchiveRoutes
 import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
@@ -366,12 +367,14 @@ fun Application.xoboroModule(
         return@status
       }
       if (call.request.path().isXoboroNativeApiPath()) {
-        call.respond(
+        // `respondNativeError`, not `respond`: an error body must not go through content
+        // negotiation. A caller whose `Accept` header does not admit JSON used to get `406` here
+        // and never learn the real status - see the function's own documentation for the case that
+        // made this concrete.
+        call.respondNativeError(
           status,
-          XoboroApiError(
-            code = if (status == HttpStatusCode.NotFound) "not_found" else "forbidden",
-            message = status.description,
-          ),
+          code = if (status == HttpStatusCode.NotFound) "not_found" else "forbidden",
+          message = status.description,
         )
       } else if (
         call.request.header(io.ktor.http.HttpHeaders.Origin) == null &&
@@ -388,25 +391,24 @@ fun Application.xoboroModule(
         return@status
       }
       if (call.request.path().isXoboroNativeApiPath()) {
-        call.respond(
+        call.respondNativeError(
           status,
-          XoboroApiError(
-            code =
-              if (status == HttpStatusCode.TooManyRequests) {
-                "rate_limit_exceeded"
-              } else {
-                "authentication_required"
-              },
-            message = status.description,
-          ),
+          code =
+            if (status == HttpStatusCode.TooManyRequests) {
+              "rate_limit_exceeded"
+            } else {
+              "authentication_required"
+            },
+          message = status.description,
         )
       }
     }
     exception<BadRequestException> { call, cause ->
       if (call.request.path().isXoboroNativeApiPath()) {
-        call.respond(
+        call.respondNativeError(
           HttpStatusCode.BadRequest,
-          XoboroApiError("invalid_request", "Malformed request"),
+          code = "invalid_request",
+          message = "Malformed request",
         )
       } else if (call.request.path().isSpringErrorSurface()) {
         call.respondError(
@@ -419,9 +421,10 @@ fun Application.xoboroModule(
     }
     exception<ContentTransformationException> { call, cause ->
       if (call.request.path().isXoboroNativeApiPath()) {
-        call.respond(
+        call.respondNativeError(
           HttpStatusCode.BadRequest,
-          XoboroApiError("invalid_request", "Malformed JSON request"),
+          code = "invalid_request",
+          message = "Malformed JSON request",
         )
       } else if (call.request.path().isSpringErrorSurface()) {
         call.respondError(
@@ -433,23 +436,17 @@ fun Application.xoboroModule(
       }
     }
     exception<CrossSiteRequestRejectedException> { call, cause ->
-      call.respond(
+      call.respondNativeError(
         status = HttpStatusCode.Forbidden,
-        message =
-          XoboroApiError(
-            code = CrossSiteRequestRejectedException.CODE,
-            message = requireNotNull(cause.message),
-        ),
+        code = CrossSiteRequestRejectedException.CODE,
+        message = requireNotNull(cause.message),
       )
     }
     exception<XoboroInvalidQueryException> { call, cause ->
-      call.respond(
+      call.respondNativeError(
         status = HttpStatusCode.BadRequest,
-        message =
-          XoboroApiError(
-            code = "invalid_query",
-            message = requireNotNull(cause.message),
-          ),
+        code = "invalid_query",
+        message = requireNotNull(cause.message),
       )
     }
     exception<Throwable> { call, cause ->
@@ -563,6 +560,17 @@ fun Application.xoboroModule(
               collections = seriesCollectionRepository,
               readLists = readListRepository,
               catalog = catalogReadRepository,
+            )
+          }
+          if (
+            readListRepository != null &&
+            catalogReadRepository != null &&
+            bookContentAccess != null
+          ) {
+            xoboroNativeArchiveRoutes(
+              catalog = catalogReadRepository,
+              readLists = readListRepository,
+              content = bookContentAccess,
             )
           }
           if (libraryAdministrationLifecycle != null && catalogReadRepository != null) {
