@@ -291,6 +291,18 @@ latency number measured during that is meaningless. A run that fails to drain
 prints a warning with the pending count by task type and is not comparable with
 one that drained.
 
+`scripts/container-acceptance.sh` checks that the packaged container image is a
+deployable release and not merely a process that starts. It runs the image under
+the confinement `compose.yaml` deploys with — read-only root filesystem, all
+Linux capabilities dropped, `no-new-privileges`, unprivileged user — then asks
+the image for a page and requires every asset that page references to be served,
+first at the root path and again under `XOBORO_CONTEXT_PATH`. The assets are read
+out of the served document rather than listed in the script, so a bundler that
+changes a content hash does not make the check stale. The container healthcheck
+cannot answer this: it asks `/ready`, which is a question about the server, while
+the web UI is a separate build stage copied into the image, so an image shipping
+no user interface still reports healthy.
+
 `scripts/cold-scan-repetitions.sh` repeats the cold-scan metrics in separate JVMs
 and prints a CSV of the spread. Cold metrics cannot be repeated in-process — the
 second iteration is JIT-warm and no longer measuring a cold start. Output is printed twice: stable `xoboro.perf.<metric>=<value>`

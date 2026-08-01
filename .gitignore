@@ -31,6 +31,19 @@ out/
 # is named `.omc`, so there is nothing for the loose match to catch by accident.
 .omc/
 
+# Kotlin compiler working state - session and error records, not source. `.dockerignore`
+# already excluded it, so the build context was clean while `git status` was not: the
+# directory only appears once a build runs, which is exactly when someone is most likely
+# to stage everything.
+.kotlin/
+
+# Browser-automation output: screenshots and console logs written while checking a running
+# instance. Unanchored for the same reason as `.omc/`. These are evidence for one investigation,
+# not project source, and they are exactly the kind of file that reaches a commit through
+# `git add -A` - a screenshot of a real library would carry titles and paths that must never be
+# committed.
+.playwright-mcp/
+
 # Web UI build output and installed packages. `web/build/` is not listed because
 # the `build/` rule above is unanchored and already covers it.
 #

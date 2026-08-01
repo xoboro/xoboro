@@ -57,30 +57,14 @@ jobs:
           cache-from: type=gha,scope=xoboro-container
           cache-to: type=gha,mode=max,scope=xoboro-container
 
-      - name: Start and verify image
-        run: |
-          docker run --detach --name xoboro-smoke \
-            --read-only \
-            --tmpfs /tmp:rw,exec,size=1g,mode=1777 \
-            --tmpfs /config:rw,size=256m,mode=0755,uid=10001,gid=10001 \
-            xoboro:smoke
-          for attempt in $(seq 1 60); do
-            status="$(docker inspect --format '{{.State.Health.Status}}' xoboro-smoke)"
-            if [ "$status" = "healthy" ]; then
-              exit 0
-            fi
-            if [ "$status" = "unhealthy" ]; then
-              docker logs xoboro-smoke
-              exit 1
-            fi
-            sleep 2
-          done
-          docker logs xoboro-smoke
-          exit 1
-
-      - name: Show logs after failure
-        if: failure()
-        run: docker logs xoboro-smoke || true
+      # Delegated to a script so this gate is runnable by hand, which matters while automatic
+      # triggers are paused: a check that only exists inside a workflow nobody runs is not a check.
+      # It replaces an inline `docker run` that waited for the healthcheck and stopped there. That
+      # proved the server starts and nothing about the release - the web UI is a separate build
+      # stage copied in, so an image shipping no user interface reported healthy - and it dropped no
+      # capabilities, so it passed under weaker confinement than any real deployment runs with.
+      - name: Verify the packaged image
+        run: scripts/container-acceptance.sh xoboro:smoke
 
   publish:
     name: Publish multi-architecture image
