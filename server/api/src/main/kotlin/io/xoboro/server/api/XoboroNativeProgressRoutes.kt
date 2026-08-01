@@ -44,7 +44,11 @@ fun Route.xoboroNativeProgressRoutes(
               modifiedAtMillis = request.modifiedAtMillis,
               deviceId = request.deviceId,
               deviceName = request.deviceName,
-              locatorJson = Json.encodeToString(JsonObject.serializer(), request.locator),
+              // Absent stays absent rather than becoming `{}`: an empty object would claim a
+              // locator was recorded and carried no fields, which is a different statement from
+              // this reader not having one.
+              locatorJson =
+                request.locator?.let { Json.encodeToString(JsonObject.serializer(), it) },
             )
           } catch (_: IllegalArgumentException) {
             call.respond(
