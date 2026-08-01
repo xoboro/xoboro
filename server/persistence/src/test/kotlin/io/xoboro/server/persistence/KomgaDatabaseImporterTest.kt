@@ -1,13 +1,28 @@
 package io.xoboro.server.persistence
 
+import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.catalogAccess
+import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.CollectionId
+import io.xoboro.core.domain.ReadListId
+import io.xoboro.core.domain.SeriesId
+import io.xoboro.core.domain.UserId
+import java.io.ByteArrayOutputStream
+import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.sql.Connection
 import java.sql.DriverManager
+import java.util.zip.GZIPOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class KomgaDatabaseImporterTest {
@@ -24,24 +39,49 @@ class KomgaDatabaseImporterTest {
 
       val inspected = importer.inspect(sourcePath)
       assertEquals(1, inspected.libraries)
-      assertEquals(1, inspected.books)
+      assertEquals(BOOK_IDS.size, inspected.books)
       assertEquals(0, target.int("SELECT count(*) FROM library"))
 
       val imported = importer.import(sourcePath)
       assertEquals(inspected, imported)
       assertEquals("Synthetic library", target.string("SELECT name FROM library"))
-      assertEquals("series/item.cbz", target.string("SELECT relative_uri FROM book"))
-      assertEquals("Synthetic chapter", target.string("SELECT title FROM book_metadata"))
-      assertEquals("Primary Creator", target.string("SELECT name FROM book_metadata_author"))
-      assertEquals(4, target.int("SELECT page FROM read_progress"))
-      assertEquals("collection-1", target.string("SELECT collection_id FROM series_collection_member"))
-      assertEquals("read-list-1", target.string("SELECT read_list_id FROM read_list_member"))
+      assertEquals(
+        "series/item.cbz",
+        target.string("SELECT relative_uri FROM book WHERE id = 'book-1'"),
+      )
+      assertEquals(
+        "Synthetic chapter",
+        target.string("SELECT title FROM book_metadata WHERE book_id = 'book-1'"),
+      )
+      assertEquals(
+        "Primary Creator",
+        target.string("SELECT name FROM book_metadata_author WHERE book_id = 'book-1'"),
+      )
+      assertEquals(
+        4,
+        target.int(
+          "SELECT page FROM read_progress WHERE book_id = 'book-1' AND user_id = 'user-1'",
+        ),
+      )
+      assertEquals(
+        SERIES_IDS.size,
+        target.int(
+          "SELECT count(*) FROM series_collection_member WHERE collection_id = 'collection-1'",
+        ),
+      )
+      assertEquals(
+        4,
+        target.int("SELECT count(*) FROM read_list_member WHERE read_list_id = 'read-list-1'"),
+      )
       assertEquals(1, target.int("SELECT count(*) FROM artwork_thumbnail"))
-      assertEquals(1, target.int("SELECT number FROM book_page"))
-      assertEquals(2, target.int("SELECT count(*) FROM catalog_search_fts"))
+      assertEquals(1, target.int("SELECT number FROM book_page WHERE book_id = 'book-1'"))
+      assertEquals(
+        BOOK_IDS.size + SERIES_IDS.size,
+        target.int("SELECT count(*) FROM catalog_search_fts"),
+      )
       assertEquals(
         "synthetic-password-hash",
-        target.string("SELECT password_hash FROM user_account"),
+        target.string("SELECT password_hash FROM user_account WHERE id = 'user-1'"),
       )
       val importedApiKey = target.string("SELECT key_hash FROM user_api_key")
       assertNotEquals("synthetic-api-key", importedApiKey)
@@ -51,12 +91,150 @@ class KomgaDatabaseImporterTest {
         importer.import(sourcePath)
       }
       importer.import(sourcePath, replaceExisting = true)
-      assertEquals(1, target.int("SELECT count(*) FROM book"))
-      assertEquals(1, target.int("SELECT count(*) FROM user_account"))
+      assertEquals(BOOK_IDS.size, target.int("SELECT count(*) FROM book"))
+      assertEquals(USER_IDS.size, target.int("SELECT count(*) FROM user_account"))
     }
 
     DriverManager.getConnection("jdbc:sqlite:$sourcePath").use { source ->
-      assertEquals(1, source.queryInt("SELECT count(*) FROM BOOK"))
+      assertEquals(BOOK_IDS.size, source.queryInt("SELECT count(*) FROM BOOK"))
+    }
+  }
+
+  /**
+   * Production acceptance for the four migrated properties whose defects are silent: content
+   * restrictions, read progress, collection order and read-list order.
+   *
+   * Every assertion reads through the path the running server reads through — [JooqUserRepository]
+   * projected onto a [io.xoboro.core.application.CatalogAccess] by
+   * [io.xoboro.core.application.catalogAccess], then [JooqCatalogReadRepository] — rather than
+   * comparing imported rows against the fixture rows. Comparing rows would prove only that a copy
+   * happened; it would not prove that a migrated user who was restricted from something is still
+   * unable to read it, which is the property that matters.
+   *
+   * The Komga database is deleted immediately after the import and before any assertion, so
+   * everything below is answered by the migrated database alone. That is the operational meaning
+   * of "never require runtime DB compatibility".
+   */
+  @Test
+  fun `migrated restrictions progress and manual order hold on the server read path`() {
+    val sourcePath = temporaryDirectory.resolve("acceptance-komga.sqlite")
+    createSource(sourcePath)
+    XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("acceptance.sqlite"))).use {
+        target ->
+      KomgaDatabaseImporter(target).import(sourcePath)
+      Files.delete(sourcePath)
+
+      val users = JooqUserRepository(target)
+      val catalog = JooqCatalogReadRepository(target)
+
+      fun access(userId: String) =
+        requireNotNull(users.findByIdOrNull(UserId(userId))) {
+          "Komga user $userId was not migrated"
+        }.catalogAccess()
+
+      fun readableSeries(userId: String): List<String> =
+        catalog
+          .findSeries(
+            query = SeriesCatalogQuery(),
+            access = access(userId),
+            page = CatalogPageRequest(size = 50),
+          ).content
+          .map { it.series.id.value }
+          .sorted()
+
+      // Restrictions. An unrestricted administrator reads all four series, so a denial below is
+      // a denial and not an empty catalog. Each restricted user has both a series it must not
+      // reach and a series it must still reach, and the four expectations differ from one
+      // another, so no single filter outcome satisfies them all.
+      assertEquals(SERIES_IDS.sorted(), readableSeries("user-1"))
+      assertEquals(
+        listOf("series-1", "series-open", "series-teen"),
+        readableSeries("user-age-exclude"),
+      )
+      // ALLOW_ONLY at exactly the restricted age admits it, and admits nothing unrated.
+      assertEquals(listOf("series-1", "series-teen"), readableSeries("user-age-allow"))
+      assertEquals(
+        listOf("series-1", "series-open", "series-teen"),
+        readableSeries("user-label-exclude"),
+      )
+      assertEquals(listOf("series-open"), readableSeries("user-label-allow"))
+
+      // The same restriction has to hold on the book a restricted series contains, because that
+      // is the request that would deliver the content itself.
+      assertNull(catalog.findBookByIdOrNull(BookId("book-restricted"), access("user-age-exclude")))
+      assertNull(catalog.findBookByIdOrNull(BookId("book-restricted"), access("user-label-exclude")))
+      assertNull(catalog.findBookByIdOrNull(BookId("book-restricted"), access("user-label-allow")))
+      assertNull(catalog.findBookByIdOrNull(BookId("book-open"), access("user-age-allow")))
+      assertNotNull(catalog.findBookByIdOrNull(BookId("book-restricted"), access("user-1")))
+      assertNotNull(catalog.findBookByIdOrNull(BookId("book-open"), access("user-label-allow")))
+      assertNotNull(catalog.findBookByIdOrNull(BookId("book-1"), access("user-label-exclude")))
+      assertNull(
+        catalog.findSeriesByIdOrNull(SeriesId("series-restricted"), access("user-label-exclude")),
+      )
+
+      // Progress. A migrated reader resumes where it stopped, at both boundaries: the first page
+      // of a book it has just opened, and the final page of a book it finished.
+      val readerAccess = access("user-1")
+      val opening =
+        requireNotNull(catalog.findBookByIdOrNull(BookId("book-first-position"), readerAccess))
+      val closing =
+        requireNotNull(catalog.findBookByIdOrNull(BookId("book-last-position"), readerAccess))
+      val openingProgress = requireNotNull(opening.readProgress)
+      val closingProgress = requireNotNull(closing.readProgress)
+      assertEquals(1, openingProgress.page)
+      assertFalse(openingProgress.completed)
+      assertEquals(requireNotNull(closing.media).pageCount, closingProgress.page)
+      assertTrue(closingProgress.completed)
+      assertEquals(OPENING_LOCATOR, openingProgress.locatorJson)
+      assertEquals(CLOSING_LOCATOR, closingProgress.locatorJson)
+      // Progress is per user, not per book: a second migrated user has none on the same books.
+      assertNull(
+        catalog
+          .findBookByIdOrNull(BookId("book-first-position"), access("user-age-exclude"))
+          ?.readProgress,
+      )
+      assertNull(
+        catalog
+          .findBookByIdOrNull(BookId("book-last-position"), access("user-age-exclude"))
+          ?.readProgress,
+      )
+
+      // Collections. The expected order agrees with no incidental order available to the query
+      // layer: not series id ascending or descending, not title ascending or descending, and not
+      // the order the fixture inserted the membership rows in, which is the reverse of it. The
+      // second collection holds two of the same series in the opposite relative order, so an
+      // import that lost the per-collection number cannot satisfy both.
+      val collections = JooqSeriesCollectionRepository(target)
+      val orderedCollection = requireNotNull(collections.findByIdOrNull(CollectionId("collection-1")))
+      assertEquals(
+        listOf("series-restricted", "series-teen", "series-1", "series-open"),
+        orderedCollection.seriesIds.map { it.value },
+      )
+      assertTrue(orderedCollection.ordered)
+      val unorderedCollection =
+        requireNotNull(collections.findByIdOrNull(CollectionId("collection-2")))
+      assertEquals(
+        listOf("series-1", "series-restricted"),
+        unorderedCollection.seriesIds.map { it.value },
+      )
+      assertFalse(unorderedCollection.ordered)
+
+      // Read lists, on the same argument. Book number_sort ascending is one more incidental order
+      // here, and the expected order disagrees with that too.
+      val readLists = JooqReadListRepository(target)
+      val orderedReadList = requireNotNull(readLists.findByIdOrNull(ReadListId("read-list-1")))
+      assertEquals(
+        listOf("book-last-position", "book-restricted", "book-1", "book-first-position"),
+        orderedReadList.bookIds.map { it.value },
+      )
+      assertTrue(orderedReadList.ordered)
+      assertEquals("Synthetic list summary", orderedReadList.summary)
+      val unorderedReadList = requireNotNull(readLists.findByIdOrNull(ReadListId("read-list-2")))
+      assertEquals(
+        listOf("book-1", "book-restricted"),
+        unorderedReadList.bookIds.map { it.value },
+      )
+      assertFalse(unorderedReadList.ordered)
     }
   }
 
@@ -120,12 +298,13 @@ class KomgaDatabaseImporterTest {
         """.trimIndent(),
       )
       connection.execute("INSERT INTO USER_ROLE VALUES ('user-1', 'ADMIN')")
+      connection.insertRestrictedUsers()
       connection.execute(
         """
         INSERT INTO SERIES VALUES (
           'series-1', '2026-07-27 10:00:00', '2026-07-27 10:02:00',
           '2026-07-27 09:00:00', 'Synthetic series',
-          'file:///synthetic/library/series', 'library-1', 1, NULL, 0
+          'file:///synthetic/library/series', 'library-1', 3, NULL, 0
         )
         """.trimIndent(),
       )
@@ -149,6 +328,7 @@ class KomgaDatabaseImporterTest {
       )
       connection.execute("INSERT INTO SERIES_METADATA_GENRE VALUES ('Synthetic genre', 'series-1')")
       connection.execute("INSERT INTO SERIES_METADATA_TAG VALUES ('Synthetic tag', 'series-1')")
+      connection.insertRestrictedCatalog()
       connection.execute(
         """
         INSERT INTO BOOK VALUES (
@@ -204,25 +384,8 @@ class KomgaDatabaseImporterTest {
         )
         """.trimIndent(),
       )
-      connection.execute(
-        """
-        INSERT INTO COLLECTION VALUES (
-          'collection-1', 'Synthetic collection', 1, 1,
-          '2026-07-27 10:00:00', '2026-07-27 10:00:00'
-        )
-        """.trimIndent(),
-      )
-      connection.execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-1', 'series-1', 0)")
-      connection.execute(
-        """
-        INSERT INTO READLIST VALUES (
-          'read-list-1', 'Synthetic reading order', 1,
-          '2026-07-27 10:00:00', '2026-07-27 10:00:00',
-          'Synthetic list summary', 1
-        )
-        """.trimIndent(),
-      )
-      connection.execute("INSERT INTO READLIST_BOOK VALUES ('read-list-1', 'book-1', 0)")
+      connection.insertBoundaryProgress()
+      connection.insertManualOrder()
       connection.prepareStatement(
         """
         INSERT INTO THUMBNAIL_BOOK VALUES (
@@ -244,6 +407,222 @@ class KomgaDatabaseImporterTest {
         """.trimIndent(),
       )
     }
+  }
+
+  /**
+   * Four readers, one per restriction shape Komga can store. The sharing labels are mixed case
+   * because Komga stores the label an administrator typed, on both the user and the series.
+   */
+  private fun Connection.insertRestrictedUsers() {
+    insertUser("user-age-exclude", ageRestriction = "16", allowOnly = "0")
+    insertUser("user-age-allow", ageRestriction = "12", allowOnly = "1")
+    insertUser("user-label-exclude")
+    insertUser("user-label-allow")
+    execute("INSERT INTO USER_SHARING VALUES ('RestrictedLabel', 0, 'user-label-exclude')")
+    // The same label again in another case, granted rather than denied. Komga keys these rows
+    // case-sensitively so it can hold both; the migrated user must keep the denial. Were the
+    // grant to win instead, this reader would see the restricted series and nothing else.
+    execute("INSERT INTO USER_SHARING VALUES ('restrictedlabel', 1, 'user-label-exclude')")
+    execute("INSERT INTO USER_SHARING VALUES ('OpenLabel', 1, 'user-label-allow')")
+  }
+
+  private fun Connection.insertUser(
+    id: String,
+    ageRestriction: String = "NULL",
+    allowOnly: String = "NULL",
+  ) {
+    execute(
+      """
+      INSERT INTO "USER" VALUES (
+        '$id', '2026-07-27 10:00:00', '2026-07-27 10:00:00',
+        '$id@example.invalid', 'synthetic-password-hash', 1, $ageRestriction, $allowOnly
+      )
+      """.trimIndent(),
+    )
+    execute("INSERT INTO USER_ROLE VALUES ('$id', 'PAGE_STREAMING')")
+  }
+
+  /**
+   * Three more series spanning what the restriction filters have to distinguish: rated above the
+   * restricted age, rated at exactly the restricted age, and unrated. Each carries one book, so a
+   * denial can be observed on the series and on the content it holds.
+   */
+  private fun Connection.insertRestrictedCatalog() {
+    insertSeries("series-restricted", "Synthetic restricted series")
+    insertSeriesMetadata("series-restricted", "Synthetic restricted series", ageRating = "18")
+    execute("INSERT INTO SERIES_METADATA_SHARING VALUES ('RestrictedLabel', 'series-restricted')")
+    insertSeries("series-teen", "Synthetic teen series")
+    insertSeriesMetadata("series-teen", "Synthetic teen series", ageRating = "12")
+    insertSeries("series-open", "Synthetic open series")
+    insertSeriesMetadata("series-open", "Synthetic open series", ageRating = "NULL")
+    execute("INSERT INTO SERIES_METADATA_SHARING VALUES ('OpenLabel', 'series-open')")
+
+    insertBook("book-restricted", "series-restricted", "Synthetic restricted item", 4.0, 3)
+    insertBook("book-teen", "series-teen", "Synthetic teen item", 1.0, 3)
+    insertBook("book-open", "series-open", "Synthetic open item", 1.0, 3)
+  }
+
+  /**
+   * Progress at both ends of a book: page 1 of a five-page book that was only opened, and page 7
+   * of a seven-page book that was finished. The locators differ so that one value cannot answer
+   * for both, and are stored gzipped, which is how Komga writes the column.
+   */
+  private fun Connection.insertBoundaryProgress() {
+    insertBook("book-first-position", "series-1", "Synthetic opening item", 2.0, 5)
+    insertBook("book-last-position", "series-1", "Synthetic closing item", 3.0, 7)
+    insertProgress("book-first-position", page = 1, completed = 0, locator = OPENING_LOCATOR)
+    insertProgress("book-last-position", page = 7, completed = 1, locator = CLOSING_LOCATOR)
+  }
+
+  private fun Connection.insertProgress(
+    bookId: String,
+    page: Int,
+    completed: Int,
+    locator: String,
+  ) {
+    prepareStatement(
+      """
+      INSERT INTO READ_PROGRESS VALUES (
+        '$bookId', 'user-1', '2026-07-27 10:00:00', '2026-07-27 10:05:00',
+        $page, $completed, '2026-07-27 10:05:00', 'device-1', 'Synthetic device', ?
+      )
+      """.trimIndent(),
+    ).use { statement ->
+      statement.setBytes(1, gzip(locator))
+      statement.executeUpdate()
+    }
+  }
+
+  /**
+   * Manual order for one collection and one read list, plus a second of each holding two of the
+   * same members in the opposite relative order. The membership rows are inserted in an order
+   * that is not the stored order, so rowid cannot stand in for NUMBER.
+   */
+  private fun Connection.insertManualOrder() {
+    execute(
+      """
+      INSERT INTO COLLECTION VALUES (
+        'collection-1', 'Synthetic collection', 1, 4,
+        '2026-07-27 10:00:00', '2026-07-27 10:00:00'
+      )
+      """.trimIndent(),
+    )
+    execute(
+      """
+      INSERT INTO COLLECTION VALUES (
+        'collection-2', 'Synthetic alternate collection', 0, 2,
+        '2026-07-27 10:00:00', '2026-07-27 10:00:00'
+      )
+      """.trimIndent(),
+    )
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-1', 'series-open', 3)")
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-1', 'series-1', 2)")
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-1', 'series-teen', 1)")
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-1', 'series-restricted', 0)")
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-2', 'series-1', 0)")
+    execute("INSERT INTO COLLECTION_SERIES VALUES ('collection-2', 'series-restricted', 1)")
+
+    execute(
+      """
+      INSERT INTO READLIST VALUES (
+        'read-list-1', 'Synthetic reading order', 4,
+        '2026-07-27 10:00:00', '2026-07-27 10:00:00',
+        'Synthetic list summary', 1
+      )
+      """.trimIndent(),
+    )
+    execute(
+      """
+      INSERT INTO READLIST VALUES (
+        'read-list-2', 'Synthetic alternate reading order', 2,
+        '2026-07-27 10:00:00', '2026-07-27 10:00:00',
+        'Synthetic alternate list summary', 0
+      )
+      """.trimIndent(),
+    )
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-1', 'book-1', 2)")
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-1', 'book-first-position', 3)")
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-1', 'book-last-position', 0)")
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-1', 'book-restricted', 1)")
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-2', 'book-1', 0)")
+    execute("INSERT INTO READLIST_BOOK VALUES ('read-list-2', 'book-restricted', 1)")
+  }
+
+  private fun Connection.insertSeries(
+    id: String,
+    name: String,
+  ) {
+    execute(
+      """
+      INSERT INTO SERIES VALUES (
+        '$id', '2026-07-27 10:00:00', '2026-07-27 10:02:00',
+        '2026-07-27 09:00:00', '$name',
+        'file:///synthetic/library/$id', 'library-1', 1, NULL, 0
+      )
+      """.trimIndent(),
+    )
+  }
+
+  private fun Connection.insertSeriesMetadata(
+    seriesId: String,
+    title: String,
+    ageRating: String,
+  ) {
+    execute(
+      """
+      INSERT INTO SERIES_METADATA (
+        CREATED_DATE, LAST_MODIFIED_DATE, STATUS, STATUS_LOCK,
+        TITLE, TITLE_LOCK, TITLE_SORT, TITLE_SORT_LOCK,
+        SUMMARY, SUMMARY_LOCK, READING_DIRECTION, READING_DIRECTION_LOCK,
+        PUBLISHER, PUBLISHER_LOCK, AGE_RATING, AGE_RATING_LOCK,
+        LANGUAGE, LANGUAGE_LOCK, GENRES_LOCK, TAGS_LOCK,
+        TOTAL_BOOK_COUNT, TOTAL_BOOK_COUNT_LOCK, SHARING_LABELS_LOCK,
+        LINKS_LOCK, ALTERNATE_TITLES_LOCK, SERIES_ID
+      ) VALUES (
+        '2026-07-27 10:00:00', '2026-07-27 10:02:00',
+        'ONGOING', 0, '$title', 0, '$title', 0,
+        'Synthetic summary', 0, 'LEFT_TO_RIGHT', 0, 'Synthetic publisher', 0,
+        $ageRating, 0, 'en', 0, 0, 0, 1, 0, 0, 0, 0, '$seriesId'
+      )
+      """.trimIndent(),
+    )
+  }
+
+  private fun Connection.insertBook(
+    id: String,
+    seriesId: String,
+    name: String,
+    numberSort: Double,
+    pageCount: Int,
+  ) {
+    execute(
+      """
+      INSERT INTO BOOK VALUES (
+        '$id', '2026-07-27 10:00:00', '2026-07-27 10:03:00',
+        '2026-07-27 09:30:00', '$name',
+        'file:///synthetic/library/$seriesId/$id.cbz', '$seriesId', 2048,
+        ${numberSort.toInt()}, 'library-1', '$id-hash', NULL, 0, '$id-koreader-hash'
+      )
+      """.trimIndent(),
+    )
+    execute(
+      """
+      INSERT INTO BOOK_METADATA VALUES (
+        '2026-07-27 10:00:00', '2026-07-27 10:03:00',
+        '${numberSort.toInt()}', 0, $numberSort, 0, '2026-07-27', 0,
+        'Synthetic book summary', 0, '$name', 0,
+        0, 0, '$id', '', 0, 0
+      )
+      """.trimIndent(),
+    )
+    execute(
+      """
+      INSERT INTO MEDIA VALUES (
+        'application/zip', 'READY', '2026-07-27 10:00:00',
+        '2026-07-27 10:03:00', NULL, '$id', $pageCount, 0, 0
+      )
+      """.trimIndent(),
+    )
   }
 
   private fun Connection.execute(sql: String) {
@@ -270,7 +649,38 @@ class KomgaDatabaseImporterTest {
       .digest(value.encodeToByteArray())
       .joinToString("") { "%02x".format(it) }
 
+  private fun gzip(value: String): ByteArray =
+    ByteArrayOutputStream().use { buffer ->
+      GZIPOutputStream(buffer).use { it.write(value.encodeToByteArray()) }
+      buffer.toByteArray()
+    }
+
   private companion object {
+    val SERIES_IDS = listOf("series-1", "series-open", "series-restricted", "series-teen")
+    val BOOK_IDS =
+      listOf(
+        "book-1",
+        "book-first-position",
+        "book-last-position",
+        "book-open",
+        "book-restricted",
+        "book-teen",
+      )
+    val USER_IDS =
+      listOf(
+        "user-1",
+        "user-age-allow",
+        "user-age-exclude",
+        "user-label-allow",
+        "user-label-exclude",
+      )
+    const val OPENING_LOCATOR =
+      """{"href":"/synthetic/opening.xhtml","type":"application/xhtml+xml",""" +
+        """"locations":{"position":1,"totalProgression":0.0}}"""
+    const val CLOSING_LOCATOR =
+      """{"href":"/synthetic/closing.xhtml","type":"application/xhtml+xml",""" +
+        """"locations":{"position":7,"totalProgression":0.857}}"""
+
     val SCHEMA =
       listOf(
         """CREATE TABLE flyway_schema_history(installed_rank INTEGER, version TEXT, success INTEGER)""",
