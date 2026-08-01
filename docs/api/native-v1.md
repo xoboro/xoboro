@@ -5,7 +5,7 @@ is rooted at `/api/xoboro/v1`, uses JSON request and response bodies, and does
 not reproduce Komga DTOs or endpoint shapes.
 
 This document covers authentication, catalog discovery, page and resource
-discovery, page and resource delivery, original file download, and read progress
+discovery, page and resource delivery, original file and archive download, and read progress
 mutation, settings, authentication activity, history, and the native event
 stream. OpenAPI contracts remain pending.
 
@@ -355,28 +355,21 @@ KEPUB. `href` matches a resource-manifest `path` and is what the resource route
 is asked for verbatim. These are the fields a client copies into the `locator` the
 read-progress endpoint accepts.
 
-`totalProgression` is computed as `position / count`, which makes it the progress at
-the **end** of that position rather than at its start: the first of two positions
-reports `0.5` and the last reports `1.0`. A Readium locator's `totalProgression` is
-`0` at the start of a publication, so this value is one position ahead of that
-convention. Treat it as "how far through the publication this position ends".
+`totalProgression` is computed as `(position - 1) / count`, which is where a Readium
+locator's `totalProgression` sits: the **start** of that position. The first position of
+any publication reports `0` and the last of `n` reports `(n - 1) / n`. No position
+reports `1`, because `1` is the end of the publication rather than a place a reader can
+be — recognise the last position by `position == count`, not by `totalProgression == 1`.
 
-It is documented rather than corrected because KOReader turns it back into a stored
-page: `KoreaderSyncRoutes` computes `round(pageCount * totalProgression)` and persists
-the result as read progress. That inversion is written against the current convention, so
-correcting the analyzer means correcting `pageFor` in the same change: under Readium's
-`(position - 1) / count` the last position maps to `round(pageCount * (n - 1) / n)`, which
-is no longer `pageCount` by construction, and stored KOReader pages shift by up to about
-one. Whether a reader is actually kept off the final page depends on how `pageCount`
-compares to `positions.size` — page count is derived from compressed archive size while
-positions are chunked on uncompressed size, so the two differ and the expression
-frequently rounds back up to `pageCount`. Kobo's `ProgressPercent` is the second consumer
-and is affected too, but only as a displayed number.
-`docs/architecture/0105-total-progression-convention.md` records the
-whole account, including an earlier claim in this document — that the pair is "what a
-Readium locator carries" — which was the opposite of true, and a migration argument
-that was withdrawn: the value is a pure function of two stored fields and can be
-recomputed without one.
+This was `position / count` up to and including ADR 0105, one position ahead of the
+Readium convention; ADR 0106 corrected it, and
+`docs/architecture/0106-readium-total-progression.md` records what moved. A client that
+hard-coded the old numbers sees every position shift back by `1 / count`. Two consumers
+are worth knowing about: Kobo's `ProgressPercent` is this value times 100, so a device
+opening the first chapter is now told 0% rather than one position's worth; and the
+KOReader page mapping no longer reads this field at all — it derives the stored page from
+`position` directly, so the locator convention and durable read progress are now
+independent.
 
 The list is returned in stored order without sorting, because `BookMedia` requires
 positions to be exactly `1..n` in sequence — a sort could not reorder anything and
@@ -455,6 +448,56 @@ missing. `ERR_1006` means no pages were found and `ERR_1007` lists entries that
 failed detection. See ADR 0089.
 
 Invalid page numbers, formats, and dimensions return `400 invalid_query`.
+
+## Archive downloads
+
+`GET /api/xoboro/v1/series/{seriesId}/file` and
+`GET /api/xoboro/v1/read-lists/{readListId}/file` return the original files of a
+whole series or read list as one zip archive. Both require `FILE_DOWNLOAD`, the
+same permission a single media item's `/file` requires: an archive is those files,
+so a client that may not have one may not have a container of them either. The
+role is checked before any catalog read, so a caller without it learns nothing
+about which identifiers exist.
+
+Members are filtered by the caller's library grants and content restrictions, per
+media item rather than once for the source. A read list spans series and
+libraries, so a caller who may see the list can be barred from some of its
+members; those are absent from the archive and their files are never opened.
+Deleted items, and items whose file cannot be opened, are omitted too.
+
+Series members are ordered by `numberSort`. Read-list members keep the list's own
+order and each entry name is prefixed with `<position> - `, where the position is
+the member's one-based place in the **read list** rather than in the filtered
+result — so a hidden member leaves a gap in the numbering instead of renumbering
+the rest, and an extracted directory sorts into reading order.
+
+Entry names are the leaf file name only; directory structure is not reproduced,
+and a name that collides with one already written gets a ` (2)` suffix so a
+duplicate does not silently overwrite a volume. `Content-Disposition: attachment`
+names the archive after the series title or read-list name with `.zip` appended,
+in both the ASCII `filename=` and RFC 5987 `filename*=` forms, with path and
+control characters replaced by `_`. Entries are stored rather than deflated,
+because comic archives, EPUBs and PDFs are already compressed.
+
+The archive is assembled while it is written, one member open at a time, so a
+multi-gigabyte series streams in the same memory as a single item. Its length is
+therefore unknown when the headers go out: these responses carry **no**
+`Content-Length`, no `ETag` and no `Accept-Ranges`, and do not support ranges or
+conditional requests. A client that needs to resume downloads the members
+individually through `/media-items/{mediaItemId}/file`, which does support both.
+
+Archive failures use these native error codes:
+
+- `403 file_download_forbidden` when the user lacks original-file download
+  permission.
+- `404 series_not_found` for a missing or unauthorized series.
+- `404 read_list_not_found` for a missing read list, and for one whose members
+  are all invisible to the caller — a read list is visible through its members,
+  so the two cases are deliberately indistinguishable.
+
+A series that is visible but has no readable members answers `200` with an empty
+archive rather than `404`, because `GET /api/xoboro/v1/series/{seriesId}` answers
+that same identifier.
 
 ## Read progress
 

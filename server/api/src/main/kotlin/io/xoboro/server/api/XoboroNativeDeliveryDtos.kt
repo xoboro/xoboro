@@ -33,20 +33,16 @@ data class XoboroResourceResponse(
  * read-progress endpoint's locator. [koboSpan] is present only for a KEPUB and is what
  * Kobo devices anchor to.
  *
- * [totalProgression] is `position / count`, so it is the progress at the **end** of this
- * position: the first of two positions reports `0.5`, not `0`. A Readium locator starts a
- * publication at `0`, so this is one position ahead of that convention.
+ * [totalProgression] is `(position - 1) / count`, where a Readium locator's `totalProgression`
+ * sits: the **start** of this position. The first position of any publication reports `0`, and
+ * the last of `n` reports `(n - 1) / n`. No position reports `1`, because `1` is the end of the
+ * publication rather than a place a reader can be — use `position == count` to recognise the last
+ * position, not `totalProgression == 1`.
  *
- * Documented rather than corrected because `KoreaderSyncRoutes` inverts it —
- * `round(pageCount * totalProgression)` becomes persisted read progress — so correcting this
- * formula means correcting that mapping in the same change. Under Readium's
- * `(position - 1) / count` the last position maps to `round(pageCount * (n - 1) / n)`, which is
- * no longer `pageCount` by construction, and stored KOReader pages shift by up to about one.
- * Whether the final page actually becomes unreachable depends on how `pageCount` compares to
- * `positions.size`: page count is derived from compressed archive size while positions are
- * chunked on uncompressed size, so the two differ and the expression frequently rounds back up
- * to `pageCount`. Kobo's `ProgressPercent` is affected too, as a displayed number.
- * `docs/architecture/0105-total-progression-convention.md` has the full account.
+ * This was `position / count` until ADR 0106 corrected it, so a client that hard-coded the old
+ * values sees each position move back by `1 / count`.
+ * `docs/architecture/0106-readium-total-progression.md` has the account, including why the
+ * KOReader page mapping no longer reads this field at all.
  */
 @Serializable
 data class XoboroMediaPositionResponse(

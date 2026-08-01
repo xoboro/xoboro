@@ -23,7 +23,6 @@ import io.xoboro.core.domain.MediaProfile
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRole
-import kotlin.math.roundToInt
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -199,12 +198,26 @@ private data class MappedKoreaderLocator(
   val locator: R2LocatorDto,
 )
 
+/**
+ * The percentage KOReader is told, in `0..1`.
+ *
+ * Prefers the stored locator, and falls back to the page for progress written by a client that
+ * keeps no locator — the Komga REST `read-progress` patch, which records only a page. The
+ * fallback is `(page - 1) / pageCount`, the *start* of that page, because it has to agree with
+ * the locator branch above it: both answer the same field, and one field carrying two
+ * conventions is the failure this whole change exists to remove. Page 1 of anything is therefore
+ * 0, not `1 / pageCount`.
+ */
 private fun ReadProgress.totalProgression(media: BookMedia): Float =
   locatorJson
     ?.let { runCatching { KOREADER_JSON.decodeFromString<R2LocatorDto>(it) }.getOrNull() }
     ?.locations
     ?.totalProgression
-    ?: if (media.pageCount == 0) 0F else page.toFloat() / media.pageCount.toFloat()
+    ?: if (media.pageCount == 0) {
+      0F
+    } else {
+      ((page - 1).toFloat() / media.pageCount.toFloat()).coerceIn(0F, 1F)
+    }
 
 private fun ReadProgress.toKoreaderPosition(media: BookMedia): String =
   when (media.profile) {
@@ -268,8 +281,29 @@ private fun KoreaderDocumentProgressDto.toLocator(media: BookMedia): MappedKorea
 private fun BookMedia.resourceHrefs(): List<String> =
   positions.map(MediaPosition::href).distinct()
 
-private fun BookMedia.pageFor(position: MediaPosition): Int =
-  (pageCount * position.totalProgression).roundToInt().coerceIn(1, pageCount.coerceAtLeast(1))
+/**
+ * The one-based page a KOReader client stores for [position].
+ *
+ * Positions divide the publication into [positions]`.size` equal slots, so position `k` begins
+ * inside page slot `floor((k - 1) * pageCount / n)`, one-based. Position 1 therefore always maps
+ * to page 1, and the last position maps to [pageCount] whenever `pageCount <= n` — which holds
+ * for every reflowable EPUB, because page count sums `ceil(compressedSize / POSITION_BYTES)`
+ * while positions chunk on uncompressed size.
+ *
+ * This reads [MediaPosition.position] rather than inverting [MediaPosition.totalProgression],
+ * which is what the previous version did. Two reasons, and the second is the one that matters:
+ * the position index is the stored source of truth while `totalProgression` is derived from it,
+ * and inverting the derived `Float` is not reliable at the last position. `(n - 1) / n` is not
+ * representable in `Float` for most `n`, so `pageCount * (n - 1) / n` lands just above or just
+ * below the integer depending on `n`, and `floor` of the low case silently costs a reader the
+ * final page. Integer arithmetic on the index cannot do that. It also decouples the two: the
+ * locator convention can change again without moving anybody's stored page.
+ */
+private fun BookMedia.pageFor(position: MediaPosition): Int {
+  val pages = pageCount.coerceAtLeast(1)
+  val slots = positions.size.coerceAtLeast(1)
+  return (((position.position - 1).toLong() * pages / slots).toInt() + 1).coerceIn(1, pages)
+}
 
 private class KoreaderMediaItemNotFoundException : IllegalStateException()
 
