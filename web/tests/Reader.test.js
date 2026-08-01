@@ -18,7 +18,11 @@ const ITEM = {
   id: 'm1',
   title: 'Synthetic Chapter',
   seriesId: 's1',
-  media: { pagesCount: 3, status: 'READY' },
+  // `pageCount` is the field the native API sends. This fixture said `pagesCount`, matching a
+  // misspelling in the component, so the two agreed with each other and neither agreed with the
+  // server - and the component's `?? pages.length` fallback made the mistake invisible because the
+  // fallback happened to be the same number.
+  media: { pageCount: 3, status: 'READY' },
   readProgress: null,
 }
 
@@ -43,7 +47,13 @@ function standardRoutes(extra = []) {
     ['/media-items/m1/pages', reply(PAGES)],
     ['/media-items/m1/previous', reply({ code: 'media_item_not_found' }, 404)],
     ['/media-items/m1/next', reply({ id: 'm2' })],
-    ['/media-items/m1/progress', reply(null, 204)],
+    // `200` with the stored progress, which is what the server answers. This fake replied `204`,
+    // copied from an OpenAPI description that was wrong about it; a fake that agrees with the
+    // description rather than the server is not a test of the client's contract.
+    [
+      '/media-items/m1/progress',
+      reply({ page: 1, completed: false, readAtMillis: 1, updatedAtMillis: 1 }),
+    ],
     ['/media-items/m1', reply(ITEM)],
   ])
 }
@@ -71,6 +81,27 @@ describe('Reader', () => {
     const position = await screen.findByTestId('position')
     expect(position).toHaveAttribute('aria-live', 'polite')
     expect(position.textContent).toContain('3')
+  })
+
+  it('takes the total from the analyzed count, not from how many pages were delivered', async () => {
+    // The discriminating case for the field name. Every other test here has as many delivered
+    // pages as the item claims, so `media.pageCount` and `pages.length` are the same number and a
+    // misspelled read of the first silently falls through to the second and still looks right.
+    // Here they disagree: the item was analyzed as five pages and delivery returned three.
+    //
+    // Five is the honest total — it is how long the item is — and it is also what the loader
+    // prioritises against. Three would be reporting a delivery outcome as the item's length.
+    globalThis.fetch = routes([
+      ['/media-items/m1/pages', reply(PAGES)],
+      ['/media-items/m1/previous', reply({ code: 'media_item_not_found' }, 404)],
+      ['/media-items/m1/next', reply({ id: 'm2' })],
+      ['/media-items/m1', reply({ ...ITEM, media: { ...ITEM.media, pageCount: 5 } })],
+    ])
+    render(Reader, { params: { id: 'm1' } })
+
+    const position = await screen.findByTestId('position')
+    expect(position.textContent).toContain('5')
+    expect(position.textContent).not.toContain('3')
   })
 
   it('marks page images as decorative', async () => {

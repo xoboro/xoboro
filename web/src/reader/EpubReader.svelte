@@ -383,6 +383,24 @@
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
+    /*
+     * Room for `.chrome-toggle`, which is fixed in this same corner and always rendered so the
+     * chrome keeps a keyboard path. It outranks this bar on `z-index`, so without this padding it
+     * sits on top of the settings button at the bar's right edge: both are painted, both look
+     * clickable, and every click lands on the toggle.
+     *
+     * The identical defect existed in `Reader.svelte` and was found there first by measuring
+     * reachability in a real browser. It is here too because the two readers each carry their own
+     * copy of this chrome CSS — which is the reason a fix to one silently leaves the other broken,
+     * and worth remembering the next time either bar changes.
+     *
+     * Not covered by the suite, and cannot be: this is hit-testing over real layout, which jsdom
+     * does not have. See the "Checking the web UI against a real server" section of
+     * `docs/testing.md`.
+     */
+    padding-right: calc(
+      var(--touch-target) + max(var(--space-2), var(--inset-right)) + var(--space-2)
+    );
     border-bottom: 1px solid var(--line-subtle);
   }
   .bottombar {

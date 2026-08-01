@@ -57,6 +57,20 @@
     overflow-x: auto;
     list-style: none;
     scroll-snap-type: x proximity;
+    /*
+     * Snapping has to be told about the gutter, or it eats it. `scroll-snap-align: start`
+     * below aligns a card's start edge with the *scrollport's* start edge, which is inside
+     * the padding — so a shelf that snapped came to rest at `scrollLeft: 16` with its first
+     * card flush against the window edge and visibly clipped, while the heading above it
+     * kept its gutter. `proximity` made it intermittent: on a real library two shelves
+     * rested at 0 and a third at 16, so it looked like a rendering glitch rather than a rule.
+     *
+     * Not covered by the suite, and cannot be: jsdom has no layout, so `scrollLeft` is
+     * always 0 there and any assertion about this would pass with the bug present. It was
+     * found and is verified by measuring `scrollLeft` in a real browser — see the
+     * "Checking the web UI against a real server" section of `docs/testing.md`.
+     */
+    scroll-padding-inline: var(--gutter-left) var(--gutter-right);
   }
   li {
     flex: 0 0 auto;
