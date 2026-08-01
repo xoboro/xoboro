@@ -304,17 +304,28 @@ class KomgaDatabaseImporter(
         row.string("LIBRARY_ID"),
       )
     }
+    // Normalisation collapses labels that differed only in case, so a user who carried both a
+    // grant and a denial for one label now hits the conflict clause. min() keeps the denial
+    // whichever row arrives first; resolving it by row order instead would have handed such a
+    // user the grant, because Komga's raw labels sort by case before they sort by ALLOW.
     source.each(
-      "SELECT USER_ID, LABEL, ALLOW FROM USER_SHARING ORDER BY USER_ID, LABEL, ALLOW",
+      """
+      SELECT USER_ID, LABEL, ALLOW
+      FROM USER_SHARING
+      ORDER BY USER_ID, lower(trim(LABEL)), ALLOW
+      """.trimIndent(),
     ) { row ->
+      val label = normalizedSharingLabel(row.string("LABEL"))
+      if (label.isEmpty()) return@each
       execute(
         """
         INSERT INTO user_sharing_label (user_id, label, allow)
         VALUES (?, ?, ?)
-        ON CONFLICT (user_id, label) DO UPDATE SET allow = excluded.allow
+        ON CONFLICT (user_id, label) DO UPDATE
+          SET allow = min(user_sharing_label.allow, excluded.allow)
         """.trimIndent(),
         row.string("USER_ID"),
-        row.string("LABEL"),
+        label,
         row.booleanInt("ALLOW"),
       )
     }
@@ -465,13 +476,19 @@ class KomgaDatabaseImporter(
       "SERIES_ID",
       "TAG",
     )
-    copyTextRelation(
-      source,
-      "SELECT SERIES_ID, LABEL FROM SERIES_METADATA_SHARING",
-      "INSERT INTO series_metadata_sharing_label (series_id, sharing_label) VALUES (?, ?)",
-      "SERIES_ID",
-      "LABEL",
-    )
+    source.each("SELECT SERIES_ID, LABEL FROM SERIES_METADATA_SHARING") { row ->
+      val label = normalizedSharingLabel(row.string("LABEL"))
+      if (label.isEmpty()) return@each
+      execute(
+        """
+        INSERT INTO series_metadata_sharing_label (series_id, sharing_label)
+        VALUES (?, ?)
+        ON CONFLICT (series_id, sharing_label) DO NOTHING
+        """.trimIndent(),
+        row.string("SERIES_ID"),
+        label,
+      )
+    }
     source.each(
       """
       SELECT SERIES_ID, LABEL, URL,
@@ -1317,6 +1334,17 @@ private fun normalizeMediaStatus(status: String): String =
   status.uppercase(Locale.ROOT).takeIf {
     it in setOf("UNKNOWN", "ERROR", "READY", "UNSUPPORTED", "OUTDATED")
   } ?: "UNKNOWN"
+
+/**
+ * Lower-cases a sharing label to the form the restriction filter compares against.
+ *
+ * A user's labels are lower-cased when they are read back, and the series column carries no NOCASE
+ * collation, so the stored side has to be lower-cased on the way in. This is the same invariant
+ * [JooqSeriesMetadataRepository] maintains for labels the server writes itself. Copying Komga's
+ * labels verbatim let a user who had been denied "RestrictedLabel" read a series carrying that
+ * label, because the denial read back as "restrictedlabel" and matched nothing.
+ */
+private fun normalizedSharingLabel(label: String): String = label.trim().lowercase(Locale.ROOT)
 
 private fun sha512(value: String): String =
   MessageDigest
