@@ -32,6 +32,15 @@ import org.junit.jupiter.api.io.TempDir
  *   would otherwise keep passing.
  * - Ktor renders a tailcard as `{...}` and folds authentication and rate-limit scopes into the
  *   rendered path. Both are normalised away, since neither is part of the URL a client calls.
+ *
+ * What this test does **not** check, stated because the gap has already cost something: it compares
+ * `(method, path)` pairs and nothing else. A documented operation can carry no request body, the
+ * wrong request body, or a success status the server never returns, and this test passes. Both
+ * happened on `PUT /media-items/{mediaItemId}/progress`, which documented no request body at all
+ * and declared `204` while the server answered `200` with one - and behind that undocumented body,
+ * a required `locator` field made every write from the comic reader fail. The behavioural contract
+ * is pinned by the route's own tests instead; treat a green result here as "the route exists and is
+ * named", not as "the description describes it".
  */
 class XoboroNativeOpenApiContractTest {
   @TempDir

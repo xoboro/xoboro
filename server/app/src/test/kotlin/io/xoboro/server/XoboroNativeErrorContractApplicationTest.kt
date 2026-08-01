@@ -11,6 +11,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -30,6 +31,9 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.io.TempDir
 
 /**
@@ -105,6 +109,49 @@ class XoboroNativeErrorContractApplicationTest {
   }
 
   @Test
+  fun `an error reaches a client that asks only for an event stream`() {
+    val databasePath = tempDirectory.resolve("error-contract-event-stream.sqlite")
+    val runtime = openRuntime(databasePath)
+
+    testApplication {
+      application { xoboroModule(runtime) }
+
+      // Deliberately NOT `jsonClient()`. Its ContentNegotiation plugin appends
+      // `Accept: application/json` to every request, so asking for `text/event-stream` through it
+      // sends *both* and negotiation succeeds - the first version of this test passed against the
+      // defect for exactly that reason. A browser's `EventSource` sends the one header and nothing
+      // else, so only a client without that plugin can pose the question.
+      val raw = createClient { }
+
+      // The error body is JSON, so content negotiation had nothing acceptable to write and answered
+      // `406 Not Acceptable`, discarding the `401` the caller needed. For the event stream that is
+      // not cosmetic: `EventSource` reconnects on its own forever, so a session that expired
+      // mid-reading left the UI silently disconnected with no way to learn it had to sign in again.
+      // The description has always declared `401` here.
+      //
+      // An error is not the negotiated resource. It is written with an explicit content type
+      // instead, so the status reaches the caller even when the body is a type they said they did
+      // not want.
+      val stream =
+        raw.get("$XOBORO_API_PREFIX/events") {
+          header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
+        }
+      assertEquals(HttpStatusCode.Unauthorized, stream.status)
+      assertEquals("authentication_required", stream.bodyAsText().errorCode())
+
+      // Not special-cased for `/events`: any route can be asked by any client, and a `406` in place
+      // of the real status is useless everywhere. Asserted on a second route so a fix that only
+      // patched the event stream would fail here.
+      val series =
+        raw.get("$XOBORO_API_PREFIX/series") {
+          header(HttpHeaders.Accept, ContentType.Text.EventStream.toString())
+        }
+      assertEquals(HttpStatusCode.Unauthorized, series.status)
+      assertEquals("authentication_required", series.bodyAsText().errorCode())
+    }
+  }
+
+  @Test
   fun `cross-site cookie mutation is rejected with a specific code through the production boundary`() {
     val databasePath = tempDirectory.resolve("error-contract-csrf.sqlite")
     val runtime = openRuntime(databasePath)
@@ -142,6 +189,15 @@ class XoboroNativeErrorContractApplicationTest {
       assertEquals("cross_site_request_rejected", rejected.body<XoboroApiError>().code)
     }
   }
+
+  /**
+   * The `code` of a native error body, parsed rather than searched for.
+   *
+   * `contains("authentication_required")` would also be satisfied by the word appearing in a
+   * message, or by a body that is not an error object at all, so the field is read as a field.
+   */
+  private fun String.errorCode(): String =
+    Json.parseToJsonElement(this).jsonObject.getValue("code").jsonPrimitive.content
 
   private fun openRuntime(databasePath: Path): XoboroRuntime =
     XoboroRuntime.open(
