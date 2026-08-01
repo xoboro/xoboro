@@ -82,7 +82,12 @@
   const isScroll = $derived(mode === 'scroll' || mode === 'split-scroll')
   const isSplit = $derived(mode === 'split' || mode === 'split-scroll')
   const views = $derived(pages.length ? buildViews(pages, isSplit, direction) : [])
-  const pageCount = $derived(item?.media?.pagesCount ?? pages.length)
+  // `pageCount`, which is what the media item actually carries. This read was `pagesCount` and so
+  // was always `undefined`, silently falling through to the delivered page list's length. The two
+  // agree whenever delivery returns every page, which is why nothing showed it — but the analyzed
+  // count is the authority for "how long is this", and a short page list is exactly the case where
+  // the fallback would report the wrong total and clamp a resume position backwards.
+  const pageCount = $derived(item?.media?.pageCount ?? pages.length)
 
   function flushProgress() {
     clearTimeout(saveTimer)
@@ -123,7 +128,7 @@
       if (token !== loadToken) return
       item = detail
       pages = manifest
-      const start = resumePage(detail.readProgress, detail.media?.pagesCount ?? manifest.length)
+      const start = resumePage(detail.readProgress, detail.media?.pageCount ?? manifest.length)
       current = start
       loadedId = id
       index = indexOfPage(buildViews(manifest, isSplit, direction), start)
@@ -552,6 +557,24 @@
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
+    /*
+     * Room for `.chrome-toggle`, which is fixed in this same corner and always rendered so the
+     * chrome keeps a keyboard path. It carries `z-index: 22` against this bar's `21`, so without
+     * this padding it sits *on top of* the settings button at the bar's right edge: both are
+     * painted, both look clickable, and every click lands on the toggle. Measured in a real
+     * browser, `document.elementFromPoint` at the settings button's own centre returned a `<path>`
+     * belonging to the toggle — their centres were four pixels apart.
+     *
+     * Reserving space rather than hiding the toggle while the bar is open, because the toggle is
+     * the only always-reachable way in and its `aria-expanded` is what announces the bar's state.
+     *
+     * Not covered by the suite, and cannot be: this is hit-testing over real layout, which jsdom
+     * does not have. Verified by measuring reachability of every control in a browser — see the
+     * "Checking the web UI against a real server" section of `docs/testing.md`.
+     */
+    padding-right: calc(
+      var(--touch-target) + max(var(--space-2), var(--inset-right)) + var(--space-2)
+    );
     border-bottom: 1px solid var(--line-subtle);
   }
   .bottombar {
