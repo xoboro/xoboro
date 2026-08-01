@@ -35,6 +35,16 @@ object SyntheticLibraryGenerator {
     val seriesCount: Int,
     val booksPerSeries: Int,
     val oneShotCount: Int,
+    /**
+     * Every generated book's catalogue name - its file name without the extension, which is what
+     * the scanner stores as the book name and what a media item reports as its title.
+     *
+     * Returned rather than left to the caller to re-derive. A test asserting that a catalogue holds
+     * exactly the right items needs a list of what was written, and the writer is the only honest
+     * source for it; a second copy of `"Series %04d #%03d"` inside a test would be one more place
+     * for the two to drift apart while still agreeing with each other.
+     */
+    val bookNames: List<String>,
   ) {
     val totalBookCount: Int = seriesCount * booksPerSeries + oneShotCount
   }
@@ -56,24 +66,61 @@ object SyntheticLibraryGenerator {
     require(oneShotCount >= 0) { "oneShotCount must not be negative" }
     root.createDirectories()
     val random = Random(seed)
+    val bookNames = ArrayList<String>(seriesCount * booksPerSeries + oneShotCount)
 
     repeat(seriesCount) { seriesIndex ->
       val seriesDirectory = root.resolve(seriesDirectoryName(seriesIndex)).createDirectories()
       repeat(booksPerSeries) { bookIndex ->
-        val bookPath = seriesDirectory.resolve(bookFileName(seriesIndex, bookIndex))
-        writeSyntheticCbz(bookPath, random)
+        val fileName = bookFileName(seriesIndex, bookIndex)
+        writeSyntheticCbz(seriesDirectory.resolve(fileName), random)
+        bookNames += fileName.withoutExtension()
       }
     }
 
     if (oneShotCount > 0) {
       val oneShotDirectory = root.resolve(ONE_SHOTS_DIRECTORY_NAME).createDirectories()
       repeat(oneShotCount) { oneShotIndex ->
-        val bookPath = oneShotDirectory.resolve(oneShotFileName(oneShotIndex))
-        writeSyntheticCbz(bookPath, random)
+        val fileName = oneShotFileName(oneShotIndex)
+        writeSyntheticCbz(oneShotDirectory.resolve(fileName), random)
+        bookNames += fileName.withoutExtension()
       }
     }
 
-    return GeneratedLibrary(root, seriesCount, booksPerSeries, oneShotCount)
+    return GeneratedLibrary(root, seriesCount, booksPerSeries, oneShotCount, bookNames)
+  }
+
+  /**
+   * Writes one series directory named [seriesName] holding one CBZ per entry of [volumeNumbers],
+   * numbered **without zero padding**, and returns the book names in the order [volumeNumbers] gives
+   * them. Deterministic for a fixed [seed].
+   *
+   * The missing padding is the entire point, and it is why [generate]'s series cannot replace this.
+   * `Series 0007 #003` sorts identically under a plain string comparison and under a natural one, so
+   * a catalogue built from padded names cannot distinguish a scanner that orders volumes naturally
+   * from one that orders them lexicographically. Unpadded names separate the two: `v9` precedes
+   * `v10` naturally and follows it lexicographically. A caller should pass numbers that cross at
+   * least two digit boundaries - 9/10 and 99/100 - because a set that crosses only one can be
+   * satisfied by a comparator that merely pads to a fixed width.
+   */
+  fun generateUnpaddedVolumeSeries(
+    root: Path,
+    seriesName: String,
+    volumeNumbers: List<Int>,
+    seed: Long = DEFAULT_SEED,
+  ): List<String> {
+    require(seriesName.isNotBlank()) { "seriesName must not be blank" }
+    require(volumeNumbers.isNotEmpty()) { "volumeNumbers must not be empty" }
+    require(volumeNumbers.all { it >= 0 }) { "volumeNumbers must not be negative" }
+    require(volumeNumbers.distinct().size == volumeNumbers.size) {
+      "volumeNumbers must not repeat, or two books would share a file name"
+    }
+    val seriesDirectory = root.resolve(seriesName).createDirectories()
+    val random = Random(seed)
+    return volumeNumbers.map { number ->
+      val fileName = unpaddedVolumeFileName(seriesName, number)
+      writeSyntheticCbz(seriesDirectory.resolve(fileName), random)
+      fileName.withoutExtension()
+    }
   }
 
   private fun seriesDirectoryName(seriesIndex: Int): String =
@@ -86,6 +133,13 @@ object SyntheticLibraryGenerator {
 
   private fun oneShotFileName(oneShotIndex: Int): String =
     String.format(Locale.ROOT, "One-Shot %04d.cbz", oneShotIndex)
+
+  private fun unpaddedVolumeFileName(
+    seriesName: String,
+    volumeNumber: Int,
+  ): String = "$seriesName v$volumeNumber.cbz"
+
+  private fun String.withoutExtension(): String = substringBeforeLast('.', missingDelimiterValue = this)
 
   private fun writeSyntheticCbz(
     path: Path,
