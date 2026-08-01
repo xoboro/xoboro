@@ -45,8 +45,17 @@ rather than only in the body: deciding a version must not require opening every 
    git push origin 1.5.0
    ```
    Annotated, not lightweight: a release tag carries an author and a date, and `git describe` prefers it.
-4. **Publish the container image** for the tag. `.github/workflows/container.yml` builds it.
-5. **Write the release notes** from the commit range. The convention exists so this is mechanical:
+4. **Accept the container image.** `scripts/container-acceptance.sh` builds it from the working tree
+   (or checks a tag you pass it) and requires it to be a deployable release rather than a process that
+   starts: it runs the image under `compose.yaml`'s confinement — read-only root filesystem, all Linux
+   capabilities dropped, `no-new-privileges`, unprivileged user — then asks the image for a page and
+   requires every asset that page references to be served, at the root path and again under a context
+   path. The healthcheck alone cannot tell you this, because it asks `/ready`, which is a question
+   about the server and not about the release: the web UI is a separate build stage copied in, so an
+   image shipping no user interface reports healthy.
+5. **Publish the container image** for the tag. `.github/workflows/container.yml` builds it and runs
+   the same script.
+6. **Write the release notes** from the commit range. The convention exists so this is mechanical:
    `feat` subjects are the features, `fix` subjects are the fixes, `chore` is omitted, and anything with
    `!` goes first with its body quoted, because that body is where the migration instruction lives.
 
@@ -80,6 +89,11 @@ upgrading**, and treat a downgrade as a restore rather than as a version change.
   account (#128). Until that is resolved, "confirm `main` is green" means a local `./gradlew check` **and
   a local `npm test && npm run build` in `web/`**, and the container image has to be built by hand or by a
   manual workflow run. This is a real gap in the release process, recorded rather than glossed over.
+
+  The container half of that gap is narrowed rather than closed: `scripts/container-acceptance.sh` is
+  the same gate the workflow runs, so an operator can execute it locally and get the identical result.
+  That is deliberate — while the triggers are off, a check that exists only inside a workflow nobody
+  runs is not a check at all.
 
   The web job exists in `ci.yml` and is paused by the same missing trigger block as the backend one, so
   the UI's tests and build do not run anywhere automatic today either. Two things make the local run
