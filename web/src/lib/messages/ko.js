@@ -333,6 +333,76 @@ export default {
     conflictStay: '여기 계속 보기',
   },
 
+  search: {
+    title: '찾기',
+    link: '찾기',
+    queryLabel: '찾을 말',
+    submit: '찾기',
+    searching: '찾고 있습니다…',
+    scope: {
+      legend: '무엇을 찾을까요',
+      series: '작품',
+      mediaItems: '편',
+    },
+    sort: {
+      field: '정렬 기준',
+      direction: '정렬 방향',
+      asc: '오름차순',
+      desc: '내림차순',
+      series: {
+        title: '제목',
+        createdAt: '추가된 때',
+        updatedAt: '바뀐 때',
+        sourceModifiedAt: '파일 날짜',
+        lastReadAt: '마지막으로 읽은 때',
+        mediaItemCount: '편 수',
+      },
+      mediaItems: {
+        title: '제목',
+        seriesTitle: '작품 제목',
+        number: '읽는 순서',
+        createdAt: '추가된 때',
+        updatedAt: '바뀐 때',
+        sourceModifiedAt: '파일 날짜',
+        fileSize: '파일 크기',
+        lastReadAt: '마지막으로 읽은 때',
+        seriesLastReadAt: '작품을 마지막으로 읽은 때',
+      },
+    },
+    filters: {
+      legend: '결과 좁히기',
+      library: '서재',
+      allLibraries: '볼 수 있는 서재 전부',
+      genre: '장르',
+      tag: '태그',
+      publisher: '출판사',
+      language: '언어',
+      oneShot: '단편',
+      oneShotChoices: {
+        any: '함께 보기',
+        only: '단편만',
+        exclude: '빼고 보기',
+      },
+      progress: '내가 읽은 것',
+      onDeck: '보던 작품의 다음 편',
+      keepReading: '읽기 시작하고 아직 안 끝낸 것',
+      progressHint:
+        '두 조건은 동시에 성립하지 않습니다. 읽기 시작한 편은 아직 펼치지 않은 편이 아닙니다. 둘 다 고르면 아무것도 찾지 못합니다.',
+      noChoices: '아직 이 서재에는 골라 좁힐 값이 없습니다',
+      choicesFailed: '좁히기 값을 읽지 못했습니다. 비어 있는 것이 아니라 일부 항목이 빠져 있습니다.',
+      clear: '좁히기 지우기',
+    },
+    results: {
+      summary: '{total, plural, =0 {찾은 것이 없습니다} other {#개를 찾았습니다}}',
+      noResults: '찾은 것이 없습니다. 말을 줄이거나 좁히기를 풀어 보세요.',
+    },
+    paging: {
+      summary: '{pages}쪽 중 {page}쪽',
+      previous: '결과 이전 쪽',
+      next: '결과 다음 쪽',
+    },
+  },
+
   catalog: {
     navigation: '내 서재',
     metadata: {
