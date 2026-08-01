@@ -14,7 +14,7 @@
    * moved" is both expensive and unrelated to when the work actually lands.
    */
   import { onMount } from 'svelte'
-  import { Languages, Layers3, BookOpen, LogOut, Settings } from '@lucide/svelte'
+  import { Languages, Layers3, BookOpen, LogOut, Search, Settings } from '@lucide/svelte'
   import { _, applyLocale, locale } from '../lib/i18n.js'
   import { isAdministrator, session, signOut } from '../lib/session.js'
   import { artworkUrl, listSeries, readFeed } from '../lib/api/catalog.js'
@@ -121,6 +121,9 @@
 </header>
 
 <nav class="library" aria-label={$_('catalog.navigation')}>
+  <a href="#/search">
+    <Search size={18} aria-hidden="true" /><span>{$_('search.link')}</span>
+  </a>
   <a href="#/collections">
     <Layers3 size={18} aria-hidden="true" /><span>{$_('catalog.collection.title')}</span>
   </a>
@@ -200,7 +203,7 @@
   }
   .library {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
     gap: var(--space-2);
     padding: 0 var(--gutter-right) var(--space-5) var(--gutter-left);
   }

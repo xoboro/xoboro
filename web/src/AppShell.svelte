@@ -13,6 +13,7 @@
   import Router from 'svelte-spa-router'
   import { wrap } from 'svelte-spa-router/wrap'
   import Home from './reader/Home.svelte'
+  import Search from './reader/Search.svelte'
   import SeriesScreen from './reader/SeriesScreen.svelte'
   import ReaderRoute from './reader/ReaderRoute.svelte'
   import Groupings from './catalog/Groupings.svelte'
@@ -20,6 +21,9 @@
 
   const routes = {
     '/': Home,
+    // Reader-side and eagerly loaded, unlike the console: search is part of browsing
+    // the library, so it is on the path a reader takes rather than off it.
+    '/search': Search,
     '/series/:id': SeriesScreen,
     '/read/:id': ReaderRoute,
     // Reader-side, not console: reading a collection is open to any authenticated

@@ -331,6 +331,78 @@ export default {
     conflictStay: 'Stay here',
   },
 
+  search: {
+    title: 'Search',
+    link: 'Search',
+    queryLabel: 'Words to look for',
+    submit: 'Search',
+    searching: 'Searching…',
+    scope: {
+      legend: 'What to search',
+      series: 'Series',
+      mediaItems: 'Items',
+    },
+    sort: {
+      field: 'Order by',
+      direction: 'Direction',
+      asc: 'Ascending',
+      desc: 'Descending',
+      series: {
+        title: 'Title',
+        createdAt: 'Added',
+        updatedAt: 'Changed',
+        sourceModifiedAt: 'File date',
+        lastReadAt: 'Last read',
+        mediaItemCount: 'Number of items',
+      },
+      mediaItems: {
+        title: 'Title',
+        seriesTitle: 'Series title',
+        number: 'Reading order',
+        createdAt: 'Added',
+        updatedAt: 'Changed',
+        sourceModifiedAt: 'File date',
+        fileSize: 'File size',
+        lastReadAt: 'Last read',
+        seriesLastReadAt: 'Series last read',
+      },
+    },
+    filters: {
+      legend: 'Narrow the results',
+      library: 'Libraries',
+      allLibraries: 'Every library you can see',
+      genre: 'Genre',
+      tag: 'Tag',
+      publisher: 'Publisher',
+      language: 'Language',
+      oneShot: 'One-shots',
+      oneShotChoices: {
+        any: 'Include them',
+        only: 'Only one-shots',
+        exclude: 'Leave them out',
+      },
+      progress: 'Your reading',
+      onDeck: 'Next up in a series you have started',
+      keepReading: 'Started and not finished',
+      progressHint:
+        'These two cannot both hold: an item you have started is not one you have never opened. Choosing both finds nothing.',
+      noChoices: 'This library records nothing to filter by yet',
+      choicesFailed:
+        'Filter choices could not be read, so some filters are missing rather than empty.',
+      clear: 'Clear the filters',
+    },
+    results: {
+      summary:
+        '{total, plural, =0 {No matches} one {One match} other {# matches}}',
+      noResults: 'Nothing matched. Try fewer words or fewer filters.',
+    },
+    paging: {
+      summary: 'Page {page} of {pages}',
+      previous: 'Previous page of results',
+      next: 'Next page of results',
+    },
+  },
+
   catalog: {
     navigation: 'My library',
     metadata: {
