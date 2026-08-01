@@ -345,13 +345,19 @@ class EpubMediaAnalyzer(
           )
         }
       }
+    // `(position - 1) / count`: a Readium locator's `totalProgression` is where a position
+    // *starts*, so the first position of any publication is 0 and the last of n is
+    // `(n - 1) / n`. No position reports 1 — 1 is the end of the publication, which is not
+    // a place a reader can be. `progression` stays the fraction through the resource and is
+    // deliberately not folded in here: it is measured against the spine item, not against
+    // the publication, so adding it would push a position past its own slot.
     return raw.map { draft ->
       MediaPosition(
         href = draft.href,
         mediaType = draft.mediaType,
         progression = draft.progression,
         position = draft.position,
-        totalProgression = draft.position.toFloat() / raw.size,
+        totalProgression = (draft.position - 1).toFloat() / raw.size,
         koboSpan = draft.koboSpan,
       )
     }
