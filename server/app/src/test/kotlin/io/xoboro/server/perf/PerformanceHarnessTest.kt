@@ -13,7 +13,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.testing.testApplication
+import io.ktor.server.testing.runTestApplication
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
@@ -52,6 +52,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 import kotlin.time.measureTime
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.io.TempDir
@@ -305,217 +306,233 @@ class PerformanceHarnessTest {
       // measurement tool, not a gate - but it must be visible, because latency metrics from an
       // undrained run cannot be compared with metrics from a drained one.
       drainTaskQueue(runtime, scannedBookCount, report)
-      testApplication {
-        application { xoboroModule(runtime) }
-        val client = createClient { install(ContentNegotiation) { json() } }
+      // `runTestApplication` under this harness's own scope, not `testApplication`.
+      // `testApplication` runs its body through `runTest` with a hardcoded 60-second whole-body
+      // timeout, and it passes that value explicitly, so `-Dkotlinx.coroutines.test.default_timeout`
+      // does not reach it. Exceeding it does not report a timeout: it throws
+      // `UncompletedCoroutinesError`, which reads like a coroutine leak and sends you looking in the
+      // wrong place entirely.
+      //
+      // The drain above is deliberately outside, so the four and a half minutes a 15,050-item
+      // library spends clearing its queue never counted against the cap. What is inside is the api
+      // measurement loop, and at the larger documented sizes that is the part at risk.
+      //
+      // Found by `XoboroLargeLibraryAcceptanceTest`, which hit the cap for real at 4,810 items.
+      // Not reproduced in this harness — doing so means a full 15,050-item run — so this is
+      // prevention rather than a repair of an observed failure, and the two are worth telling apart.
+      runBlocking {
+        runTestApplication {
+            application { xoboroModule(runtime) }
+          val client = createClient { install(ContentNegotiation) { json() } }
 
-        val setup =
-          retryingTransientFailures {
-            client.post("$XOBORO_API_PREFIX/setup") {
-              header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
-              setBody(
-                SetupRequest(
-                  email = "perf-admin@example.invalid",
-                  password = "synthetic-performance-password",
-                  transport = SessionTransport.BEARER,
-                ),
-              )
-            }
-          }
-        assertEquals(HttpStatusCode.Created, setup.status)
-        val token = requireNotNull(setup.body<SessionResponse>().accessToken)
-
-        // The first-ever call to /series triggers a one-time full-catalog aggregation-cache
-        // rebuild (JooqBookMetadataAggregationRepository.refreshAllDirty) covering every series
-        // marked dirty since the scan. That is a real, user-visible cost — "how long does the
-        // first browse take after scanning a library" — not an error to retry past and discard.
-        // So this call keeps its generously larger retry budget (it can otherwise collide with
-        // the idle worker's periodic queue poll and exhaust a steady-state budget), but see
-        // recordColdRead below: the successful attempt's own duration, the retry/backoff time, and
-        // the failure count/type are reported as three separate numbers, not folded into one. A
-        // total that includes jittered backoff sleep across several failed attempts is mostly
-        // measuring the harness's own retry loop, not the server — reporting it alone would repeat
-        // exactly the "polluted max" mistake this harness was built to avoid. This is a single,
-        // one-time observation: it is not averaged, and nothing later in this run should need the
-        // same budget, since no other request here dirties a series after the cache is warm.
-        val firstSeriesReadOutcome =
-          attemptWithRetries(
-            attempts = CACHE_WARMUP_RETRY_ATTEMPTS,
-            backoffMillis = CACHE_WARMUP_RETRY_BACKOFF_MILLIS,
-          ) {
-            client.get("$XOBORO_API_PREFIX/series?page=0&size=1&sort=mediaItemCount,desc") {
-              bearerAuth(token)
-            }
-          }
-        report.recordColdRead(
-          key = "api.first_series_read_after_scan",
-          itemCount = scannedBookCount,
-          successfulAttemptMillis = firstSeriesReadOutcome.successfulAttemptElapsedNanos / 1_000_000.0,
-          harnessWallMillis = firstSeriesReadOutcome.harnessWallElapsedNanos / 1_000_000.0,
-          attempts = firstSeriesReadOutcome.attempts,
-          lastFailureType = firstSeriesReadOutcome.lastFailureType,
-        )
-        val topSeries =
-          firstSeriesReadOutcome.response
-            .body<XoboroPageResponse<XoboroSeriesResponse>>()
-            .items
-            .single()
-
-        val seriesListing =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/series?page=0&size=20") { bearerAuth(token) }
-          }
-        report.recordLatency(
-          "api.series_listing",
-          scannedBookCount,
-          seriesListing.stats,
-          seriesListing.retriedSamples,
-        )
-
-        // Offset pagination's cost is supposed to grow with the offset, because SQLite still has
-        // to walk and discard the skipped rows. Whether that is worth a second pagination mode is
-        // an empirical question, so measure the same endpoint at the deepest page that exists and
-        // report both. A cursor is only justified if this diverges from the first page.
-        val seriesPageCount =
-          retryingTransientFailures {
-            client.get("$XOBORO_API_PREFIX/series?page=0&size=$DEEP_PAGE_SIZE") { bearerAuth(token) }
-          }.body<XoboroPageResponse<XoboroSeriesResponse>>()
-            .totalPages
-        val lastSeriesListing =
-          measureRepeated {
-            client.get(
-              "$XOBORO_API_PREFIX/series?page=${(seriesPageCount - 1).coerceAtLeast(0)}" +
-                "&size=$DEEP_PAGE_SIZE",
-            ) { bearerAuth(token) }
-          }
-        report.recordLatency(
-          "api.series_listing_last_page",
-          scannedBookCount,
-          lastSeriesListing.stats,
-          lastSeriesListing.retriedSamples,
-        )
-        report.recordCount("api.series_listing_last_page.page_index", seriesPageCount - 1)
-
-        // Discriminates what the per-page cost actually is. If it is dominated by the total-count
-        // query - which every page pays regardless of depth, over the whole filtered set - then
-        // asking for 10x as many rows costs about the same. If it is dominated by fetching and
-        // serialising rows, it scales with the page size.
-        val wideSeriesListing =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/series?page=0&size=${DEEP_PAGE_SIZE * 10}") {
-              bearerAuth(token)
-            }
-          }
-        report.recordLatency(
-          "api.series_listing_wide_page",
-          scannedBookCount,
-          wideSeriesListing.stats,
-          wideSeriesListing.retriedSamples,
-        )
-
-        // Third leg of the same question. The wide-page probe rules out row work; this rules in or
-        // out "proportional to the set being scanned and counted" by narrowing that set ~30x while
-        // returning the same page size. Fast here means the cost tracks the filtered set, not the
-        // rows returned, not the offset, and not a fixed per-request overhead.
-        val narrowSeriesListing =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/series?oneShot=true&page=0&size=$DEEP_PAGE_SIZE") {
-              bearerAuth(token)
-            }
-          }
-        report.recordLatency(
-          "api.series_listing_narrow_filter",
-          scannedBookCount,
-          narrowSeriesListing.stats,
-          narrowSeriesListing.retriedSamples,
-        )
-
-        val mediaItemPageCount =
-          retryingTransientFailures {
-            client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
-              bearerAuth(token)
-            }
-          }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
-            .totalPages
-        val firstMediaItemListing =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
-              bearerAuth(token)
-            }
-          }
-        report.recordLatency(
-          "api.media_item_listing",
-          scannedBookCount,
-          firstMediaItemListing.stats,
-          firstMediaItemListing.retriedSamples,
-        )
-        val lastMediaItemListing =
-          measureRepeated {
-            client.get(
-              "$XOBORO_API_PREFIX/media-items?page=${(mediaItemPageCount - 1).coerceAtLeast(0)}" +
-                "&size=$DEEP_PAGE_SIZE",
-            ) { bearerAuth(token) }
-          }
-        report.recordLatency(
-          "api.media_item_listing_last_page",
-          scannedBookCount,
-          lastMediaItemListing.stats,
-          lastMediaItemListing.retriedSamples,
-        )
-        report.recordCount("api.media_item_listing_last_page.page_index", mediaItemPageCount - 1)
-
-        val booksInSeries =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/series/${topSeries.id}/media-items?page=0&size=20") {
-              bearerAuth(token)
-            }
-          }
-        report.recordLatency(
-          "api.books_in_series",
-          topSeries.mediaItemCount.toLong(),
-          booksInSeries.stats,
-          booksInSeries.retriedSamples,
-        )
-
-        val sampleBooks =
-          retryingTransientFailures {
-            client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$KEEP_READING_SAMPLE_SIZE") {
-              bearerAuth(token)
-            }
-          }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
-            .items
-        sampleBooks.forEachIndexed { index, book ->
-          if (index % KEEP_READING_SEED_STRIDE == 0) {
+          val setup =
             retryingTransientFailures {
-              client.put("$XOBORO_API_PREFIX/media-items/${book.id}/progress") {
-                bearerAuth(token)
+              client.post("$XOBORO_API_PREFIX/setup") {
                 header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
                 setBody(
-                  XoboroMediaProgressRequest(
-                    page = 1,
-                    locator = JsonObject(emptyMap()),
-                    deviceId = "perf-harness",
-                    deviceName = "perf-harness",
-                    modifiedAtMillis = System.currentTimeMillis(),
+                  SetupRequest(
+                    email = "perf-admin@example.invalid",
+                    password = "synthetic-performance-password",
+                    transport = SessionTransport.BEARER,
                   ),
                 )
               }
             }
-          }
-        }
+          assertEquals(HttpStatusCode.Created, setup.status)
+          val token = requireNotNull(setup.body<SessionResponse>().accessToken)
 
-        val keepReadingFeed =
-          measureRepeated {
-            client.get("$XOBORO_API_PREFIX/media-items?keepReading=true&page=0&size=20") {
-              bearerAuth(token)
+          // The first-ever call to /series triggers a one-time full-catalog aggregation-cache
+          // rebuild (JooqBookMetadataAggregationRepository.refreshAllDirty) covering every series
+          // marked dirty since the scan. That is a real, user-visible cost — "how long does the
+          // first browse take after scanning a library" — not an error to retry past and discard.
+          // So this call keeps its generously larger retry budget (it can otherwise collide with
+          // the idle worker's periodic queue poll and exhaust a steady-state budget), but see
+          // recordColdRead below: the successful attempt's own duration, the retry/backoff time, and
+          // the failure count/type are reported as three separate numbers, not folded into one. A
+          // total that includes jittered backoff sleep across several failed attempts is mostly
+          // measuring the harness's own retry loop, not the server — reporting it alone would repeat
+          // exactly the "polluted max" mistake this harness was built to avoid. This is a single,
+          // one-time observation: it is not averaged, and nothing later in this run should need the
+          // same budget, since no other request here dirties a series after the cache is warm.
+          val firstSeriesReadOutcome =
+            attemptWithRetries(
+              attempts = CACHE_WARMUP_RETRY_ATTEMPTS,
+              backoffMillis = CACHE_WARMUP_RETRY_BACKOFF_MILLIS,
+            ) {
+              client.get("$XOBORO_API_PREFIX/series?page=0&size=1&sort=mediaItemCount,desc") {
+                bearerAuth(token)
+              }
+            }
+          report.recordColdRead(
+            key = "api.first_series_read_after_scan",
+            itemCount = scannedBookCount,
+            successfulAttemptMillis = firstSeriesReadOutcome.successfulAttemptElapsedNanos / 1_000_000.0,
+            harnessWallMillis = firstSeriesReadOutcome.harnessWallElapsedNanos / 1_000_000.0,
+            attempts = firstSeriesReadOutcome.attempts,
+            lastFailureType = firstSeriesReadOutcome.lastFailureType,
+          )
+          val topSeries =
+            firstSeriesReadOutcome.response
+              .body<XoboroPageResponse<XoboroSeriesResponse>>()
+              .items
+              .single()
+
+          val seriesListing =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/series?page=0&size=20") { bearerAuth(token) }
+            }
+          report.recordLatency(
+            "api.series_listing",
+            scannedBookCount,
+            seriesListing.stats,
+            seriesListing.retriedSamples,
+          )
+
+          // Offset pagination's cost is supposed to grow with the offset, because SQLite still has
+          // to walk and discard the skipped rows. Whether that is worth a second pagination mode is
+          // an empirical question, so measure the same endpoint at the deepest page that exists and
+          // report both. A cursor is only justified if this diverges from the first page.
+          val seriesPageCount =
+            retryingTransientFailures {
+              client.get("$XOBORO_API_PREFIX/series?page=0&size=$DEEP_PAGE_SIZE") { bearerAuth(token) }
+            }.body<XoboroPageResponse<XoboroSeriesResponse>>()
+              .totalPages
+          val lastSeriesListing =
+            measureRepeated {
+              client.get(
+                "$XOBORO_API_PREFIX/series?page=${(seriesPageCount - 1).coerceAtLeast(0)}" +
+                  "&size=$DEEP_PAGE_SIZE",
+              ) { bearerAuth(token) }
+            }
+          report.recordLatency(
+            "api.series_listing_last_page",
+            scannedBookCount,
+            lastSeriesListing.stats,
+            lastSeriesListing.retriedSamples,
+          )
+          report.recordCount("api.series_listing_last_page.page_index", seriesPageCount - 1)
+
+          // Discriminates what the per-page cost actually is. If it is dominated by the total-count
+          // query - which every page pays regardless of depth, over the whole filtered set - then
+          // asking for 10x as many rows costs about the same. If it is dominated by fetching and
+          // serialising rows, it scales with the page size.
+          val wideSeriesListing =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/series?page=0&size=${DEEP_PAGE_SIZE * 10}") {
+                bearerAuth(token)
+              }
+            }
+          report.recordLatency(
+            "api.series_listing_wide_page",
+            scannedBookCount,
+            wideSeriesListing.stats,
+            wideSeriesListing.retriedSamples,
+          )
+
+          // Third leg of the same question. The wide-page probe rules out row work; this rules in or
+          // out "proportional to the set being scanned and counted" by narrowing that set ~30x while
+          // returning the same page size. Fast here means the cost tracks the filtered set, not the
+          // rows returned, not the offset, and not a fixed per-request overhead.
+          val narrowSeriesListing =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/series?oneShot=true&page=0&size=$DEEP_PAGE_SIZE") {
+                bearerAuth(token)
+              }
+            }
+          report.recordLatency(
+            "api.series_listing_narrow_filter",
+            scannedBookCount,
+            narrowSeriesListing.stats,
+            narrowSeriesListing.retriedSamples,
+          )
+
+          val mediaItemPageCount =
+            retryingTransientFailures {
+              client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
+                bearerAuth(token)
+              }
+            }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
+              .totalPages
+          val firstMediaItemListing =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$DEEP_PAGE_SIZE") {
+                bearerAuth(token)
+              }
+            }
+          report.recordLatency(
+            "api.media_item_listing",
+            scannedBookCount,
+            firstMediaItemListing.stats,
+            firstMediaItemListing.retriedSamples,
+          )
+          val lastMediaItemListing =
+            measureRepeated {
+              client.get(
+                "$XOBORO_API_PREFIX/media-items?page=${(mediaItemPageCount - 1).coerceAtLeast(0)}" +
+                  "&size=$DEEP_PAGE_SIZE",
+              ) { bearerAuth(token) }
+            }
+          report.recordLatency(
+            "api.media_item_listing_last_page",
+            scannedBookCount,
+            lastMediaItemListing.stats,
+            lastMediaItemListing.retriedSamples,
+          )
+          report.recordCount("api.media_item_listing_last_page.page_index", mediaItemPageCount - 1)
+
+          val booksInSeries =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/series/${topSeries.id}/media-items?page=0&size=20") {
+                bearerAuth(token)
+              }
+            }
+          report.recordLatency(
+            "api.books_in_series",
+            topSeries.mediaItemCount.toLong(),
+            booksInSeries.stats,
+            booksInSeries.retriedSamples,
+          )
+
+          val sampleBooks =
+            retryingTransientFailures {
+              client.get("$XOBORO_API_PREFIX/media-items?page=0&size=$KEEP_READING_SAMPLE_SIZE") {
+                bearerAuth(token)
+              }
+            }.body<XoboroPageResponse<XoboroMediaItemResponse>>()
+              .items
+          sampleBooks.forEachIndexed { index, book ->
+            if (index % KEEP_READING_SEED_STRIDE == 0) {
+              retryingTransientFailures {
+                client.put("$XOBORO_API_PREFIX/media-items/${book.id}/progress") {
+                  bearerAuth(token)
+                  header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+                  setBody(
+                    XoboroMediaProgressRequest(
+                      page = 1,
+                      locator = JsonObject(emptyMap()),
+                      deviceId = "perf-harness",
+                      deviceName = "perf-harness",
+                      modifiedAtMillis = System.currentTimeMillis(),
+                    ),
+                  )
+                }
+              }
             }
           }
-        report.recordLatency(
-          "api.keep_reading_feed",
-          scannedBookCount,
-          keepReadingFeed.stats,
-          keepReadingFeed.retriedSamples,
-        )
+
+          val keepReadingFeed =
+            measureRepeated {
+              client.get("$XOBORO_API_PREFIX/media-items?keepReading=true&page=0&size=20") {
+                bearerAuth(token)
+              }
+            }
+          report.recordLatency(
+            "api.keep_reading_feed",
+            scannedBookCount,
+            keepReadingFeed.stats,
+            keepReadingFeed.retriedSamples,
+          )
+        }
       }
     } finally {
       runtime.close()

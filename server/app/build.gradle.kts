@@ -56,7 +56,7 @@ dependencies {
 
 tasks.test {
   useJUnitPlatform {
-    excludeTags("performance")
+    excludeTags("performance", "largeLibrary")
   }
 }
 
@@ -95,6 +95,29 @@ tasks.register<Test>("performanceHarness") {
     "xoboro.perf.oneShotCount",
     perfIntProperty("xoboro.perf.oneShotCount", "XOBORO_PERF_ONE_SHOT_COUNT", 5),
   )
+  testLogging {
+    showStandardStreams = true
+    events("passed", "skipped", "failed", "standardOut", "standardError")
+  }
+  outputs.upToDateWhen { false }
+}
+
+// Opt-in large-library acceptance gate (XoboroLargeLibraryAcceptanceTest). A separate tag and task
+// from `performance` above, because the two are different kinds of thing: the harness reports
+// numbers and asserts almost nothing, while this is pass/fail and asserts scan correctness, reading
+// order, whole-catalogue paging and incremental-rescan invariants at a size where a scan takes
+// minutes. Excluded from `test`/`check` for the same reason as the harness - it generates and scans
+// thousands of archives - and run explicitly with `./gradlew :server:app:largeLibraryAcceptance`.
+tasks.register<Test>("largeLibraryAcceptance") {
+  group = "verification"
+  description =
+    "Runs the opt-in large-library end-to-end acceptance gate. Not part of check/test; it " +
+      "generates and scans thousands of synthetic archives through the native API."
+  testClassesDirs = sourceSets.test.get().output.classesDirs
+  classpath = sourceSets.test.get().runtimeClasspath
+  useJUnitPlatform {
+    includeTags("largeLibrary")
+  }
   testLogging {
     showStandardStreams = true
     events("passed", "skipped", "failed", "standardOut", "standardError")
