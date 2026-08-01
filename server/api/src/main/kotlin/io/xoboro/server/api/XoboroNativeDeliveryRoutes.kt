@@ -391,7 +391,7 @@ private suspend fun ApplicationCall.respondPageStreamingForbidden() {
   )
 }
 
-private suspend fun ApplicationCall.respondFileDownloadForbidden() {
+internal suspend fun ApplicationCall.respondFileDownloadForbidden() {
   respondNativeError(
     HttpStatusCode.Forbidden,
     "file_download_forbidden",
