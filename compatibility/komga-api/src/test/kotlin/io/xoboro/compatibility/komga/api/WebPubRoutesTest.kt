@@ -430,7 +430,8 @@ class WebPubRoutesTest {
               mediaType = "application/xhtml+xml",
               progression = 0F,
               position = 1,
-              totalProgression = 1F,
+              // The only position of a one-position publication starts at its beginning.
+              totalProgression = 0F,
             ),
           ),
         createdAtMillis = 1,
