@@ -30,11 +30,6 @@ fun interface ServerReleaseCatalog {
   suspend fun releases(): List<ServerRelease>
 }
 
-interface CompatibilityMaintenanceRequester {
+interface CompatibilityMaintenanceRequester : DuplicatePageRemovalRequester {
   fun regenerateBookArtwork(forBiggerResultOnly: Boolean): Int
-
-  fun deleteDuplicatePages(
-    hash: String,
-    matches: List<io.xoboro.core.domain.PageHashMatch>,
-  ): Int
 }
