@@ -2,20 +2,22 @@
   /**
    * Duplicate pages.
    *
-   * The honesty requirement is the whole design of this screen. Xoboro **records**
-   * decisions and does not perform removal: nothing executes `DELETE_AUTO` or
-   * `DELETE_MANUAL`, because removing a page means rewriting an archive on disk —
-   * destructive, irreversible, and a decision belonging to whoever owns those files.
-   * `deleteCount` is always `0`, and that is the stored value rather than a
-   * placeholder.
+   * The honesty requirement is the whole design of this screen, and what it has to say
+   * changed once removal became reachable. Deciding and executing are **two steps**.
+   * Recording `DELETE_AUTO` or `DELETE_MANUAL` still deletes nothing — it stores what
+   * the operator wants — and a separate call executes it, rewriting the archive on
+   * disk. So the record buttons keep saying they only record, and the execute action
+   * appears on the decided row, where a decision already exists to carry out.
    *
-   * So the actions are labelled as recording an intention, the screen says removal is
-   * not carried out, and there is no button anywhere that implies deletion happens.
-   * A button labelled "Delete pages" that deletes nothing would be a lie in the
-   * interface.
+   * The earlier version of this comment said nothing in Xoboro executes those actions.
+   * That was already untrue when it was written: the Komga-compatible surface reached
+   * the executor. A screen that tells an operator their archives are safe while another
+   * route is rewriting them is worse than one with no disclosure at all.
    *
-   * `IGNORE` is the one action with a real effect: the candidate list excludes any
-   * hash with a recorded decision, so ignoring one removes it from the list for good.
+   * `IGNORE` is the one action that takes effect from the record alone: the candidate
+   * list excludes any hash with a decision, so ignoring one removes it for good. It is
+   * also the one decision the execute action must never offer — the server answers 409
+   * for it, so a button there would promise something that cannot happen.
    */
   import { onMount } from 'svelte'
   import { _ } from '../lib/i18n.js'
@@ -24,12 +26,14 @@
     UNPERFORMED_ACTIONS,
     listDuplicateCandidates,
     listDuplicateDecisions,
+    executeDuplicateRemoval,
     listHashCarriers,
     recordDuplicateDecision,
   } from '../lib/api/admin.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Dialog from '../components/Dialog.svelte'
   import DataTable from './DataTable.svelte'
+  import TypedConfirmDialog from './TypedConfirmDialog.svelte'
 
   /**
    * Both listings are server-paged, so both hold the page envelope rather than an
@@ -59,6 +63,10 @@
   let loadToken = 0
   /** `{ candidate, carriers }` while the carrier list is open; `carriers` is a page. */
   let inspecting = $state(null)
+  /** The decided row whose removal is awaiting a typed confirmation. */
+  let executing = $state(null)
+  /** How many media items the last executed removal queued, held until the next action. */
+  let queued = $state(null)
 
   /**
    * Clamps a page request to one that still exists.
@@ -135,6 +143,32 @@
     }
   }
 
+  /**
+   * Executes the decision recorded for a hash, after the typed confirmation.
+   *
+   * `mediaItemIds` is left null, so every match is queued — the decision was recorded
+   * against the hash, not against a subset, and the confirmation names the same blast
+   * radius the server reported. The count reported back is what was **queued**: the
+   * rewrites happen in durable tasks afterwards, so claiming the pages are gone at this
+   * point would be a guess about work that has not run.
+   */
+  async function confirmExecute() {
+    const decision = executing
+    busy = true
+    try {
+      const result = await executeDuplicateRemoval(decision.hash)
+      queued = result?.queuedMediaItems ?? 0
+      executing = null
+      error = null
+      await load()
+    } catch (caught) {
+      error = caught
+      executing = null
+    } finally {
+      busy = false
+    }
+  }
+
   async function record(candidate, action) {
     busy = true
     try {
@@ -159,6 +193,15 @@
 </p>
 
 <ErrorNotice {error} onretry={load} />
+
+{#if queued !== null}
+  <!-- What was queued, not what was removed: the rewrites run in durable tasks after
+       this response, so anything stronger would be a claim about work that has not
+       happened yet. -->
+  <p class="queued" data-testid="removal-queued">
+    {$_('admin.duplicates.executeQueued', { values: { count: queued } })}
+  </p>
+{/if}
 
 <h2>{$_('admin.duplicates.candidates')}</h2>
 <DataTable
@@ -236,6 +279,18 @@
           <span class="not-performed" data-testid={`not-performed-${decision.hash}`}>
             {$_('admin.duplicates.intentOnly')}
           </span>
+          <!-- Offered only here. A hash recorded as IGNORE has asked for nothing and the
+               route answers 409 for it, so a button on that row would promise something
+               that cannot happen. -->
+          <button
+            type="button"
+            class="execute"
+            disabled={busy}
+            data-testid={`execute-${decision.hash}`}
+            onclick={() => (executing = decision)}
+          >
+            {$_('admin.duplicates.execute')}
+          </button>
         {:else}
           <span>{$_('admin.duplicates.excludedFromList')}</span>
         {/if}
@@ -243,6 +298,23 @@
     </tr>
   {/snippet}
 </DataTable>
+
+{#if executing}
+  <!-- The console's destructive convention: a server-supplied blast radius and the exact
+       identifier typed out. The count comes from `matchCount` on the decided row, which is
+       what the server says carries this hash, rather than from anything counted here. -->
+  <TypedConfirmDialog
+    title={$_('admin.duplicates.executeTitle')}
+    expected={executing.hash}
+    summary={$_('admin.duplicates.executeSummary', {
+      values: { count: executing.matchCount ?? 0 },
+    })}
+    actionLabel={$_('admin.duplicates.execute')}
+    {busy}
+    onconfirm={confirmExecute}
+    onclose={() => (executing = null)}
+  />
+{/if}
 
 {#if inspecting}
   <Dialog
@@ -339,6 +411,30 @@
   }
   .not-performed {
     color: var(--warning);
+  }
+  .execute {
+    display: block;
+    min-height: var(--touch-target);
+    margin-top: var(--space-2);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    background: var(--surface-control);
+    color: var(--danger);
+    font: inherit;
+    font-size: var(--font-sm);
+    cursor: pointer;
+  }
+  .execute:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .queued {
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    font-size: var(--font-sm);
   }
   .more {
     margin: var(--space-3) 0 0;

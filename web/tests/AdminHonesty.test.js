@@ -350,6 +350,97 @@ describe('duplicate pages', () => {
     await waitFor(() => expect(screen.getByTestId('not-performed-def')).toBeInTheDocument())
   })
 
+  it('offers to execute a recorded delete and never an ignore', async () => {
+    // Removal is real now, so the screen has to offer it — but only where the server will
+    // act. A hash recorded as IGNORE has not asked for anything, and the route answers 409
+    // for it, so a button there would promise something that cannot happen.
+    globalThis.fetch = routes([
+      ['/duplicate-pages/decided', reply(page([
+        { hash: 'del', action: 'DELETE_MANUAL', matchCount: 3 },
+        { hash: 'ign', action: 'IGNORE', matchCount: 2 },
+      ]))],
+      ['/duplicate-pages', reply(page([]))],
+    ])
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('execute-del')).toBeInTheDocument())
+    expect(screen.queryByTestId('execute-ign')).toBeNull()
+  })
+
+  it('requires the hash to be typed before any archive is rewritten', async () => {
+    // The destructive convention for this console: a server-supplied blast radius and an
+    // exact typed confirmation. Asserted as "no request left before the field was
+    // satisfied", because that is the property — not which widget carries it.
+    const fetchImpl = routes([
+      ['/removals', reply({ queuedMediaItems: 3 }, 202)],
+      ['/duplicate-pages/decided', reply(page([{ hash: 'del', action: 'DELETE_MANUAL', matchCount: 3 }]))],
+      ['/duplicate-pages', reply(page([]))],
+    ])
+    globalThis.fetch = fetchImpl
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('execute-del')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('execute-del'))
+
+    // Asserted as the button's disabled state rather than by clicking it and checking that
+    // nothing was sent. `fireEvent.click` dispatches straight at the node, so jsdom runs the
+    // handler on a disabled button where a browser would not — that version of this test
+    // passed only because the click it thought it was refusing had in fact gone through.
+    const confirm = await screen.findByTestId('typed-confirm')
+    expect(confirm).toBeDisabled()
+
+    fetchImpl.mockClear()
+    const field = document.querySelector('input[id^="typed-confirm"]')
+    await fireEvent.input(field, { target: { value: 'del' } })
+    await waitFor(() => expect(screen.getByTestId('typed-confirm')).not.toBeDisabled())
+    await fireEvent.click(screen.getByTestId('typed-confirm'))
+
+    await waitFor(() =>
+      expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/removals')).length).toBe(1),
+    )
+    const [url, init] = fetchImpl.mock.calls.find(([called]) => called.includes('/removals'))
+    expect(url).toContain('/duplicate-pages/del/removals')
+    expect(init.method).toBe('POST')
+    // The body is always sent: the route refuses to infer "every match" from its absence.
+    expect(JSON.parse(init.body)).toEqual({ mediaItemIds: null })
+  })
+
+  it('reports what was queued rather than claiming pages are gone', async () => {
+    globalThis.fetch = routes([
+      ['/removals', reply({ queuedMediaItems: 3 }, 202)],
+      ['/duplicate-pages/decided', reply(page([{ hash: 'del', action: 'DELETE_MANUAL', matchCount: 3 }]))],
+      ['/duplicate-pages', reply(page([]))],
+    ])
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('execute-del')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('execute-del'))
+    const field = document.querySelector('input[id^="typed-confirm"]')
+    await fireEvent.input(field, { target: { value: 'del' } })
+    await fireEvent.click(screen.getByTestId('typed-confirm'))
+
+    const queued = await screen.findByTestId('removal-queued')
+    expect(queued.textContent).toContain('3')
+  })
+
+  it('surfaces a refused execution through the error notice', async () => {
+    globalThis.fetch = routes([
+      ['/removals', reply({ code: 'duplicate_page_not_marked_for_deletion', message: 'no' }, 409)],
+      ['/duplicate-pages/decided', reply(page([{ hash: 'del', action: 'DELETE_MANUAL', matchCount: 1 }]))],
+      ['/duplicate-pages', reply(page([]))],
+    ])
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('execute-del')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('execute-del'))
+    const field = document.querySelector('input[id^="typed-confirm"]')
+    await fireEvent.input(field, { target: { value: 'del' } })
+    await fireEvent.click(screen.getByTestId('typed-confirm'))
+
+    // The screen's own error surface, not an alert the operator cannot copy from.
+    expect(await screen.findByRole('button', { name: /retry|다시 시도/i })).toBeInTheDocument()
+  })
+
   it('does not invent a size when the pages differ', async () => {
     // A hash whose pages differ in size has no single size and the listing reports
     // null. Rendering "0" would state a fact the server did not.

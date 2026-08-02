@@ -130,7 +130,7 @@ export default {
     },
     duplicates: {
       removalNotPerformed:
-        'Xoboro records these decisions and does not delete pages. Removing a page means rewriting an archive on disk \u2014 irreversible, and a decision belonging to whoever owns those files. The delete actions are stored as stated intent only.',
+        'Recording a decision does not delete anything. A recorded delete has to be executed as a separate step, and executing it rewrites the archive on disk \u2014 the page is gone from the file, and this console cannot put it back.',
       candidates: 'Awaiting a decision',
       decisions: 'Recorded decisions',
       hash: 'Page hash',
@@ -139,7 +139,14 @@ export default {
       decide: 'Record a decision',
       recorded: 'Recorded',
       effect: 'What it does',
-      intentOnly: 'Recorded only (nothing is deleted)',
+      intentOnly: 'Recorded only \u2014 not yet carried out',
+      execute: 'Remove the pages',
+      executeTitle: 'Remove duplicate pages',
+      executeSummary:
+        'Rewrites {count} archive(s) on disk to drop this page. The removal runs in the background once queued.',
+      executeQueued: 'Queued removal for {count} item(s). The archives are rewritten in the background.',
+      executeNotMarked: 'This hash has no recorded delete decision, so there is nothing to execute.',
+      executeNoMatch: 'No media item carrying this hash matched the request.',
       excludedFromList: 'Excluded from the candidate list',
       noCandidates: 'Nothing awaiting a decision',
       noDecisions: 'No decisions recorded',

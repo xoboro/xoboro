@@ -145,17 +145,21 @@ export function listHistory({ page = 0, size = 50 } = {}) {
 /**
  * Duplicate-page actions.
  *
- * `IGNORE` is the only one with an effect today: the candidate list excludes any
- * hash with a recorded decision, so ignoring one removes it permanently.
- *
- * The two delete actions are stored as **stated intent**. Nothing executes them —
- * removing a page means rewriting an archive on disk, which is destructive and
- * irreversible for files the operator owns. `deleteCount` is therefore always `0`,
- * and that is the stored value rather than a placeholder.
+ * Recording one is not carrying it out. `IGNORE` takes effect from the record
+ * alone — the candidate list excludes any hash with a decision, so ignoring one
+ * removes it permanently. The two delete actions record an intent that a separate
+ * call has to execute, and executing it rewrites an archive on the operator's
+ * disk. `deleteCount` stays `0` for a hash until that call runs.
  */
 export const DUPLICATE_ACTIONS = Object.freeze(['IGNORE', 'DELETE_MANUAL', 'DELETE_AUTO'])
 
-/** Actions the server records but does not carry out. */
+/**
+ * Actions that recording alone does not carry out.
+ *
+ * Still accurate now that removal can be executed: these are the actions where
+ * the record and the effect are two separate steps, which is exactly what the
+ * screen has to keep saying.
+ */
 export const UNPERFORMED_ACTIONS = Object.freeze(['DELETE_MANUAL', 'DELETE_AUTO'])
 
 /**
@@ -186,6 +190,26 @@ export function recordDuplicateDecision(pageHash, action, sizeBytes = null) {
   return request(`/duplicate-pages/${encodeURIComponent(pageHash)}`, {
     method: 'PUT',
     body: { action, ...(sizeBytes === null ? {} : { sizeBytes }) },
+  })
+}
+
+/**
+ * Executes a recorded delete decision, rewriting the archives that carry the page.
+ *
+ * The body is always sent, including when it is `{"mediaItemIds": null}` for every
+ * match. The route requires one: it refuses to infer "remove everything" from an
+ * absent body, because no reliable test distinguishes a request that carries no
+ * body from one whose body it could not measure, and one side of that ambiguity is
+ * rewriting every archive carrying the hash. So the widest effect is stated here
+ * rather than left to be deduced.
+ *
+ * Answers `202` with `{ queuedMediaItems }` — what was queued, not what was
+ * removed. `409` means the hash carries no recorded delete decision.
+ */
+export function executeDuplicateRemoval(pageHash, mediaItemIds = null) {
+  return request(`/duplicate-pages/${encodeURIComponent(pageHash)}/removals`, {
+    method: 'POST',
+    body: { mediaItemIds },
   })
 }
 
