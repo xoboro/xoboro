@@ -229,6 +229,59 @@ both that shape. When a test cannot reach the authority for part of its subject 
 with a template parameter, a route that needs a fixture — say so in the test, and name
 what is still covered by agreement alone.
 
+## A tally of zero failures is not a green build
+
+The verification gate is a full rebuild in an isolated worktree:
+
+```
+git worktree add /tmp/gate HEAD
+cd /tmp/gate && ./gradlew clean build --continue \
+  --no-build-cache --rerun-tasks --no-configuration-cache
+```
+
+Read **`BUILD SUCCESSFUL`**, not the test tally. They are different claims, and the gap
+between them is where a run gets reported as green while a third of it never happened.
+
+A module whose `compileKotlin` fails writes no test results at all. Its tests do not fail —
+they do not exist. So summing `failures` and `errors` across every
+`build/test-results/**/*.xml` gives a confident `failed=0` for a build that stopped
+compiling partway. Three runs of the same gate, same commit:
+
+| | suites | tests | failed | build |
+|---|---|---|---|---|
+| default heap | 107 | 623 | 0 | **FAILED** |
+| `-Xmx3g` on the command line | 151 | 746 | 0 | **FAILED** |
+| heap set in `gradle.properties` | 183 | 884 | 0 | SUCCESSFUL |
+
+All three report zero failures. Only the last one ran the suite. A gate reported as
+"759 tests, 0 failed" earlier in this repository's history was one of the truncated ones.
+
+The cause was the Kotlin compile daemon's heap, which `gradle.properties` did not set. It
+matters only on a full rebuild — every module at once, in parallel — which is exactly what
+the gate is. It surfaces as
+
+```
+BackendException: Backend Internal error: Exception during IR lowering
+Could not read class: VirtualFile: .../java/util/regex/Pattern.class
+```
+
+with `OutOfMemoryError` several `Caused by` levels down, in files nobody touched. That reads
+as a compiler bug, and was diagnosed as one here more than once — including after it
+reproduced in an isolated worktree, which was taken as ruling out contention. It does not
+rule anything out: an isolated worktree *is* a full recompile, so the control was selecting
+for the cause.
+
+So when a build fails with no failing test:
+
+- **Compilation ran out of memory** — `OutOfMemoryError` below an `IR lowering` or
+  `Could not read class` line. Check `gradle.properties` still sets `kotlin.daemon.jvmargs`.
+- **Concurrent builds shared a build directory** — `NoClassDefFoundError`,
+  `initializationError`, `EOFException`, a missing `in-progress-results-generic.bin`, or a
+  failing task with zero failing cases. Use a worktree per agent.
+- **A real defect** — carries an assertion message, and the XML tally is non-zero.
+
+Only the third is about the code.
+
 ## Completion rule
 
 Code is not considered complete when only the happy path passes. Tests cover:
