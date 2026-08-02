@@ -114,6 +114,6 @@ These are valuable but do not count against Komga feature coverage.
 
 | Capability | Status | Remaining work |
 |---|---|---|
-| WebDAV and other remote source adapters | FUTURE | Source read/list/cache/mutation contracts and credential storage |
+| WebDAV and other remote source adapters | PARTIAL | A read-only WebDAV source is implemented (`server/sources/webdav`) and registered alongside `local`: a library created with `provider: "webdav"` lists, analyzes and serves from a remote server. Archives are cached locally beside the database because analyzers need a real file, evicted least-recently-used under a byte bound and revalidated by ETag/Last-Modified. Credentials come from `XOBORO_WEBDAV_USERNAME`/`XOBORO_WEBDAV_PASSWORD`, or a per-library pair selected by a credential id carried as a fragment on the stored root URL — never from the database, for the same reason OAuth2 client secrets are not stored there. Verified against a real server: 18,211 archives listed and pages served over it. Remaining: mutation (`SourceMutationAccess` stays unsupported, so extension repair, RAR-to-CBZ conversion and duplicate-page removal do not apply to a WebDAV library), and no other remote protocol |
 | Video and audio timelines | FUTURE | Native scanning, metadata, progress, transcoding/delivery, and clients |
 | Private Android and iOS applications | FUTURE | Local libraries, remote Xoboro/NAS connections, offline holdings, and native readers |
