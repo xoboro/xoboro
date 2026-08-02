@@ -64,13 +64,63 @@ describe('duplicate pages', () => {
     expect(disclosure).toBeInTheDocument()
   })
 
+  it('identifies a row by the field the server actually sends', async () => {
+    // The duplicate-page routes answer `hash`. Every fixture in this file used to say
+    // `pageHash`, which is the URL parameter's name and not a field of any response, so
+    // the screen read `undefined` for every row in production: an empty hash cell, every
+    // row keyed alike, and each decision sent to `/duplicate-pages/undefined`.
+    //
+    // Asserted through the request rather than the rendered text, because the hash has to
+    // survive as far as the URL for the screen to do anything at all.
+    const fetchImpl = routes([
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([{ hash: 'real-hash', sizeBytes: 1024, matchCount: 2 }]))],
+    ])
+    globalThis.fetch = fetchImpl
+
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('inspect-real-hash')).toBeInTheDocument())
+    expect(screen.getByTestId('inspect-real-hash').textContent).toContain('real-hash')
+
+    fetchImpl.mockClear()
+    await fireEvent.click(screen.getByTestId('record-IGNORE-real-hash'))
+
+    await waitFor(() => expect(fetchImpl.mock.calls.length).toBeGreaterThan(0))
+    const recorded = fetchImpl.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(recorded, 'no PUT was sent').toBeDefined()
+    expect(recorded[0]).toContain('/duplicate-pages/real-hash')
+  })
+
+  it('names the carrying file rather than only its identifier', async () => {
+    // `/duplicate-pages/{hash}/media-items` answers `fileName`, and the screen read
+    // `mediaItemTitle` — a field no response carries — so every carrier fell through to
+    // the `?? mediaItemId` branch and the dialog listed opaque identifiers. Deciding
+    // whether a repeated page is a scanner credit is a judgement about the file, so the
+    // one field that supports it was the one being dropped.
+    globalThis.fetch = routes([
+      ['/media-items', reply(page([
+        { mediaItemId: 'item-1', pageNumber: 4, fileName: 'credits.jpg', fileSizeBytes: 900, mediaType: 'image/jpeg' },
+      ]))],
+      ['/duplicate-pages/decided', reply(page([]))],
+      ['/duplicate-pages', reply(page([{ hash: 'carried', sizeBytes: 900, matchCount: 1 }]))],
+    ])
+    render(Duplicates)
+
+    await waitFor(() => expect(screen.getByTestId('inspect-carried')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('inspect-carried'))
+
+    const carrier = await screen.findByTestId('carrier-item-1-4')
+    expect(carrier.textContent).toContain('credits.jpg')
+  })
+
   it('renders a candidate row from the page envelope', async () => {
     // The assertion the suite was missing. Every other test here reached for a testid
     // that only exists inside a row, so all of them failed the same way for the same
     // reason and none of them said what it was.
     globalThis.fetch = routes([
       ['/duplicate-pages/decided', reply(page([]))],
-      ['/duplicate-pages', reply(page([{ pageHash: 'abc', sizeBytes: 1024 }]))],
+      ['/duplicate-pages', reply(page([{ hash: 'abc', sizeBytes: 1024 }]))],
     ])
     const { container } = render(Duplicates)
 
@@ -109,7 +159,7 @@ describe('duplicate pages', () => {
         if (requested > totalPages - 1) {
           return { ...page([]), page: requested, totalItems: 1, totalPages }
         }
-        return { ...page([{ pageHash: `hash-${requested}`, sizeBytes: 1 }]), page: requested, totalItems: 1, totalPages }
+        return { ...page([{ hash: `hash-${requested}`, sizeBytes: 1 }]), page: requested, totalItems: 1, totalPages }
       }
       if (init.method === 'PUT') decided = true
       const text = JSON.stringify(body())
@@ -179,7 +229,7 @@ describe('duplicate pages', () => {
         body = empty
       } else {
         body = {
-          items: [{ pageHash: `h${requested}`, sizeBytes: 1 }],
+          items: [{ hash: `h${requested}`, sizeBytes: 1 }],
           page: requested,
           size: 50,
           totalItems: 2,
@@ -241,10 +291,10 @@ describe('duplicate pages', () => {
         if (init.method === 'PUT') return {}
         if (url.includes('/decided')) return page([])
         return decided
-          ? page([{ pageHash: 'second', sizeBytes: 2 }])
+          ? page([{ hash: 'second', sizeBytes: 2 }])
           : page([
-              { pageHash: 'first', sizeBytes: 1 },
-              { pageHash: 'second', sizeBytes: 2 },
+              { hash: 'first', sizeBytes: 1 },
+              { hash: 'second', sizeBytes: 2 },
             ])
       }
       if (init.method === 'PUT') decided = true
@@ -276,7 +326,7 @@ describe('duplicate pages', () => {
     // reading "Delete pages" would be a lie in the interface.
     globalThis.fetch = routes([
       ['/duplicate-pages/decided', reply(page([]))],
-      ['/duplicate-pages', reply(page([{ pageHash: 'abc', sizeBytes: 1024 }]))],
+      ['/duplicate-pages', reply(page([{ hash: 'abc', sizeBytes: 1024 }]))],
     ])
     render(Duplicates)
 
@@ -292,7 +342,7 @@ describe('duplicate pages', () => {
 
   it('marks a recorded delete decision as not carried out', async () => {
     globalThis.fetch = routes([
-      ['/duplicate-pages/decided', reply(page([{ pageHash: 'def', action: 'DELETE_AUTO' }]))],
+      ['/duplicate-pages/decided', reply(page([{ hash: 'def', action: 'DELETE_AUTO' }]))],
       ['/duplicate-pages', reply(page([]))],
     ])
     render(Duplicates)
@@ -305,7 +355,7 @@ describe('duplicate pages', () => {
     // null. Rendering "0" would state a fact the server did not.
     globalThis.fetch = routes([
       ['/duplicate-pages/decided', reply(page([]))],
-      ['/duplicate-pages', reply(page([{ pageHash: 'ghi', sizeBytes: null }]))],
+      ['/duplicate-pages', reply(page([{ hash: 'ghi', sizeBytes: null }]))],
     ])
     const { container } = render(Duplicates)
 
