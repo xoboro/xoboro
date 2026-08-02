@@ -1,5 +1,6 @@
 package io.xoboro.server.security
 
+import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserSession
 import io.xoboro.core.domain.UserSessionRepository
@@ -18,7 +19,7 @@ class InMemoryUserSessionRepository : UserSessionRepository {
     tokenDigest: String,
     accessedAtMillis: Long,
     expiresAtMillis: Long,
-  ): Boolean {
+  ): SessionTouch {
     var touched = false
     sessions.computeIfPresent(tokenDigest) { _, current ->
       if (current.expiresAtMillis <= accessedAtMillis) {
@@ -31,7 +32,8 @@ class InMemoryUserSessionRepository : UserSessionRepository {
         )
       }
     }
-    return touched
+    // Never UNAVAILABLE: an in-memory map has no contention to report.
+    return if (touched) SessionTouch.TOUCHED else SessionTouch.EXPIRED
   }
 
   override fun deleteByTokenDigest(tokenDigest: String): Boolean =

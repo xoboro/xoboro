@@ -1,5 +1,6 @@
 package io.xoboro.server.security
 
+import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserSession
 import kotlin.test.Test
@@ -20,11 +21,11 @@ class InMemoryUserSessionRepositoryTest {
     assertFalse(repository.insertIfAbsent(first))
     repository.insertIfAbsent(second)
     repository.insertIfAbsent(third)
-    assertTrue(repository.touchIfActive("digest-1", 10, 110))
+    assertEquals(SessionTouch.TOUCHED, repository.touchIfActive("digest-1", 10, 110))
     assertEquals(110, repository.findByTokenDigestOrNull("digest-1")?.expiresAtMillis)
-    assertTrue(repository.touchIfActive("digest-1", 5, 105))
+    assertEquals(SessionTouch.TOUCHED, repository.touchIfActive("digest-1", 5, 105))
     assertEquals(110, repository.findByTokenDigestOrNull("digest-1")?.expiresAtMillis)
-    assertFalse(repository.touchIfActive("digest-1", 110, 210))
+    assertEquals(SessionTouch.EXPIRED, repository.touchIfActive("digest-1", 110, 210))
 
     assertEquals(1, repository.deleteExpired(150))
     assertNull(repository.findByTokenDigestOrNull("digest-1"))
