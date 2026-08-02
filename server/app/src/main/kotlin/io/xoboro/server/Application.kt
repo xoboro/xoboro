@@ -521,8 +521,19 @@ fun Application.xoboroModule(
             xoboroNativeEventRoutes(hub = nativeEventHub, sessions = sessions)
           }
           oauth2LoginLifecycle?.let(::xoboroNativeOAuth2Routes)
-          if (pageHashRepository != null && pageHashLifecycle != null) {
-            xoboroNativeDuplicatePageRoutes(pageHashRepository, pageHashLifecycle)
+          if (
+            pageHashRepository != null &&
+            pageHashLifecycle != null &&
+            compatibilityMaintenanceRequester != null
+          ) {
+            // Reuses the same durable requester instance the Komga-compatible surface enqueues
+            // removals through - there is exactly one thing in the process that turns a delete
+            // decision into a queued task, native or compatible.
+            xoboroNativeDuplicatePageRoutes(
+              pageHashRepository,
+              pageHashLifecycle,
+              compatibilityMaintenanceRequester,
+            )
           }
           if (
             serverSettingsLifecycle != null &&
