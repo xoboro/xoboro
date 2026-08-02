@@ -127,7 +127,7 @@
   async function inspect(candidate) {
     busy = true
     try {
-      inspecting = { candidate, carriers: await listHashCarriers(candidate.pageHash) }
+      inspecting = { candidate, carriers: await listHashCarriers(candidate.hash) }
     } catch (caught) {
       error = caught
     } finally {
@@ -138,7 +138,7 @@
   async function record(candidate, action) {
     busy = true
     try {
-      await recordDuplicateDecision(candidate.pageHash, action, candidate.sizeBytes ?? null)
+      await recordDuplicateDecision(candidate.hash, action, candidate.sizeBytes ?? null)
       // Recording removes the hash from the candidate list, so a decision taken on the
       // last row of a page would otherwise leave the operator on a page that no longer
       // exists. Both listings are re-read at their current page.
@@ -173,7 +173,7 @@
   onpage={goToCandidatePage}
   {busy}
   emptyLabel={$_('admin.duplicates.noCandidates')}
-  keyOf={(candidate) => candidate.pageHash}
+  keyOf={(candidate) => candidate.hash}
 >
   {#snippet row(candidate)}
     <tr>
@@ -182,10 +182,10 @@
           class="hash"
           type="button"
           disabled={busy}
-          data-testid={`inspect-${candidate.pageHash}`}
+          data-testid={`inspect-${candidate.hash}`}
           onclick={() => inspect(candidate)}
         >
-          {candidate.pageHash}
+          {candidate.hash}
         </button>
       </th>
       <td>
@@ -199,7 +199,7 @@
             <button
               type="button"
               disabled={busy}
-              data-testid={`record-${action}-${candidate.pageHash}`}
+              data-testid={`record-${action}-${candidate.hash}`}
               data-performed={UNPERFORMED_ACTIONS.includes(action) ? 'false' : 'true'}
               onclick={() => record(candidate, action)}
             >
@@ -225,15 +225,15 @@
   onpage={goToDecisionPage}
   {busy}
   emptyLabel={$_('admin.duplicates.noDecisions')}
-  keyOf={(decision) => decision.pageHash}
+  keyOf={(decision) => decision.hash}
 >
   {#snippet row(decision)}
     <tr>
-      <th scope="row">{decision.pageHash}</th>
+      <th scope="row">{decision.hash}</th>
       <td>{$_(`admin.duplicates.action.${decision.action}`)}</td>
       <td>
         {#if UNPERFORMED_ACTIONS.includes(decision.action)}
-          <span class="not-performed" data-testid={`not-performed-${decision.pageHash}`}>
+          <span class="not-performed" data-testid={`not-performed-${decision.hash}`}>
             {$_('admin.duplicates.intentOnly')}
           </span>
         {:else}
@@ -250,12 +250,20 @@
     onclose={() => (inspecting = null)}
   >
     {#snippet children()}
-      <p class="hash-detail">{inspecting.candidate.pageHash}</p>
+      <p class="hash-detail">{inspecting.candidate.hash}</p>
       <ul>
         {#each inspecting.carriers.items ?? [] as carrier, index (`${carrier.mediaItemId}-${carrier.pageNumber}-${index}`)}
-          <li>
-            <span>{carrier.mediaItemTitle ?? carrier.mediaItemId}</span>
-            <span class="page">{$_('admin.duplicates.page', { values: { number: carrier.pageNumber } })}</span>
+          <li data-testid={`carrier-${carrier.mediaItemId}-${carrier.pageNumber}`}>
+            <!-- The entry name, because deciding whether a repeated page is a scanner
+                 credit is a judgement about the file. This read `mediaItemTitle`, which no
+                 response carries, so every carrier fell through to the identifier and the
+                 dialog listed opaque ids while the server was sending the name. The
+                 identifier stays as the fallback: a name is what the route sends, not
+                 something it promises. -->
+            <span class="carrier-file">{carrier.fileName ?? carrier.mediaItemId}</span>
+            <span class="page">
+              {$_('admin.duplicates.page', { values: { number: carrier.pageNumber } })}
+            </span>
           </li>
         {/each}
         {#if (inspecting.carriers.items ?? []).length === 0}
@@ -350,8 +358,13 @@
     border-bottom: 1px solid var(--line-subtle);
     font-size: var(--font-sm);
   }
+  .carrier-file {
+    font-family: ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
   .page {
     color: var(--text-muted);
+    white-space: nowrap;
   }
   .empty {
     color: var(--text-muted);
