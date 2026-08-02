@@ -133,7 +133,7 @@ export default {
     },
     duplicates: {
       removalNotPerformed:
-        'Xoboro는 결정을 기록만 하고 페이지를 삭제하지 않습니다. 삭제는 디스크의 아카이브를 다시 쓰는 일이라 되돌릴 수 없고, 그 파일의 주인이 결정할 일입니다. 삭제 항목은 의사 표시로만 저장됩니다.',
+        '결정을 기록해도 삭제되지 않습니다. 기록된 삭제는 별도 단계로 실행해야 하며, 실행하면 디스크의 아카이브를 다시 씁니다. 파일에서 해당 페이지가 사라지고, 이 콘솔로는 되돌릴 수 없습니다.',
       candidates: '결정 대기',
       decisions: '기록된 결정',
       hash: '페이지 해시',
@@ -142,7 +142,13 @@ export default {
       decide: '결정 기록',
       recorded: '기록된 결정',
       effect: '실제 효과',
-      intentOnly: '기록만 됨 (삭제하지 않음)',
+      intentOnly: '기록만 됨 \u2014 아직 실행되지 않음',
+      execute: '페이지 제거 실행',
+      executeTitle: '중복 페이지 제거',
+      executeSummary: '아카이브 {count}개를 디스크에서 다시 써서 이 페이지를 뺍니다. 실행은 큐에 넣은 뒤 백그라운드에서 진행됩니다.',
+      executeQueued: '{count}개 항목의 제거를 큐에 넣었습니다. 아카이브는 백그라운드에서 다시 쓰입니다.',
+      executeNotMarked: '이 해시에는 기록된 삭제 결정이 없어 실행할 것이 없습니다.',
+      executeNoMatch: '요청한 항목 중 이 해시를 가진 것이 없습니다.',
       excludedFromList: '대기 목록에서 제외됨',
       noCandidates: '결정할 항목이 없습니다',
       noDecisions: '기록된 결정이 없습니다',
