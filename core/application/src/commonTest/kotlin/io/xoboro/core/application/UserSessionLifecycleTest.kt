@@ -1,5 +1,6 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
 import io.xoboro.core.domain.UserId
@@ -67,6 +68,36 @@ class UserSessionLifecycleTest {
 
     assertEquals(user, lifecycle.authenticate("token"))
     assertEquals(600, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
+  }
+
+  @Test
+  fun `keeps authenticating when the store cannot record the access`() {
+    // Found against a real library: while a scan of 18,211 archives held the SQLite write
+    // lock, `touchIfActive` exceeded its busy timeout and the exception failed the whole
+    // request with a 500 — for a plain read, which only became a write because every
+    // authenticated call extends the session's sliding window.
+    //
+    // Losing one extension is harmless: the window is 500ms shy of what it would have been
+    // and the next request extends it. Refusing the request, or worse treating the failure
+    // as an expiry and logging the operator out, is not. So the store reports that it could
+    // not record the access, and that is distinct from reporting the session expired.
+    val user = syntheticUser()
+    val sessions = InMemorySessionRepository()
+    sessions.insertIfAbsent(session("hash:token", user.id, expiresAtMillis = 1_000))
+    sessions.touchUnavailable = true
+    val lifecycle =
+      UserSessionLifecycle(
+        users = SingleUserRepository(user),
+        sessions = sessions,
+        tokenEncoder = TokenEncoder { "hash:$it" },
+        plainTokenFactory = { "unused" },
+        currentTimeMillis = { 100 },
+        inactivityTimeoutMillis = 500,
+      )
+
+    assertEquals(user, lifecycle.authenticate("token"))
+    // The session survives: an unavailable store must not read as a revocation.
+    assertEquals(1_000, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
   }
 
   private fun syntheticUser(): User =
@@ -141,19 +172,23 @@ class UserSessionLifecycleTest {
       return true
     }
 
+    /** Makes the store report that it could not record the access, as a busy database does. */
+    var touchUnavailable = false
+
     override fun touchIfActive(
       tokenDigest: String,
       accessedAtMillis: Long,
       expiresAtMillis: Long,
-    ): Boolean {
-      val current = sessions[tokenDigest] ?: return false
-      if (current.expiresAtMillis <= accessedAtMillis) return false
+    ): SessionTouch {
+      if (touchUnavailable) return SessionTouch.UNAVAILABLE
+      val current = sessions[tokenDigest] ?: return SessionTouch.EXPIRED
+      if (current.expiresAtMillis <= accessedAtMillis) return SessionTouch.EXPIRED
       sessions[tokenDigest] =
         current.copy(
           lastAccessedAtMillis = maxOf(current.lastAccessedAtMillis, accessedAtMillis),
           expiresAtMillis = maxOf(current.expiresAtMillis, expiresAtMillis),
         )
-      return true
+      return SessionTouch.TOUCHED
     }
 
     override fun deleteByTokenDigest(tokenDigest: String): Boolean =
