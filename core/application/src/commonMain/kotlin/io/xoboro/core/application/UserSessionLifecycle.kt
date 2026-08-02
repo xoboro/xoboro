@@ -1,5 +1,6 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRepository
 import io.xoboro.core.domain.UserSession
@@ -52,14 +53,27 @@ class UserSessionLifecycle(
       sessions.deleteByTokenDigest(digest)
       return null
     }
-    val touched =
+    // The store, not the row read above, decides expiry: a session extended between that read
+    // and this call must not be revoked by a stale value. But a store that cannot answer is a
+    // third case, and collapsing it into "expired" is what made a busy database log operators
+    // out and fail plain reads - every authenticated request extends the sliding window, so
+    // every read is also a write, and under a large scan that write loses the lock.
+    return when (
       sessions.touchIfActive(
         tokenDigest = digest,
         accessedAtMillis = now,
         expiresAtMillis = now + inactivityTimeoutMillis,
       )
-    if (!touched) sessions.deleteExpired(now)
-    return user.takeIf { touched }
+    ) {
+      SessionTouch.TOUCHED -> user
+      SessionTouch.EXPIRED -> {
+        sessions.deleteExpired(now)
+        null
+      }
+      // Proceeds on the session that was just read. The window ends up shorter than it would
+      // have been and the next request extends it, which is the cheaper of the two mistakes.
+      SessionTouch.UNAVAILABLE -> user
+    }
   }
 
   fun invalidate(plainToken: String): Boolean =
