@@ -4,17 +4,31 @@ import io.xoboro.core.application.SourceCopyMode
 import io.xoboro.core.application.SourceImportRequest
 import io.xoboro.core.application.SourceMutationAccess
 import io.xoboro.core.application.SourceMutationResult
+import java.io.IOException
 import java.net.URI
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
+import java.util.UUID
 import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-class LocalSourceMutationAccess : SourceMutationAccess {
+/**
+ * @param quarantine When set, the original file behind an archive rewrite is preserved by moving
+ *   it here instead of letting the rewritten copy overwrite it in place. A single instance of
+ *   this class serves every local library root — the root is only known per call, through
+ *   `rootItemId` — so "the quarantine directory must never sit inside a library root" is
+ *   enforced the first time a root becomes known, inside [removeArchiveEntries] before any file
+ *   is touched, rather than at construction.
+ */
+class LocalSourceMutationAccess(
+  private val quarantine: Path? = null,
+) : SourceMutationAccess {
   override val sourceId: String = LocalLibraryRootInspector.SOURCE_ID
 
   override fun delete(
@@ -86,8 +100,13 @@ class LocalSourceMutationAccess : SourceMutationAccess {
     val archive = itemId.filePath("Local media item").toRealPath()
     require(archive.startsWith(root)) { "Local media item must remain inside its library root" }
     require(Files.isRegularFile(archive)) { "Local media item must be a regular file: $archive" }
+    val resolvedQuarantine = quarantine?.realPathOrNormalized()
+    require(resolvedQuarantine == null || !resolvedQuarantine.startsWith(root)) {
+      "Quarantine directory must not be inside the library root: $resolvedQuarantine"
+    }
     val temporary = Files.createTempFile(archive.parent, ".xoboro-rewrite-", ".tmp")
     var removed = 0
+    val removedNames = mutableSetOf<String>()
     try {
       ZipInputStream(Files.newInputStream(archive).buffered()).use { input ->
         ZipOutputStream(Files.newOutputStream(temporary).buffered()).use { output ->
@@ -95,6 +114,7 @@ class LocalSourceMutationAccess : SourceMutationAccess {
             val entry = input.nextEntry ?: break
             if (entry.name in entryNames) {
               removed += 1
+              removedNames += entry.name
             } else {
               val replacement =
                 ZipEntry(entry.name).apply {
@@ -110,10 +130,103 @@ class LocalSourceMutationAccess : SourceMutationAccess {
           }
         }
       }
-      if (removed > 0) moveIntoPlace(temporary, archive, replaceExisting = true)
+      if (removed > 0) {
+        verifyRewrittenArchive(archive, temporary, removedNames)
+        replaceArchive(archive, temporary, resolvedQuarantine)
+      }
       return removed
     } finally {
       Files.deleteIfExists(temporary)
+    }
+  }
+
+  /**
+   * Confirms, via the central directory ([ZipFile], not the sequential [ZipInputStream] used to
+   * write [temporary]), that [temporary] holds exactly the entries of [archive] minus
+   * [removedNames] — nothing else missing, nothing else added — and that every retained entry
+   * still carries its original uncompressed size and is actually readable. A truncated or
+   * subtly malformed [archive] can make [ZipInputStream] stop enumerating early without ever
+   * raising an exception, which would otherwise let a rewrite silently drop pages nobody asked
+   * to remove.
+   */
+  private fun verifyRewrittenArchive(
+    archive: Path,
+    temporary: Path,
+    removedNames: Set<String>,
+  ) {
+    ZipFile(archive.toFile()).use { originalZip ->
+      ZipFile(temporary.toFile()).use { temporaryZip ->
+        val originalEntries = originalZip.entriesByName()
+        val temporaryEntries = temporaryZip.entriesByName()
+        val expectedNames = originalEntries.keys - removedNames
+        check(temporaryEntries.keys == expectedNames) {
+          "Archive rewrite of $archive would drop or add entries: expected retained entries " +
+            "$expectedNames, rewrite produced ${temporaryEntries.keys}"
+        }
+        for (name in expectedNames) {
+          val originalSize = originalEntries.getValue(name).size
+          val temporaryEntry = temporaryEntries.getValue(name)
+          check(temporaryEntry.size == originalSize) {
+            "Archive rewrite of $archive changed the size of entry '$name': expected " +
+              "$originalSize bytes, rewrite produced ${temporaryEntry.size} bytes"
+          }
+          try {
+            temporaryZip.getInputStream(temporaryEntry).use { it.readAllBytes() }
+          } catch (failure: IOException) {
+            throw IllegalStateException(
+              "Archive rewrite of $archive produced an unreadable entry '$name'",
+              failure,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  private fun ZipFile.entriesByName(): Map<String, ZipEntry> {
+    val byName = mutableMapOf<String, ZipEntry>()
+    val remaining = entries()
+    while (remaining.hasMoreElements()) {
+      val entry = remaining.nextElement()
+      byName[entry.name] = entry
+    }
+    return byName
+  }
+
+  /**
+   * Replaces [archive] with the verified [temporary] rewrite. With no [quarantineRoot] resolved
+   * this is the original in-place overwrite. With one resolved, [archive] is moved aside first
+   * so the operator's original survives; if moving [temporary] into place then fails, the
+   * original is moved back so the path never ends up with neither file.
+   */
+  private fun replaceArchive(
+    archive: Path,
+    temporary: Path,
+    quarantineRoot: Path?,
+  ) {
+    if (quarantineRoot == null) {
+      moveIntoPlace(temporary, archive, replaceExisting = true)
+      return
+    }
+    val quarantined = quarantineRoot.resolve(UUID.randomUUID().toString()).resolve(archive.fileName)
+    Files.createDirectories(quarantined.parent)
+    atomicMove(archive, quarantined, replaceExisting = false)
+    try {
+      moveIntoPlace(temporary, archive, replaceExisting = false)
+    } catch (failure: Throwable) {
+      // Caught broadly rather than as `IOException`, because the invariant is about the file
+      // system rather than about a class of exception: between the two moves the media item's
+      // path holds nothing at all, and anything that escapes here - `Files.move` can also raise
+      // `SecurityException` and `UnsupportedOperationException`, neither an `IOException` -
+      // would leave the library missing a file it still believes it has.
+      try {
+        atomicMove(quarantined, archive, replaceExisting = false)
+      } catch (rollbackFailure: Throwable) {
+        // Reported alongside rather than instead: if the restore fails too, the original is
+        // still in quarantine and whoever reads this needs the path, not just the first error.
+        failure.addSuppressed(rollbackFailure)
+      }
+      throw failure
     }
   }
 
@@ -239,6 +352,19 @@ class LocalSourceMutationAccess : SourceMutationAccess {
     require(uri.scheme.equals("file", ignoreCase = true)) { "$label must use a file URI" }
     return Path.of(uri).toAbsolutePath().normalize()
   }
+
+  /**
+   * Resolves symlinks like [Path.toRealPath] when the path already exists, so it compares
+   * correctly against a library root that was itself resolved with [Path.toRealPath]. Falls back
+   * to a plain normalized absolute path when the quarantine directory does not exist yet, since
+   * it is created on demand.
+   */
+  private fun Path.realPathOrNormalized(): Path =
+    try {
+      toRealPath()
+    } catch (_: NoSuchFileException) {
+      toAbsolutePath().normalize()
+    }
 
   private fun validatedRoot(rootItemId: String): Path =
     rootItemId.filePath("Local media root").toRealPath().also { root ->
