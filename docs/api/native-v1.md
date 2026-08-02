@@ -879,8 +879,9 @@ would be unreachable.
 | `GET` | `/api/xoboro/v1/duplicate-pages/decided` | `200 OK` |
 | `GET` | `/api/xoboro/v1/duplicate-pages/{pageHash}/media-items` | `200 OK` |
 | `PUT` | `/api/xoboro/v1/duplicate-pages/{pageHash}` | `200 OK` |
+| `POST` | `/api/xoboro/v1/duplicate-pages/{pageHash}/removals` | `202 Accepted` |
 
-Administrator-only, all four. Duplicate pages expose file names and sizes across
+Administrator-only, all five. Duplicate pages expose file names and sizes across
 every library, so a caller with a grant on one library must not learn another's
 file layout from this surface. A non-administrator receives
 `403 duplicate_pages_forbidden`.
@@ -897,17 +898,39 @@ number carrying that hash.
 because a hash whose pages differ in size has no single size, and the candidate
 listing reports `null` for it.
 
-**Xoboro records these decisions and does not perform removal.** Nothing executes
-`DELETE_AUTO` or `DELETE_MANUAL`: removing a page means rewriting an archive on
-disk, which is destructive, irreversible for the operator's own files, and a
-decision that belongs to whoever owns those files rather than to a sweep. The two
-delete actions are stored as stated intent, and `deleteCount` is therefore always
-`0` — it is the stored value, not a placeholder that will change shape later.
+Recording and executing a decision are deliberately two separate calls. `IGNORE`
+takes effect purely from being recorded: the candidate list excludes any hash
+with a recorded decision, so ignoring a hash removes it from the list
+permanently. `DELETE_AUTO` and `DELETE_MANUAL` do not remove anything by
+themselves — they only record the operator's stated intent, and `deleteCount`
+stays `0` until a removal actually runs.
 
-`IGNORE` is the one action with an effect today, and a real one: the candidate list
-excludes any hash with a recorded decision, so ignoring a hash removes it from the
-list permanently. That is why the delete actions are not rejected outright — the
-surface is useful without removal existing.
+`POST /duplicate-pages/{pageHash}/removals` is what executes a delete. It queues
+durable removal tasks that rewrite the archive on the operator's own disk, which
+is destructive and irreversible for those files, so it refuses to run against a
+hash that carries no recorded `DELETE_AUTO` or `DELETE_MANUAL` decision — a
+`409 duplicate_page_not_marked_for_deletion` response means exactly that.
+Requiring the decision first is what keeps a single call from deleting anything
+that was not already, separately, asked for.
+
+The request body is **required**. `{"mediaItemIds": ["..."]}` restricts removal to
+matches whose media item is in that list, and a request naming no matching media
+item returns `404 duplicate_page_match_not_found`. `{"mediaItemIds": null}`, or a
+body that omits the field, queues removal for every media item carrying the hash.
+A request with no body at all is refused rather than treated as either.
+
+That last part is deliberate and is the one place this surface is less convenient
+than it could be. "No body means every match" reads naturally, but whether a body
+arrived is not something a server establishes reliably: a chunked request carries
+one and declares no `Content-Length`, so a length test takes it for empty. Every
+such test resolves an ambiguity, and here one side of the ambiguity is rewriting
+every archive that carries the hash. Asking the caller again is cheap by
+comparison.
+
+A successful call returns `202 Accepted` with `{"queuedMediaItems": <count>}`,
+the number of media items that had a removal task queued. The count is what was
+**queued**, not what was removed: the tasks are durable and run afterwards, and a
+task whose rewrite fails verification leaves that archive untouched.
 
 ### External login configuration
 
@@ -1147,10 +1170,11 @@ A missing media item returns `404 media_item_not_found`; a missing series
 returns `404 series_not_found`. A non-administrator receives `403
 catalog_maintenance_forbidden` before any existence check or task is queued.
 
-Duplicate-page removal and book-artwork regeneration are intentionally not
-ported to the native surface yet: they are tracked separately under artwork
-and duplicate-detection work in `docs/feature-coverage.md` rather than as
-general "maintenance" commands.
+Duplicate-page removal has its own dedicated route under
+[Duplicate pages](#duplicate-pages) rather than living here as a general
+"maintenance" command. Book-artwork regeneration is intentionally not ported to
+the native surface yet: it is tracked separately under artwork work in
+`docs/feature-coverage.md`.
 
 Route-specific `*_not_found` and `*_forbidden` codes survive the production
 pipeline. `Application.kt` installs a global `StatusPages

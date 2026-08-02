@@ -7,10 +7,12 @@ import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
+import io.xoboro.core.application.DuplicatePageRemovalRequester
 import io.xoboro.core.application.PageHashLifecycle
 import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.domain.KnownPageHash
@@ -26,19 +28,24 @@ import kotlinx.serialization.Serializable
  * releaser stamps into every archive. Detection already existed and stored its results; nothing exposed
  * them outside the Komga-compatible surface, so a native-only deployment could not see or act on them.
  *
- * **This surface records decisions; it does not delete anything.** Nothing in Xoboro executes
- * `DELETE_AUTO` or `DELETE_MANUAL` — removing a page means rewriting an archive on disk, which is
- * destructive, irreversible for the operator's own files, and a decision that belongs to whoever owns
- * those files rather than to a sweep. The two delete actions are accepted and stored as an operator's
- * stated intent, and `docs/api/native-v1.md` says plainly that no removal happens yet.
+ * The surface is split into recording and executing a decision, and deliberately not merged into
+ * one step. `PUT /{pageHash}` records what an operator wants done - `IGNORE`, `DELETE_AUTO`, or
+ * `DELETE_MANUAL` - and only `IGNORE` has an effect at that point, by removing the hash from the
+ * candidate list. `POST /{pageHash}/removals` is what actually executes a delete: it rewrites the
+ * archive on the operator's disk, which is destructive and irreversible for those files, so it
+ * refuses to run against a hash that carries no recorded delete decision. Requiring the decision
+ * first is what keeps a single unconsidered call from deleting anything - a caller has to have
+ * already said what it wants before this route will act on it.
  *
- * `IGNORE` is the one action with an effect today, and it is a real one: the candidate list excludes any
- * hash that has been marked known, so ignoring a hash removes it from the list permanently. That is why
- * the actions are not gated behind removal existing — the endpoint is useful without it.
+ * `IGNORE` is the one action with an effect purely from being recorded: the candidate list excludes
+ * any hash that has been marked known, so ignoring a hash removes it from the list permanently. That
+ * is why the decision and the removal are not rejected outright before each other exists - each half
+ * of the surface is useful on its own.
  */
 fun Route.xoboroNativeDuplicatePageRoutes(
   hashes: PageHashRepository,
   lifecycle: PageHashLifecycle,
+  removals: DuplicatePageRemovalRequester,
 ) {
   route(XOBORO_API_PREFIX) {
     authenticate(
@@ -99,6 +106,55 @@ fun Route.xoboroNativeDuplicatePageRoutes(
               return@put
             }
           call.respond(known.toNativeResponse())
+        }
+        post("/{pageHash}/removals") {
+          call.requireDuplicatePageAdministrator() ?: return@post
+          val hash = call.requiredParameter("pageHash")
+          val known = hashes.findKnownOrNull(hash)
+          // Executing a removal requires a recorded delete decision - this route is how a stated
+          // intent is carried out, not a second way to delete an arbitrary hash. A hash with no
+          // decision, or one recorded as IGNORE, has not asked for this.
+          if (known == null || known.action == PageHashAction.IGNORE) {
+            call.respondNativeError(
+              HttpStatusCode.Conflict,
+              "duplicate_page_not_marked_for_deletion",
+              "Page hash has no recorded DELETE_AUTO or DELETE_MANUAL decision",
+            )
+            return@post
+          }
+          // The body is required, and "every match" is a value inside it rather than its absence.
+          //
+          // Treating a missing body as "remove every match" reads naturally and is wrong here: the
+          // route rewrites archives, and whether a body arrived is not something a server can
+          // establish reliably. Sniffing `Content-Length` takes a chunked request - which carries a
+          // body and declares no length - for an empty one, so a caller naming a single media item
+          // would have its list ignored and every match carrying the hash deleted instead. Any such
+          // test resolves an ambiguity, and on this route one side of every ambiguity is mass
+          // deletion.
+          //
+          // So the body is simply read. A request without one is refused by content negotiation
+          // before reaching the queue, which is the failure worth having: asking again is cheap,
+          // and rewriting archives nobody named is not.
+          val requestedMediaItemIds =
+            call.receive<XoboroDuplicatePageRemovalRequest>().mediaItemIds
+          val allMatches = hashes.findMatches(hash, CatalogPageRequest(unpaged = true)).content
+          val matches =
+            if (requestedMediaItemIds == null) {
+              allMatches
+            } else {
+              val requested = requestedMediaItemIds.toSet()
+              allMatches.filter { it.mediaItemId.value in requested }
+            }
+          if (requestedMediaItemIds != null && matches.isEmpty()) {
+            call.respondNativeError(
+              HttpStatusCode.NotFound,
+              "duplicate_page_match_not_found",
+              "No media item in the request matches this page hash",
+            )
+            return@post
+          }
+          val queued = removals.deleteDuplicatePages(hash, matches)
+          call.respond(HttpStatusCode.Accepted, XoboroDuplicatePageRemovalResponse(queued))
         }
       }
     }
@@ -199,8 +255,8 @@ data class XoboroDecidedDuplicatePageResponse(
   /**
    * How many pages a removal has deleted for this hash.
    *
-   * Always `0` today, because nothing performs removal. Present because the count is stored and an
-   * administrator reading it should see the stored value rather than a field that appears later.
+   * `0` until `POST /duplicate-pages/{pageHash}/removals` actually runs a removal for this hash;
+   * it is the stored value, not a placeholder that changes shape once removal is implemented.
    */
   val deleteCount: Int,
   val createdAtMillis: Long,
@@ -224,4 +280,19 @@ data class XoboroDuplicatePageMatchResponse(
 data class XoboroDuplicatePageDecisionRequest(
   val action: String,
   val sizeBytes: Long? = null,
+)
+
+/**
+ * The request body for `POST /duplicate-pages/{pageHash}/removals`. Absent entirely, or present
+ * with [mediaItemIds] null or omitted, means every match is queued; a non-null list restricts
+ * removal to matches whose media item is in it.
+ */
+@Serializable
+data class XoboroDuplicatePageRemovalRequest(
+  val mediaItemIds: List<String>? = null,
+)
+
+@Serializable
+data class XoboroDuplicatePageRemovalResponse(
+  val queuedMediaItems: Int,
 )

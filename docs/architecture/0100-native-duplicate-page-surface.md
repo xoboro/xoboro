@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted. Removal is deliberately out of scope; see Decision.
+Accepted, and **partly superseded**. The Decision below states that nothing in Xoboro executes a
+removal. That was false when it was written: the Komga-compatible surface already reached the
+executor, and this document did not. See "Correction" at the end, which records what was actually
+true and what changed as a result.
 
 ## Context
 
@@ -62,3 +65,40 @@ page, and an out-of-range size is a client error rather than a 500.
 - Verified by mutation: dropping the administrator gate fails the non-administrator test, and making an
   empty `action` filter mean an empty set — rather than every action — fails the filter test.
 - The OpenAPI drift test caught the four new routes before review did, which is what it is for.
+
+## Correction
+
+The central claim above — "Nothing in Xoboro executes `DELETE_AUTO` or `DELETE_MANUAL`" — was not
+true when this document was accepted. `RemoveDuplicatePagesTaskHandler` existed, was registered in
+`XoboroRuntime`, called `SourceMutationAccess.removeArchiveEntries`, and incremented `deleteCount`.
+It was reachable from `POST /api/v1/page-hashes/{hash}/delete-all` and `/delete-match` on the
+Komga-compatible surface. So an operator's archives could already be rewritten, while this ADR, the
+API doc, the console screen and the coverage row all said removal was unimplemented and
+`deleteCount` was always `0`.
+
+This is worth recording as a failure mode rather than as a typo. The decision "we will not build
+this" and the fact "this is not built" are different claims, and only the first is an ADR's to
+make. Writing them as one sentence made a design intention read as a description of the system,
+and nothing checks a description that only exists in prose. Two hand-maintained documents agreeing
+with each other said nothing about the code neither of them looked at.
+
+What the decision above still gets right, and what is now implemented, is the shape: **deciding and
+executing stay two separate steps.** `POST /api/xoboro/v1/duplicate-pages/{pageHash}/removals`
+executes a recorded decision and refuses a hash that carries none, so no single call deletes
+anything that was not already, separately, asked for. The reasoning for that split is exactly the
+reasoning this ADR used to refuse removal outright.
+
+Two properties were added to the executor at the same time, because it turned out to have neither:
+
+- The rewrite is verified against the source's central directory before it replaces anything. It
+  streamed with `ZipInputStream`, which reads sequential local headers, so a truncated archive
+  could silently produce a rewrite missing entries nobody asked to remove — and be moved into place
+  with a removal count that matched the request exactly.
+- The original can be preserved. A quarantine directory, unset by default, is where the original
+  goes instead of being overwritten. The irreversibility this ADR objected to was real and was
+  already shipping.
+
+Still deliberately not implemented: an **automatic policy** that executes `DELETE_AUTO` unattended
+during a scan. That is the part of the original objection that survives intact — a sweep rewriting
+an operator's archives with nobody watching is a different proposition from an administrator
+executing a decision they recorded, and it is not implied by having built the latter.

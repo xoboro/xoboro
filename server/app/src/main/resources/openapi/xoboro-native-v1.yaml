@@ -675,8 +675,8 @@ paths:
       operationId: put_duplicate_page_decision
       description: >-
         Records what should happen to a duplicate page. IGNORE takes effect immediately by removing
-        the hash from the candidate list; the two delete actions are stored as intent and nothing
-        performs the removal.
+        the hash from the candidate list. DELETE_AUTO and DELETE_MANUAL only record intent; a
+        follow-up `POST .../removals` call is what executes them.
       parameters:
         - name: pageHash
           in: path
@@ -705,6 +705,55 @@ paths:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
         "403":
           description: Authenticated but not an administrator.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/duplicate-pages/{pageHash}/removals:
+    post:
+      tags: [Duplicate pages]
+      operationId: post_duplicate_page_removal
+      description: >-
+        Executes a previously recorded DELETE_AUTO or DELETE_MANUAL decision by queuing removal of
+        the matching archive entries. Rewrites an archive on the operator's disk once the queued
+        task runs, which is why this refuses to run against a hash with no recorded delete decision.
+        The request body is required. Its `mediaItemIds` restricts which matches are queued; a null
+        or omitted `mediaItemIds` queues every match. A request with no body at all is refused
+        rather than taken for either, because a chunked request carries a body and declares no
+        Content-Length, so no reliable test distinguishes them - and here one side of that
+        ambiguity is rewriting every archive carrying the hash.
+      parameters:
+        - name: pageHash
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/XoboroDuplicatePageRemovalRequest" }
+      responses:
+        "202":
+          description: Accepted; removal has been queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroDuplicatePageRemovalResponse" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not an administrator.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: A requested media item does not carry this page hash.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "409":
+          description: The page hash has no recorded DELETE_AUTO or DELETE_MANUAL decision.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
@@ -3973,8 +4022,8 @@ components:
           enum: [DELETE_AUTO, DELETE_MANUAL, IGNORE]
           description: >-
             IGNORE removes the hash from the candidate list. DELETE_AUTO and DELETE_MANUAL are stored
-            as the operator's stated intent; nothing in Xoboro performs page removal, because removing
-            a page rewrites an archive on disk.
+            as the operator's stated intent and do not by themselves remove anything; a follow-up
+            `POST .../removals` call executes a hash recorded with either of these two actions.
         sizeBytes:
           type: integer
           format: int64
@@ -3983,6 +4032,24 @@ components:
             **omits** the key for it rather than sending `null` - the server serializes with
             `explicitNulls = false`. A consumer has to treat absent as "no single size" rather than
             as zero.
+    XoboroDuplicatePageRemovalRequest:
+      type: object
+      properties:
+        mediaItemIds:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: >-
+            Restricts removal to matches whose media item is in this list. Omitted, or an explicit
+            `null`, queues removal for every media item carrying the hash. The enclosing body is
+            required even when this field is not.
+    XoboroDuplicatePageRemovalResponse:
+      type: object
+      required: [queuedMediaItems]
+      properties:
+        queuedMediaItems:
+          type: integer
+          description: How many media items had a removal task queued for them.
     XoboroOAuth2Configuration:
       type: object
       description: >-
