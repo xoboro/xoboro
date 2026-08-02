@@ -130,6 +130,11 @@ import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
+import io.xoboro.server.sources.webdav.WebDavLibraryRootInspector
+import io.xoboro.server.sources.webdav.WebDavSourceArtworkAccess
+import io.xoboro.server.sources.webdav.WebDavSourceInventory
+import io.xoboro.server.sources.webdav.WebDavSourceMediaAccess
+import io.xoboro.server.sources.webdav.WebDavSourceSidecarAccess
 import io.xoboro.server.tasks.ActivityRetentionScheduler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
@@ -546,7 +551,7 @@ class XoboroRuntime private constructor(
           )
         val catalogScanner =
           CatalogScanner(
-            inventories = listOf(LocalSourceInventory()),
+            inventories = listOf(LocalSourceInventory(), WebDavSourceInventory()),
             reconciliationStore =
               JooqCatalogReconciliationStore(
                 database = database,
@@ -657,7 +662,7 @@ class XoboroRuntime private constructor(
           }
         val libraryRootAccess =
           RoutingLibraryRootAccess(
-            listOf(LocalLibraryRootInspector()),
+            listOf(LocalLibraryRootInspector(), WebDavLibraryRootInspector()),
           )
         val libraryAvailabilityProbe =
           LibraryAvailabilityProbe(
@@ -704,12 +709,19 @@ class XoboroRuntime private constructor(
           )
         val localMediaAccess = LocalSourceMediaAccess()
         val localMutationAccess = LocalSourceMutationAccess()
+        // A remote source has to hand the analyzers a real file, so archives are cached beside
+        // the database rather than in the library: the library is read-only and, being remote,
+        // is the one place a cache must not live.
+        val webDavMediaAccess =
+          WebDavSourceMediaAccess(
+            cacheDirectory = config.databasePath.toAbsolutePath().parent.resolve("webdav-cache"),
+          )
         val bookContentAccess =
           BookContentService(
             libraries = libraries,
             books = books,
             media = media,
-            accesses = listOf(localMediaAccess),
+            accesses = listOf(localMediaAccess, webDavMediaAccess),
           )
         val kepubContentAccess =
           ExternalKepubContentAccess(
@@ -725,11 +737,11 @@ class XoboroRuntime private constructor(
                 .resolve("cache/kepub"),
           )
         val comicInfoMetadataProvider =
-          ComicInfoMetadataProvider(listOf(localMediaAccess))
+          ComicInfoMetadataProvider(listOf(localMediaAccess, webDavMediaAccess))
         val epubMetadataProvider =
-          EpubMetadataProvider(listOf(localMediaAccess))
+          EpubMetadataProvider(listOf(localMediaAccess, webDavMediaAccess))
         val pdfMetadataProvider =
-          PdfMetadataProvider(listOf(localMediaAccess))
+          PdfMetadataProvider(listOf(localMediaAccess, webDavMediaAccess))
         val isbnBarcodeMetadataProvider =
           IsbnBarcodeMetadataProvider(bookContentAccess)
         val metadataRefreshLifecycle =
@@ -751,7 +763,7 @@ class XoboroRuntime private constructor(
                 comicInfoMetadataProvider,
                 epubMetadataProvider,
                 MylarSeriesMetadataProvider(
-                  accesses = listOf(LocalSourceSidecarAccess()),
+                  accesses = listOf(LocalSourceSidecarAccess(), WebDavSourceSidecarAccess()),
                   diagnostics = { diagnostic ->
                     // Schema drift is INFO because a newer Mylar writing new fields is normal and
                     // logging it as a problem would train an operator to ignore the log. Everything
@@ -790,7 +802,7 @@ class XoboroRuntime private constructor(
             books = books,
             series = series,
             artwork = artworkLifecycle,
-            accesses = listOf(LocalSourceArtworkAccess()),
+            accesses = listOf(LocalSourceArtworkAccess(), WebDavSourceArtworkAccess()),
           )
         val refreshMetadataTaskEmitter =
           RefreshMetadataTaskEmitter(
@@ -850,7 +862,7 @@ class XoboroRuntime private constructor(
           AnalyzeBook(
             books = books,
             libraries = libraries,
-            accesses = listOf(localMediaAccess),
+            accesses = listOf(localMediaAccess, webDavMediaAccess),
             media = media,
             zipAnalyzer = ZipMediaAnalyzer(),
             currentTimeMillis = System::currentTimeMillis,
@@ -958,7 +970,7 @@ class XoboroRuntime private constructor(
                   books = books,
                   libraries = libraries,
                   media = media,
-                  accesses = listOf(localMediaAccess),
+                  accesses = listOf(localMediaAccess, webDavMediaAccess),
                   mutations = listOf(localMutationAccess),
                   converter = RarToCbzConverter(),
                   analysisEmitter = analyzeBookTaskEmitter,

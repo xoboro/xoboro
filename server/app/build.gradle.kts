@@ -29,6 +29,7 @@ dependencies {
   implementation(project(":server:persistence"))
   implementation(project(":server:security"))
   implementation(project(":server:sources:local"))
+  implementation(project(":server:sources:webdav"))
   implementation(project(":server:tasks"))
   implementation(libs.ktor.server.core)
   implementation(libs.ktor.server.auth)
