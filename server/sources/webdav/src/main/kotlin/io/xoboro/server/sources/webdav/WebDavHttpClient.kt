@@ -33,7 +33,15 @@ class WebDavHttpClient(
       .followRedirects(HttpClient.Redirect.NORMAL)
       .connectTimeout(Duration.ofSeconds(30))
       .build(),
+  private val maximumTransportAttempts: Int = DEFAULT_TRANSPORT_ATTEMPTS,
+  private val retryBackoffMillis: Long = DEFAULT_RETRY_BACKOFF_MILLIS,
+  private val beforeAttempt: () -> Unit = {},
 ) {
+  init {
+    require(maximumTransportAttempts > 0) { "WebDAV transport attempts must be positive" }
+    require(retryBackoffMillis >= 0) { "WebDAV retry backoff must not be negative" }
+  }
+
   /** `PROPFIND` with the given [depth] (0 or 1), returning every `<response>` entry resolved to an absolute URL. */
   fun propfind(
     url: String,
@@ -141,13 +149,33 @@ class WebDavHttpClient(
     request: HttpRequest,
     handler: HttpResponse.BodyHandler<T>,
   ): HttpResponse<T> =
-    try {
-      httpClient.send(request, handler)
-    } catch (failure: IOException) {
-      throw failureFor(request.method(), request.uri().toString(), -1, failure)
-    } catch (failure: InterruptedException) {
-      Thread.currentThread().interrupt()
-      throw failureFor(request.method(), request.uri().toString(), -1, failure)
+    run {
+      var lastFailure: IOException? = null
+      repeat(maximumTransportAttempts) { attempt ->
+        try {
+          beforeAttempt()
+          return@run httpClient.send(request, handler)
+        } catch (failure: InterruptedException) {
+          Thread.currentThread().interrupt()
+          throw failureFor(request.method(), request.uri().toString(), -1, failure)
+        } catch (failure: IOException) {
+          lastFailure = failure
+          if (attempt + 1 < maximumTransportAttempts) {
+            // Linear rather than exponential: what this rides out is a link that dropped and
+            // came back, which is over in seconds, not a server that needs minutes to recover.
+            val pause = retryBackoffMillis * (attempt + 1)
+            if (pause > 0) {
+              try {
+                Thread.sleep(pause)
+              } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw failureFor(request.method(), request.uri().toString(), -1, interrupted)
+              }
+            }
+          }
+        }
+      }
+      throw failureFor(request.method(), request.uri().toString(), -1, lastFailure)
     }
 
   private fun failureFor(
@@ -159,6 +187,15 @@ class WebDavHttpClient(
     if (status == 401) WebDavAuthenticationException(method, url) else WebDavRequestFailedException(method, url, status, cause)
 
   private companion object {
+    /**
+     * A remote transport is expected to blink, and the task queue's three attempts are sized
+     * for a local filesystem that does not. A dropped link turned 13,983 `ANALYZE_BOOK` tasks
+     * DEAD at 3/3 against a real library, permanently, while every archive was reachable
+     * again seconds later. Absorbing it here keeps that knowledge where the flakiness is.
+     */
+    const val DEFAULT_TRANSPORT_ATTEMPTS = 4
+    const val DEFAULT_RETRY_BACKOFF_MILLIS = 500L
+
     const val PROPFIND_BODY =
       "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
         "<D:propfind xmlns:D=\"DAV:\"><D:prop>" +

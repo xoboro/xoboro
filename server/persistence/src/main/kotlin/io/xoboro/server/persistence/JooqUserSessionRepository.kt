@@ -6,8 +6,6 @@ import io.xoboro.core.domain.UserSession
 import io.xoboro.core.domain.UserSessionRepository
 import org.jooq.Record
 import org.jooq.exception.DataAccessException
-import org.sqlite.SQLiteErrorCode
-import org.sqlite.SQLiteException
 
 class JooqUserSessionRepository(
   private val database: XoboroDatabase,
@@ -67,16 +65,6 @@ class JooqUserSessionRepository(
       if (failure.isDatabaseLocked()) SessionTouch.UNAVAILABLE else throw failure
     }
 
-  /**
-   * Whether a failure is SQLite's transient lock contention rather than a real fault.
-   *
-   * Matched on the driver's own result code through the cause chain instead of on message text,
-   * which is localised and version-dependent.
-   */
-  private fun DataAccessException.isDatabaseLocked(): Boolean =
-    generateSequence(this as Throwable) { it.cause }
-      .filterIsInstance<SQLiteException>()
-      .any { it.resultCode == SQLiteErrorCode.SQLITE_BUSY || it.resultCode == SQLiteErrorCode.SQLITE_LOCKED }
 
   override fun deleteByTokenDigest(tokenDigest: String): Boolean =
     database.dsl.execute(
