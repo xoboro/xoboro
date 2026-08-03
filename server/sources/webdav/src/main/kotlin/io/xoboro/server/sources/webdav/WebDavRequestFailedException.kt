@@ -13,7 +13,17 @@ open class WebDavRequestFailedException(
   url: String,
   val statusCode: Int,
   cause: Throwable? = null,
-) : IOException("WebDAV $method $url failed with status $statusCode", cause)
+) : IOException(
+    // The cause is named in the message, not only chained: the durable task queue records
+    // `last_error` from the message, so every one of 13,983 dead tasks read "status -1" and gave
+    // an operator nothing to diagnose. A status of -1 means the request never got an answer, and
+    // which failure that was is the only useful part.
+    buildString {
+      append("WebDAV $method $url failed with status $statusCode")
+      cause?.let { append(": ${it::class.simpleName}: ${it.message}") }
+    },
+    cause,
+  )
 
 /** The server rejected the credentials (or lack of them) with `401 Unauthorized`. */
 class WebDavAuthenticationException(

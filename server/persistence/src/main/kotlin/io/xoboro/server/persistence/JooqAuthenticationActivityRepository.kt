@@ -2,6 +2,9 @@ package io.xoboro.server.persistence
 
 import io.xoboro.core.domain.ApiKeyId
 import io.xoboro.core.domain.AuthenticationActivity
+import java.util.logging.Level
+import java.util.logging.Logger
+import org.jooq.exception.DataAccessException
 import io.xoboro.core.domain.AuthenticationActivityPage
 import io.xoboro.core.domain.AuthenticationActivityPageRequest
 import io.xoboro.core.domain.AuthenticationActivityRepository
@@ -56,7 +59,30 @@ class JooqAuthenticationActivityRepository(
       .singleOrNull()
   }
 
+  /**
+   * Records an authentication attempt, and never fails the caller if it cannot.
+   *
+   * This is bookkeeping around a request whose real work has already happened, so a locked
+   * database must not turn a successful login into a `500` - which is what it did against a real
+   * library while a scan held the write lock. The record is dropped instead, and the drop is
+   * logged at `WARNING` so it is visible rather than silent: authentication activity is what an
+   * administrator reads to spot an attack, and a gap in it that nothing announced would be worse
+   * than the gap itself. Only lock contention is absorbed; any other failure still propagates.
+   */
   override fun insert(activity: AuthenticationActivity) {
+    try {
+      insertRecord(activity)
+    } catch (failure: DataAccessException) {
+      if (!failure.isSqliteContention()) throw failure
+      logger.log(
+        Level.WARNING,
+        "Dropped an authentication activity record because the database was locked: " +
+          "source=${activity.source} success=${activity.success}",
+      )
+    }
+  }
+
+  private fun insertRecord(activity: AuthenticationActivity) {
     database.dsl.execute(
       """
       INSERT INTO authentication_activity (
@@ -159,6 +185,8 @@ class JooqAuthenticationActivityRepository(
       }
 
   companion object {
+    private val logger = Logger.getLogger(JooqAuthenticationActivityRepository::class.java.name)
+
     private const val SELECT_ACTIVITY =
       """
       SELECT authentication_activity.*,
