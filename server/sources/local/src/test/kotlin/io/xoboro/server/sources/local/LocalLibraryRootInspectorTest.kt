@@ -69,4 +69,18 @@ class LocalLibraryRootInspectorTest {
   }
 
   private fun Path.uri(): String = toUri().toString()
+
+  @Test
+  fun `reports an unparseable location as an invalid item rather than letting it escape`() {
+    // An administrator creating a library posts this string, and the route turns
+    // `IllegalArgumentException` into a 400. `URI("file:///tmp/has a space")` throws
+    // `URISyntaxException`, which is neither caught here nor an `IllegalArgumentException`, so
+    // it escaped as a 500 - observed against a running server for a path containing a space,
+    // which is an ordinary thing for a series directory to contain.
+    val inspector = LocalLibraryRootInspector()
+
+    for (location in listOf("file:///tmp/has a space", "::::not-a-uri", "file:///tmp/bad%zz")) {
+      assertFailsWith<InvalidLocalSourceItemException>(location) { inspector.typeOf(location) }
+    }
+  }
 }
