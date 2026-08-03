@@ -3,6 +3,7 @@ package io.xoboro.server.sources.local
 import io.xoboro.core.application.LibraryRootInspector
 import io.xoboro.core.application.RootType
 import java.net.URI
+import java.net.URISyntaxException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
@@ -51,6 +52,12 @@ class LocalLibraryRootInspector(
     } catch (failure: InvalidPathException) {
       throw InvalidLocalSourceItemException(this, failure)
     } catch (failure: IllegalArgumentException) {
+      throw InvalidLocalSourceItemException(this, failure)
+    } catch (failure: URISyntaxException) {
+      // `URISyntaxException` is not an `IllegalArgumentException`, so it was the one parse
+      // failure that escaped - and the location is a string an administrator posts, so it
+      // escaped as a 500. A path containing a space is enough to trigger it, which is an
+      // ordinary thing for a series directory to contain.
       throw InvalidLocalSourceItemException(this, failure)
     }
 
