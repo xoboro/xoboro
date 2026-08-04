@@ -64,6 +64,14 @@ none of them looked wrong:
 - Comparing rendered content to test something that does not affect it. Keying an
   `{#each}` changes node identity and nothing else, so an assertion about a row's
   text passes under any key.
+- **A fixture that throws to fail the test, called from code that catches everything.**
+  `runCatching { ... }.getOrNull()` catches `Throwable`, so a stub written as
+  `throw AssertionError("this must not be called")` is swallowed and the test passes *while
+  doing the thing it forbids*. Found in `ComicInfoMetadataProviderTest`: the stub refused to
+  materialize an archive, `readComicInfo` swallowed the refusal, and a mutation that made every
+  archive get fetched left the suite green. **Count the forbidden call and assert the count is
+  zero** — a counter cannot be caught. Kotlin's `runCatching` and bare `catch (_: Exception)`
+  around a callback are both enough to hide it.
 - A shell check whose pattern matches nothing. A regex that finds no candidates
   compares an empty set and reports success. On macOS `grep -P` is unsupported and
   fails silently when stderr is discarded, which is indistinguishable from "no

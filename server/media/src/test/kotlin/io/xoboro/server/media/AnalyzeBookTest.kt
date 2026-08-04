@@ -144,6 +144,139 @@ class AnalyzeBookTest {
     }
   }
 
+  /**
+   * The whole point of the ranged path: a library that needs nothing out of an entry must not cause
+   * the archive to be fetched. On a remote source, `materialize` here means transferring the file.
+   */
+  @Test
+  fun `reads only the archive trailer when nothing needs entry bytes`() {
+    val archive = archive()
+    val probe = TrailerProbe(Files.readAllBytes(archive))
+    val mediaRepository = InMemoryMediaRepository()
+    val analyzer =
+      AnalyzeBook(
+        books = InMemoryBookRepository(bookFixture()),
+        libraries =
+          InMemoryLibraryRepository(libraryFixture(hashFiles = false, hashKoreader = false)),
+        accesses = listOf(RefusingMediaAccess),
+        media = mediaRepository,
+        zipAnalyzer = ZipMediaAnalyzer(),
+        randomAccesses = listOf(probe),
+        currentTimeMillis = { 1_700_000_000_000L },
+      )
+
+    val result = analyzer.execute(BookId("book-1"))
+
+    assertEquals(MediaStatus.READY, result.status)
+    assertEquals(listOf("001.png"), result.pages.map { it.fileName })
+    assertEquals(1, probe.opened)
+    assertTrue(probe.lastMedia!!.closed, "the opened media must be closed")
+    assertEquals(result, mediaRepository.media)
+  }
+
+  @Test
+  fun `materializes when dimensions are requested, since dimensions need entry bytes`() {
+    val archive = archive()
+    val probe = TrailerProbe(Files.readAllBytes(archive))
+    val access = CountingMediaAccess(archive)
+    val analyzer =
+      AnalyzeBook(
+        books = InMemoryBookRepository(bookFixture()),
+        libraries =
+          InMemoryLibraryRepository(
+            libraryFixture(analyzeDimensions = true, hashFiles = false, hashKoreader = false),
+          ),
+        accesses = listOf(access),
+        media = InMemoryMediaRepository(),
+        zipAnalyzer = ZipMediaAnalyzer(),
+        randomAccesses = listOf(probe),
+        currentTimeMillis = { 1_700_000_000_000L },
+      )
+
+    val result = analyzer.execute(BookId("book-1"))
+
+    assertEquals(0, probe.opened)
+    assertEquals(1, access.materializations)
+    assertEquals(10, result.pages.single().dimension?.width)
+  }
+
+  @Test
+  fun `materializes while a whole-file hash is still missing`() {
+    val archive = archive()
+    val probe = TrailerProbe(Files.readAllBytes(archive))
+    val access = CountingMediaAccess(archive)
+    val analyzer =
+      AnalyzeBook(
+        books = InMemoryBookRepository(bookFixture()),
+        libraries = InMemoryLibraryRepository(libraryFixture(hashFiles = true, hashKoreader = false)),
+        accesses = listOf(access),
+        media = InMemoryMediaRepository(),
+        zipAnalyzer = ZipMediaAnalyzer(),
+        randomAccesses = listOf(probe),
+        currentTimeMillis = { 1_700_000_000_000L },
+      )
+
+    analyzer.execute(BookId("book-1"))
+
+    assertEquals(0, probe.opened)
+    assertEquals(1, access.materializations)
+  }
+
+  /**
+   * A hash already recorded is a hash that will not be recomputed, so the setting being on does not
+   * by itself force the file to be read. This is the case that matters on reanalysis of a remote
+   * library: the first scan pays, later ones do not have to.
+   */
+  @Test
+  fun `takes the trailer path once the whole-file hash is already recorded`() {
+    val archive = archive()
+    val probe = TrailerProbe(Files.readAllBytes(archive))
+    val access = CountingMediaAccess(archive)
+    val analyzer =
+      AnalyzeBook(
+        books =
+          InMemoryBookRepository(
+            bookFixture().copy(fileHash = "already-recorded", fileHashKoreader = "already-recorded"),
+          ),
+        libraries = InMemoryLibraryRepository(libraryFixture(hashFiles = true, hashKoreader = true)),
+        accesses = listOf(access),
+        media = InMemoryMediaRepository(),
+        zipAnalyzer = ZipMediaAnalyzer(),
+        randomAccesses = listOf(probe),
+        currentTimeMillis = { 1_700_000_000_000L },
+      )
+
+    analyzer.execute(BookId("book-1"))
+
+    assertEquals(1, probe.opened)
+    assertEquals(0, access.materializations)
+  }
+
+  /** A `.cbz` that is really a RAR reaches this, and must get the full read's diagnosis. */
+  @Test
+  fun `falls back to materializing when the trailer does not parse as a ZIP`() {
+    val archive = archive()
+    val probe = TrailerProbe(ByteArray(2_048) { 0x3f })
+    val access = CountingMediaAccess(archive)
+    val analyzer =
+      AnalyzeBook(
+        books = InMemoryBookRepository(bookFixture()),
+        libraries =
+          InMemoryLibraryRepository(libraryFixture(hashFiles = false, hashKoreader = false)),
+        accesses = listOf(access),
+        media = InMemoryMediaRepository(),
+        zipAnalyzer = ZipMediaAnalyzer(),
+        randomAccesses = listOf(probe),
+        currentTimeMillis = { 1_700_000_000_000L },
+      )
+
+    val result = analyzer.execute(BookId("book-1"))
+
+    assertEquals(1, probe.opened)
+    assertEquals(1, access.materializations)
+    assertEquals(MediaStatus.READY, result.status)
+  }
+
   private fun archive(): Path {
     val path = tempDirectory.resolve("book.cbz")
     val bytes =
@@ -183,6 +316,9 @@ class AnalyzeBookTest {
 
   private fun libraryFixture(
     analyzeDimensions: Boolean = false,
+    hashFiles: Boolean = true,
+    hashKoreader: Boolean = true,
+    hashPages: Boolean = false,
   ): Library =
     Library(
       id = LibraryId("library-1"),
@@ -191,10 +327,70 @@ class AnalyzeBookTest {
       settings =
         LibrarySettings(
           analyzeDimensions = analyzeDimensions,
-          hashKoreader = true,
+          hashFiles = hashFiles,
+          hashKoreader = hashKoreader,
+          hashPages = hashPages,
         ),
       createdAtMillis = 1,
     )
+
+  /** Serves an archive's bytes by range and records that it was opened, and later closed. */
+  private class TrailerProbe(
+    private val bytes: ByteArray,
+  ) : SourceRandomAccess {
+    override val sourceId: String = "synthetic"
+
+    var opened: Int = 0
+      private set
+
+    var lastMedia: ByteArrayRandomAccessMedia? = null
+      private set
+
+    override fun open(
+      rootItemId: String,
+      itemId: String,
+    ): RandomAccessMedia {
+      assertEquals("opaque-root", rootItemId)
+      assertEquals("opaque-book", itemId)
+      opened++
+      return ByteArrayRandomAccessMedia(bytes).also { lastMedia = it }
+    }
+  }
+
+  /**
+   * Fails the test if the whole file is ever fetched. Asserting "materialize was not called" through
+   * a counter would still pass if the call happened and its result went unused; refusing outright
+   * cannot.
+   */
+  private object RefusingMediaAccess : SourceMediaAccess {
+    override val sourceId: String = "synthetic"
+
+    override fun materialize(
+      rootItemId: String,
+      itemId: String,
+    ): MaterializedMedia = throw AssertionError("The whole archive must not be materialized for this library")
+  }
+
+  private class CountingMediaAccess(
+    private val archive: Path,
+  ) : SourceMediaAccess {
+    override val sourceId: String = "synthetic"
+
+    var materializations: Int = 0
+      private set
+
+    override fun materialize(
+      rootItemId: String,
+      itemId: String,
+    ): MaterializedMedia {
+      materializations++
+      return object : MaterializedMedia {
+        override val path: Path = archive
+
+        override fun close() = Unit
+      }
+    }
+  }
 
   private class InMemoryBookRepository(
     private var book: Book,

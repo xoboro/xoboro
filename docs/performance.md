@@ -169,47 +169,140 @@ Running it at 3,050 and 15,050 items is the outstanding work. The two-point rati
 above is suggestive but two points cannot distinguish superlinear growth from a
 fixed cost that happens to land between them.
 
-## Settled: a WebDAV library is bounded by the link, not by the adapter
+## Settled: a WebDAV scan was bounded by how much it chose to transfer
 
-Same library from both sides — 234 series, 18,211 CBZ archives, 129.1 GB, average 7.26 MB
-per archive:
+The heading here used to read "bounded by the link, not by the adapter". That was half right and
+the wrong half was the part that mattered. The link does cap throughput. But the amount crossing
+it was a design choice: analysis needed about 5 KB per archive and was moving 7.26 MB.
+
+Same library from both sides — 234 series, 18,211 CBZ archives, 129.1 GB, average 7.26 MB per
+archive:
 
 | | listing | analysis | total |
 |---|---|---|---|
 | `local`, on the machine holding the files | 95 s | 5.5 items/s | **56 min** |
-| `webdav`, from another machine over a ~6 MB/s link | 87 s | 0.60 items/s | **~6 h** |
+| `webdav`, from another machine, whole-file `materialize` | 87 s | 0.60 items/s | **~6 h** |
 
-Listing is not the difference: 234 `PROPFIND`s cost about the same as walking a directory
-tree. Analysis is, and the reason is a design choice rather than a protocol limit.
-`SourceMediaAccess.materialize()` returns a `Path`, so a remote source must produce a whole
-local file before an analyzer can open it. 129 GB over ~6 MB/s is about 6 hours, and the
-measured remaining time tracked that floor.
+Listing is not the difference: 234 `PROPFIND`s cost about the same as walking a directory tree.
+Analysis was, and `SourceMediaAccess.materialize()` returning a `Path` is why - a remote source
+had to produce a whole local file before any analyzer could open it. 129 GB at the measured link
+rate is about six hours, and the remaining time tracked that floor exactly.
 
-**The adapter is not leaving throughput on the table.** It sustains 4.36 MB/s against a link
-that measured 4.4 MB/s on one stream and 6.3 MB/s on four. Four task workers each fetch then
-analyze in sequence, so a connection idles while its archive is being read; 69% of the
-four-stream ceiling is what that structure predicts.
+### Where the time actually went
 
-Three earlier readings of this said otherwise and were all measurement errors worth
-recording, because each is easy to repeat:
+Layer by layer, same 9,449,145-byte archive, measured end to end:
 
-- **0.30 items/s** — measured while a local-source benchmark was analyzing *the same external
-  disk on the other machine* at 5.5 items/s. The disk was the shared bottleneck. Comparing
-  two configurations by running them at the same time against one disk measures neither.
-- **144 items/h over 24 h** — dragged down by the transport being absent, not by slow work.
-  The SSH tunnel carrying the connection failed to connect 169 times in that day
-  (`ssh: connect to host ...: Undefined error: 0`), and every WebDAV `GET` during those gaps
-  got `Connection refused`.
-- **"we are at 36% of the link ceiling, so the problem is ours"** — arithmetic on the first
-  number above. With the confound removed it is 69%, which is what the fetch-then-analyze
-  structure predicts, so there was nothing to find there.
+| layer | throughput |
+|---|---|
+| inside the serving container - disk plus the VM's bind mount | 32 MB/s cold, 126-133 MB/s warm |
+| HTTP on the serving machine, no tunnel | 757-849 MB/s |
+| through the SSH tunnel, one stream | **5.0-8.5 MB/s** |
+| through the SSH tunnel, four streams | 12.2 MB/s aggregate |
+| raw SSH channel, default cipher | 12.4-15.5 MB/s |
+| raw SSH channel, `aes128-gcm@openssh.com` | 17.6-20.4 MB/s |
+| HTTP over the VPN with no SSH tunnel, one stream | 10.3-18.6 MB/s |
+| HTTP over the VPN with no SSH tunnel, four streams | 18.2 MB/s aggregate |
 
-What would actually lower the floor is not fetching whole files. The server advertises
-`Accept-Ranges: bytes`, and on one 20.5 MB archive a trailing 2 KB range returned in 0.24 s
-against 15.2 s for the whole file — a ZIP's central directory is at the end, and an analyzer
-needs kilobytes of it. That is an SPI change (`materialize` cannot express it) and is not
-free: with `analyzeDimensions` on, per-page headers mean many round trips at 23 ms RTT, so
-it only wins if reads are batched into windows covering many entries rather than issued per
-page. `hashFiles`, on by default, genuinely needs the whole file and would have to be off
-for a remote library to benefit.
+Two things fall out of that table. The serving side is free - the disk, the container bind mount
+and Apache `mod_dav` together cost nothing measurable. And **the SSH tunnel roughly halves the
+link**, because it is a second layer of encryption inside a VPN that already encrypts and
+authenticates the path. Eight parallel streams over the VPN gave 17.9 MB/s against four streams'
+18.2, so ~18 MB/s is the link, and parallelism past four buys nothing.
 
+### Per-entry ranged reads are slower than the whole file
+
+The obvious way to read less is to fetch each entry's header. Measured on the same archive and
+link: **150 sequential 4 KiB range requests took 6.52 s - 43.5 ms each, essentially all round
+trip - against 520 ms to fetch the entire 9 MB archive.** Concurrency does not save it either;
+eight at a time still lands near the whole-file time. Anything needing bytes out of every entry
+is cheaper to materialize, and `SourceRandomAccess` says so in its own documentation.
+
+### What did work: one range request per book
+
+A ZIP's central directory is at the end of the file. One 64 KiB suffix range returned in **25 ms**
+and held the complete directory for all 79 entries of that archive - names, sizes, and the
+encryption flag. That is the entire page list, for 1/145th of the bytes and one round trip.
+
+`materialize()` could not express it, since it hands an analyzer a local `Path` and
+`java.util.zip.ZipFile` needs a real seekable file. So the trailer is parsed directly
+(`ZipCentralDirectory` over `SourceRandomAccess`), and `AnalyzeBook` takes that path only when
+nothing in the library's settings needs entry bytes:
+
+- `analyzeDimensions` off - image dimensions are in the entry data.
+- `hashPages` off - page hashes are the entry data.
+- `hashFiles` / `hashKoreader` satisfied already or off - a whole-file hash needs every byte by
+  definition. Note this is per book, not per library: once a book's hash is recorded, later
+  analyses of it take the cheap path even with the setting on.
+
+A trailer that does not parse as a ZIP falls back to materializing, which is what a `.cbz` that
+is really a RAR relies on.
+
+The cost of the cheap path is what it cannot see: no dimensions, and media types guessed from
+file extension rather than sniffed with Tika. An operator who wants pages verified is already
+paying to read them.
+
+### The cover was the other half, and it was the whole remaining cost
+
+With analysis fixed, a real scan still transferred the library, and the WebDAV server's own access
+log said so in one line per book:
+
+```
+"GET /<series>/<book>.cbz HTTP/1.1" 206   65557
+"GET /<series>/<book>.cbz HTTP/1.1" 200 4120549
+```
+
+Exactly paired, 100 and 100 in a 200-line sample. The `206` is the trailer read working. The `200`
+is the whole archive, fetched immediately afterwards — because `AnalyzeBookTaskHandler` generates
+the book's cover in the same task, and the only way to read page 1 was to materialize:
+
+```
+AnalyzeBookTaskHandler.handle
+  -> BookCoverGenerationLifecycle.generateForBook
+       -> BookContentService.openPage
+            -> WebDavSourceMediaAccess.materialize      <- the entire archive
+```
+
+Four worker threads were parked in `HttpClient.send` under that stack for fifteen minutes straight
+while the queue made no progress. A thread dump found it; no log line would have, because nothing
+was failing.
+
+`ZipRangedEntryReader` closes it: two range requests per page — the local header first, because only
+it says where the entry's data begins, then the data — and raw inflate for a deflated entry. Roughly
+50 ms against 520 ms to fetch the archive. `openPage` takes that path for ZIP comic archives when a
+ranged source is registered, so covers, thumbnails and ordinary reading all stop pulling whole
+files; RAR, EPUB and PDF still materialize, since those readers need a real file.
+
+The general shape worth remembering: **one entry by range is a win, every entry by range is a
+loss.** Same mechanism, opposite conclusion, and only the count differs.
+
+### Two comparisons that are not the same comparison
+
+Komga on the same machine reports `Scanned 234 series, 18211 books, and 907 sidecars in
+700.887526ms`. That number invites a 100x conclusion and does not support one:
+
+- Komga reads the library **locally**: its container bind-mounts the library directory read-only
+  and its own log reports `root=file:/data/`. It has no WebDAV client. Both it and the WebDAV
+  server bind-mount the *same* host directory — an APFS volume over USB — which is what makes the
+  protocol the only variable between them.
+- That 700 ms line is a six-hourly **incremental rescan of an already-analyzed library**: a
+  filesystem walk that opens no archive. Its first pass had to open all 18,211 too.
+
+So the honest pairing is Xoboro-local (56 min, dominated by hashing and analysis) against
+Xoboro-over-WebDAV, and the gap between those two was transfer.
+
+### Earlier readings of this that were wrong
+
+Each was a measurement error, and each is easy to repeat:
+
+- **0.30 items/s** - measured while a local-source benchmark was analyzing *the same external
+  disk on the other machine*. Comparing two configurations by running them simultaneously
+  against one disk measures neither.
+- **144 items/h over 24 h** - the transport was absent, not slow. The tunnel failed to connect
+  169 times that day and every `GET` in those gaps got `Connection refused`.
+- **"we are at 36% of the link ceiling, so the problem is ours"** - arithmetic on the first
+  number. Corrected it was 69%, which is what fetch-then-analyze predicts, so there was nothing
+  to find there. The real problem was one level up: not how fast bytes moved, but how many.
+- **"concurrent crawlers on the serving machine are confounding this"** - ten crawler workers
+  really were writing to that disk throughout. It made no difference, because the serving side
+  measures 757 MB/s and the bottleneck is entirely the link. A plausible confound is still worth
+  measuring rather than asserting, in either direction.
