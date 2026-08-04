@@ -449,6 +449,9 @@ class XoboroRuntime private constructor(
               workerPool?.resize(workerCount)
             },
           )
+        // One supplier for every cover producer, so the analysis-time generator and the operator's
+        // regeneration sweep can never disagree about how large a cover should be.
+        val maximumCoverDimension = { serverSettingsLifecycle.snapshot().thumbnailSize.maximumDimension }
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
@@ -882,6 +885,7 @@ class XoboroRuntime private constructor(
             series = series,
             content = bookContentAccess,
             artwork = artworkLifecycle,
+            maximumCoverDimension = maximumCoverDimension,
           )
         val catalogSourceFileLifecycle =
           CatalogSourceFileLifecycle(
@@ -951,7 +955,11 @@ class XoboroRuntime private constructor(
                 DeleteBookFileTaskHandler(catalogSourceFileLifecycle),
                 DeleteSeriesFileTaskHandler(catalogSourceFileLifecycle),
                 ImportBookTaskHandler(catalogSourceFileLifecycle),
-                GenerateBookArtworkTaskHandler(bookContentAccess, artworkLifecycle),
+                GenerateBookArtworkTaskHandler(
+                  bookContentAccess,
+                  artworkLifecycle,
+                  maximumCoverDimension,
+                ),
                 OrganizationArtworkTaskHandler(
                   collections = collections,
                   readLists = readLists,
@@ -965,6 +973,7 @@ class XoboroRuntime private constructor(
                   queue = queue,
                   taskIdFactory = { UUID.randomUUID().toString() },
                   currentTimeMillis = System::currentTimeMillis,
+                  maximumCoverDimension = maximumCoverDimension,
                 ),
                 RemoveDuplicatePagesTaskHandler(
                   books = books,

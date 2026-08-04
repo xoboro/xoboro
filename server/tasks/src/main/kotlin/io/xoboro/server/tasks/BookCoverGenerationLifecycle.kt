@@ -44,6 +44,12 @@ class BookCoverGenerationLifecycle(
   private val series: SeriesRepository,
   private val content: BookContentAccess,
   private val artwork: ArtworkLifecycle,
+  /**
+   * Read per cover rather than captured once, so an operator who changes the setting sees it apply
+   * to the next cover instead of after a restart. Analysis runs for hours on a large library, which
+   * is exactly when the setting gets changed.
+   */
+  private val maximumCoverDimension: () -> Int,
 ) {
   fun generateForBook(bookId: BookId) {
     runCatching { generate(bookId) }
@@ -111,7 +117,7 @@ class BookCoverGenerationLifecycle(
           request =
             PageImageRequest(
               format = PageImageFormat.JPEG,
-              maximumDimension = COVER_MAXIMUM_DIMENSION,
+              maximumDimension = maximumCoverDimension(),
             ),
         )
       MediaKind.EPUB ->
@@ -162,8 +168,6 @@ class BookCoverGenerationLifecycle(
   }
 
   companion object {
-    const val COVER_MAXIMUM_DIMENSION: Int =
-      DurableCompatibilityMaintenanceRequester.GENERATED_ARTWORK_MAXIMUM_DIMENSION
     private const val FAILURE_LOG_LIMIT = 500
     private val logger = Logger.getLogger(BookCoverGenerationLifecycle::class.java.name)
   }
