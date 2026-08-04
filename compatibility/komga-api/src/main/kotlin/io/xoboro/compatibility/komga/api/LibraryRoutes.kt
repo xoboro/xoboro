@@ -1,11 +1,13 @@
 package io.xoboro.compatibility.komga.api
 
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
@@ -17,6 +19,7 @@ import io.ktor.server.routing.route
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibrarySettings
@@ -139,13 +142,11 @@ fun Route.komgaLibraryRoutes(
         }
         post("/analyze") {
           if (!call.requireLibraryAdministrator()) return@post
-          maintenanceRequester.analyze(call.libraryId())
-          call.respond(HttpStatusCode.Accepted)
+          call.respondQueued(maintenanceRequester.analyze(call.libraryId()))
         }
         post("/metadata/refresh") {
           if (!call.requireLibraryAdministrator()) return@post
-          maintenanceRequester.refreshMetadata(call.libraryId())
-          call.respond(HttpStatusCode.Accepted)
+          call.respondQueued(maintenanceRequester.refreshMetadata(call.libraryId()))
         }
         post("/empty-trash") {
           if (!call.requireLibraryAdministrator()) return@post
@@ -465,6 +466,25 @@ private suspend fun ApplicationCall.respondLibraryValidation(message: String) {
   respondError(HttpStatusCode.BadRequest, message)
 }
 
+/**
+ * Answers a maintenance request that was queued as a single fan-out task.
+ *
+ * [TaskEnqueue.ALREADY_RUNNING] is a `202` alongside [TaskEnqueue.QUEUED], because both mean the
+ * library's refresh is under way and asking twice is not an error. [TaskEnqueue.UNAVAILABLE] is a
+ * `503` with a `Retry-After`: nothing was queued, so answering `202` would tell an operator their
+ * library was being refreshed when it was not.
+ */
+private suspend fun ApplicationCall.respondQueued(outcome: TaskEnqueue) {
+  if (outcome == TaskEnqueue.UNAVAILABLE) {
+    response.header(HttpHeaders.RetryAfter, TASK_STORE_RETRY_AFTER_SECONDS.toString())
+    respondError(HttpStatusCode.ServiceUnavailable, "The task store is busy; retry the request")
+    return
+  }
+  respond(HttpStatusCode.Accepted)
+}
+
 private val LIBRARY_WIRE_JSON = Json { ignoreUnknownKeys = true }
 private val LIBRARY_RESPONSE_JSON = Json { explicitNulls = true }
 private const val LOCAL_SOURCE_ID: String = "local"
+
+private const val TASK_STORE_RETRY_AFTER_SECONDS: Int = 30

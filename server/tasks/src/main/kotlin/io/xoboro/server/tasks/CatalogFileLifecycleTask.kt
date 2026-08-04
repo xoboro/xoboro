@@ -10,6 +10,7 @@ import io.xoboro.core.application.SourceCopyMode
 import io.xoboro.core.application.SourceImportRequest
 import io.xoboro.core.application.SourceMutationAccess
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.Library
@@ -41,7 +42,7 @@ class DurableCatalogFileLifecycleRequester(
     return books.count { command ->
       val target = series.findByIdOrNull(command.seriesId)
       if (target == null || target.deletedAtMillis != null) return@count false
-      queue.enqueue(
+      queue.enqueueOrRetry(
         task =
           DurableTask(
             id = "IMPORT_BOOK_${taskIdFactory().requireIdentifier()}",
@@ -66,7 +67,7 @@ class DurableCatalogFileLifecycleRequester(
   override fun deleteBook(id: BookId): Boolean {
     val book = books.findByIdOrNull(id)?.takeIf { it.deletedAtMillis == null } ?: return false
     val now = now()
-    return queue.enqueue(
+    return queue.enqueueOrRetry(
       task =
         DurableTask(
           id = DeleteBookFileTaskHandler.taskId(id),
@@ -83,7 +84,7 @@ class DurableCatalogFileLifecycleRequester(
   override fun deleteSeries(id: SeriesId): Boolean {
     val item = series.findByIdOrNull(id)?.takeIf { it.deletedAtMillis == null } ?: return false
     val now = now()
-    return queue.enqueue(
+    return queue.enqueueOrRetry(
       task =
         DurableTask(
           id = DeleteSeriesFileTaskHandler.taskId(id),

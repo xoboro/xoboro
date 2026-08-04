@@ -4,6 +4,7 @@ import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.LibraryTrashStore
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.LibraryId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -22,7 +23,7 @@ class EmptyLibraryTrashTaskEmitter(
   ): Boolean {
     val nowMillis = currentTimeMillis()
     require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
-    return queue.enqueue(
+    return queue.enqueueOrRetry(
       task =
         DurableTask(
           id = taskId(libraryId),

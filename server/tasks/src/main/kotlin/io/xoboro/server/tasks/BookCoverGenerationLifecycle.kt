@@ -50,15 +50,41 @@ class BookCoverGenerationLifecycle(
    * is exactly when the setting gets changed.
    */
   private val maximumCoverDimension: () -> Int,
+  /**
+   * Whether a failure is the store being momentarily busy rather than this item having no cover.
+   *
+   * Injected because recognising it means reading a driver result code, which belongs to the
+   * persistence module and not here. Defaults to "never", which is right for wiring with no write
+   * lock to contend over.
+   */
+  private val isStoreBusy: (Throwable) -> Boolean = { false },
 ) {
   fun generateForBook(bookId: BookId) {
     runCatching { generate(bookId) }
+      .onFailure { rethrowIfBusy(it) }
       .onFailure { logSwallowed("media item ${bookId.value}", it) }
   }
 
   fun generateForSeries(seriesId: SeriesId) {
     runCatching { refreshSeriesCover(seriesId) }
+      .onFailure { rethrowIfBusy(it) }
       .onFailure { logSwallowed("series ${seriesId.value}", it) }
+  }
+
+  /**
+   * Lets store contention out, where every other failure is swallowed.
+   *
+   * "This item has no cover" and "ask again in a moment" are not the same answer, and only the
+   * first one is permanent. Swallowing contention left media items with no artwork for good, with a
+   * single `WARNING` as the only record - observed during a scan of 145,105 archives, whose write
+   * lock made `DELETE FROM artwork_thumbnail` fail for a run of items.
+   *
+   * Propagating fails the analysis task that called this, which the worker then retries. That costs
+   * a re-analysis, which is idempotent and does not undo the analysis already persisted - a cheaper
+   * price than a cover that never appears and never explains itself.
+   */
+  private fun rethrowIfBusy(error: Throwable) {
+    if (isStoreBusy(error)) throw error
   }
 
   /**

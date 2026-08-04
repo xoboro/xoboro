@@ -57,11 +57,71 @@ data class TaskCounts(
   val dead: Long,
 )
 
+/**
+ * What became of a [DurableTaskQueue.enqueue].
+ *
+ * Three states rather than a boolean, because "not queued" covers two situations that ask the
+ * caller for opposite things. [ALREADY_RUNNING] means the work is in flight and there is nothing to
+ * do; [UNAVAILABLE] means nothing was written at all and the caller still owes the work. Reporting
+ * both as `false` is what let a busy store look like a completed enqueue.
+ */
+enum class TaskEnqueue {
+  /** Queued - freshly inserted, or refreshed/revived in place over an existing row. */
+  QUEUED,
+
+  /** A row with this id holds a live lease, so it was left untouched. See [DurableTaskQueue.enqueue]. */
+  ALREADY_RUNNING,
+
+  /**
+   * The store could not be written to, and the task is not queued.
+   *
+   * SQLite admits one writer, and a library scan holds the write lock for minutes - past any
+   * `busy_timeout` worth configuring. A caller on a request path should report this as retryable
+   * rather than as a failure; a caller already inside a task should let the task retry.
+   */
+  UNAVAILABLE,
+}
+
+/**
+ * Thrown when a task could not be queued because the store was busy.
+ *
+ * Carries the task id rather than a generic message so a dead-letter record names what was
+ * deferred. See [enqueueOrRetry] for who is expected to let this propagate.
+ */
+class TaskStoreUnavailableException(
+  taskId: String,
+) : RuntimeException("The task store was busy; $taskId was not queued")
+
+/**
+ * Enqueues [task], throwing [TaskStoreUnavailableException] when the store is busy.
+ *
+ * This is the idiom for a caller **already running inside a durable task**. A throw fails that
+ * task, the worker retries it with backoff, and task ids are deterministic - so the retry
+ * re-enqueues idempotently and the work is deferred rather than lost.
+ *
+ * A caller on a **request path must not use this**. It should enqueue one fan-out task and report
+ * [TaskEnqueue.UNAVAILABLE] as retryable, because a request cannot be replayed by the worker.
+ *
+ * Returns whether the task was newly queued, so a `count {}` over many tasks still reports how many
+ * it added - the distinction this preserves is that a busy store now stops the loop instead of
+ * being tallied as a skip. Counting it as a skip is what let a fan-out report success while
+ * silently dropping most of its work.
+ */
+fun DurableTaskQueue.enqueueOrRetry(
+  task: DurableTask,
+  nowMillis: Long,
+): Boolean =
+  when (enqueue(task, nowMillis)) {
+    TaskEnqueue.QUEUED -> true
+    TaskEnqueue.ALREADY_RUNNING -> false
+    TaskEnqueue.UNAVAILABLE -> throw TaskStoreUnavailableException(task.id)
+  }
+
 interface DurableTaskQueue {
   fun enqueue(
     task: DurableTask,
     nowMillis: Long,
-  ): Boolean
+  ): TaskEnqueue
 
   fun claimNext(
     workerId: String,

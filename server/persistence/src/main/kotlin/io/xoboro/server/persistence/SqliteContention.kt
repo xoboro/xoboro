@@ -21,3 +21,14 @@ internal fun Throwable.isSqliteContention(): Boolean =
     }
 
 internal fun DataAccessException.isDatabaseLocked(): Boolean = isSqliteContention()
+
+/**
+ * The same test, for callers outside this module.
+ *
+ * Modules above persistence cannot read a driver result code and must not try, but some of them do
+ * need to tell "the store is busy" apart from a fault they are meant to absorb - see
+ * [io.xoboro.server.tasks.BookCoverGenerationLifecycle], which swallows every cover failure except
+ * this one. Exposed as a function to inject rather than as a type to import, so those modules keep
+ * no dependency on jOOQ or the SQLite driver.
+ */
+fun isStoreContention(failure: Throwable): Boolean = failure.isSqliteContention()
