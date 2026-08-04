@@ -443,6 +443,26 @@ export default {
       genres: '장르 (쉼표로 구분)',
       tags: '태그 (쉼표로 구분)',
       unset: '지정 안 함',
+      statuses: {
+        ONGOING: '연재중',
+        ENDED: '완결',
+        ABANDONED: '중단',
+        HIATUS: '휴재',
+      },
+      // Read-only labels. Separate from the ones above because those carry
+      // form-only hints like "(쉼표로 구분)", which make no sense beside a value.
+      display: {
+        status: '연재 상태',
+        publisher: '출판사',
+        language: '언어',
+        ageRating: '연령 등급',
+        ageRatingValue: '{age}세 이상',
+        books: '전체 화수',
+        bookCount: '{count}화',
+        genres: '장르',
+        tags: '태그',
+        links: '링크',
+      },
     },
     grouping: {
       name: '이름',

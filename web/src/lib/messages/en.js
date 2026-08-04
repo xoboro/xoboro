@@ -444,6 +444,26 @@ export default {
       genres: 'Genres (comma separated)',
       tags: 'Tags (comma separated)',
       unset: 'Not set',
+      statuses: {
+        ONGOING: 'Ongoing',
+        ENDED: 'Completed',
+        ABANDONED: 'Abandoned',
+        HIATUS: 'On hiatus',
+      },
+      // Read-only labels. Separate from the ones above because those carry form-only
+      // hints like "(comma separated)", which make no sense beside a value.
+      display: {
+        status: 'Status',
+        publisher: 'Publisher',
+        language: 'Language',
+        ageRating: 'Age rating',
+        ageRatingValue: '{age}+',
+        books: 'Chapters',
+        bookCount: '{count}',
+        genres: 'Genres',
+        tags: 'Tags',
+        links: 'Links',
+      },
     },
     grouping: {
       name: 'Name',

@@ -34,6 +34,7 @@
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import SeriesActions from './SeriesActions.svelte'
   import SeriesMetadataForm from '../catalog/SeriesMetadataForm.svelte'
+  import SeriesMetadataPanel from '../catalog/SeriesMetadataPanel.svelte'
   import SeriesOrderToggle from './SeriesOrderToggle.svelte'
 
   let { params } = $props()
@@ -118,8 +119,8 @@
 
 <ErrorNotice {error} onretry={load} />
 
-{#if series?.metadata?.summary}
-  <p class="summary">{series.metadata.summary}</p>
+{#if series}
+  <SeriesMetadataPanel {series} />
 {/if}
 
 <SeriesActions {first} {resume} />
@@ -190,12 +191,6 @@
     font-size: var(--font-lg);
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .summary {
-    margin: 0 0 var(--space-4);
-    padding: 0 var(--gutter-right) 0 var(--gutter-left);
-    color: var(--text-secondary);
-    font-size: var(--font-sm);
   }
   /* Hidden for a one-chapter series: an order control that cannot change any result
      costs a reader the time it takes to work that out. */
