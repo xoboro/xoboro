@@ -186,15 +186,16 @@ class WebDavHttpClient(
   ): WebDavRequestFailedException =
     if (status == 401) WebDavAuthenticationException(method, url) else WebDavRequestFailedException(method, url, status, cause)
 
-  private companion object {
+  /** Internal rather than private so a test can pin the retry budget; see WebDavHttpClientRetryTest. */
+  internal companion object {
     /**
      * A remote transport is expected to blink, and the task queue's three attempts are sized
      * for a local filesystem that does not. A dropped link turned 13,983 `ANALYZE_BOOK` tasks
      * DEAD at 3/3 against a real library, permanently, while every archive was reachable
      * again seconds later. Absorbing it here keeps that knowledge where the flakiness is.
      */
-    const val DEFAULT_TRANSPORT_ATTEMPTS = 4
-    const val DEFAULT_RETRY_BACKOFF_MILLIS = 500L
+    const val DEFAULT_TRANSPORT_ATTEMPTS = 6
+    const val DEFAULT_RETRY_BACKOFF_MILLIS = 2_000L
 
     const val PROPFIND_BODY =
       "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
