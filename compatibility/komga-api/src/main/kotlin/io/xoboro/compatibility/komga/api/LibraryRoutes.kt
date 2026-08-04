@@ -357,7 +357,7 @@ private fun Library.toDto(includeRoot: Boolean): LibraryDto =
   LibraryDto(
     id = id.value,
     name = name,
-    root = if (includeRoot) root.toLocalPath() else "",
+    root = if (includeRoot) root.toKomgaRoot() else "",
     importComicInfoBook = settings.importComicInfoBook,
     importComicInfoSeries = settings.importComicInfoSeries,
     importComicInfoCollection = settings.importComicInfoCollection,
@@ -393,10 +393,26 @@ private fun String.toLocalSourceLocation(): SourceLocation {
   return SourceLocation(sourceId = LOCAL_SOURCE_ID, itemId = path.toUri().toString())
 }
 
-private fun SourceLocation.toLocalPath(): String {
-  require(sourceId == LOCAL_SOURCE_ID) { "Komga library roots must use the local source" }
-  return Path.of(URI(itemId)).toString()
-}
+/**
+ * Renders a library root for Komga's `root` field, which is a display string rather than something
+ * a client resolves.
+ *
+ * A non-local source used to `require` its way to a `500` here, which took the whole listing down:
+ * `GET /api/v1/libraries` answered `500 IllegalArgumentException` for *every* library as soon as one
+ * WebDAV library existed, so a Komga client could not enumerate libraries at all. Creating a library
+ * through this surface still refuses anything but a local path (see [toLocalSourceLocation]) - that
+ * restriction is real, and reporting an existing library is not the place to enforce it.
+ *
+ * The remote form drops any URL fragment, because the fragment carries an operator-chosen credential
+ * id (see `WebDavCredentialsResolver`) and a credential's name is not something a compatibility
+ * surface should hand out. The field is admin-only either way.
+ */
+private fun SourceLocation.toKomgaRoot(): String =
+  if (sourceId == LOCAL_SOURCE_ID) {
+    Path.of(URI(itemId)).toString()
+  } else {
+    itemId.substringBefore('#')
+  }
 
 private fun JsonObject.booleanOr(
   name: String,
