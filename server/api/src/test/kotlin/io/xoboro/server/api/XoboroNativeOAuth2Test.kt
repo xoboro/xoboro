@@ -178,14 +178,14 @@ class XoboroNativeOAuth2Test {
     val administratorToken: String =
       users
         .claimInitialAdministrator("admin@example.invalid", "synthetic-password")
-        .let { sessions.create(it).plainToken }
+        .let { requireNotNull(sessions.create(it)).plainToken }
     val readerToken: String =
       users
         .createUser(
           email = "reader@example.invalid",
           rawPassword = "synthetic-password",
           roles = setOf(UserRole.PAGE_STREAMING),
-        ).let { sessions.create(it).plainToken }
+        ).let { requireNotNull(sessions.create(it)).plainToken }
 
     private fun registration(
       id: String,
