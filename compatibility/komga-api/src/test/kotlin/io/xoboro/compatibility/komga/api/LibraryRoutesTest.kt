@@ -32,6 +32,7 @@ import io.xoboro.core.application.RootType
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.LibrarySettings
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqLibraryRepository
@@ -305,6 +306,43 @@ class LibraryRoutesTest {
     }
   }
 
+  /**
+   * One remote-source library used to take the entire listing down. `Library.toDto` rendered `root`
+   * through a conversion that `require`d the local source, so `GET /api/v1/libraries` answered `500`
+   * for *every* library as soon as a WebDAV library existed - a Komga client could not enumerate
+   * libraries at all.
+   */
+  @Test
+  fun `lists a remote-source library alongside a local one instead of failing the whole listing`() {
+    withLibraryApi("library-remote-root.sqlite") { client, _, libraries, _, _, _, _, _ ->
+      client.claimAdministrator()
+      val localRoot = tempDirectory.resolve("local-root").createDirectories()
+      libraries.create(
+        name = "Local library",
+        root = SourceLocation(LOCAL_SOURCE, localRoot.toUri().toString()),
+        settings = LibrarySettings(),
+      )
+      libraries.create(
+        name = "Remote library",
+        root = SourceLocation("webdav", "https://nas.example.invalid/dav/manga#nas1"),
+        settings = LibrarySettings(),
+      )
+
+      val response =
+        client.get("/api/v1/libraries") {
+          adminCredentials()
+        }
+      assertEquals(HttpStatusCode.OK, response.status)
+      val listed = response.body<List<LibraryDto>>().associate { it.name to it.root }
+
+      // The local library still reports a filesystem path, which is what would have regressed had
+      // the fix simply stopped reporting roots.
+      assertEquals(localRoot.toString(), listed["Local library"])
+      // The fragment carries an operator-chosen credential id and must not be handed out.
+      assertEquals("https://nas.example.invalid/dav/manga", listed["Remote library"])
+    }
+  }
+
   private fun withLibraryApi(
     databaseName: String,
     assertions:
@@ -435,8 +473,17 @@ class LibraryRoutesTest {
     setBody(value.toString())
   }
 
+  /**
+   * Resolves a `local` root against the real filesystem, and accepts a non-local root as an existing
+   * readable directory without touching disk.
+   *
+   * The second half exists so a test can hold a remote-source library at all. Without it every
+   * fixture here is `local`, and the Komga surface's handling of a remote root - which used to answer
+   * `500` for the whole listing - had no test that could reach it.
+   */
   private object LocalTestRootAccess : LibraryRootAccess {
     override fun typeOf(root: SourceLocation): RootType {
+      if (root.sourceId != LOCAL_SOURCE) return RootType.DIRECTORY
       val path = root.toPath()
       return when {
         !Files.exists(path) -> RootType.MISSING
@@ -445,13 +492,19 @@ class LibraryRoutesTest {
       }
     }
 
-    override fun isReadable(root: SourceLocation): Boolean = Files.isReadable(root.toPath())
+    override fun isReadable(root: SourceLocation): Boolean =
+      root.sourceId != LOCAL_SOURCE || Files.isReadable(root.toPath())
 
     override fun isSameOrAncestor(
       possibleAncestor: SourceLocation,
       possibleDescendant: SourceLocation,
-    ): Boolean =
-      possibleDescendant.toPath().startsWith(possibleAncestor.toPath())
+    ): Boolean {
+      if (possibleAncestor.sourceId != possibleDescendant.sourceId) return false
+      if (possibleAncestor.sourceId != LOCAL_SOURCE) {
+        return possibleDescendant.itemId.startsWith(possibleAncestor.itemId)
+      }
+      return possibleDescendant.toPath().startsWith(possibleAncestor.toPath())
+    }
 
     private fun SourceLocation.toPath(): Path =
       Path.of(URI(itemId)).toAbsolutePath().normalize()
@@ -481,6 +534,8 @@ class LibraryRoutesTest {
   }
 
   private companion object {
+    /** Mirrors the route module's own private constant rather than widening its visibility for a test. */
+    const val LOCAL_SOURCE = "local"
     const val ADMIN_EMAIL = "admin@example.invalid"
     const val ADMIN_PASSWORD = "synthetic-admin-password"
     const val READER_EMAIL = "reader@example.invalid"
