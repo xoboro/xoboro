@@ -1,10 +1,17 @@
 <script>
   /**
-   * One series and its items, in reading order.
+   * One series, its items, and the two ways into it.
    *
-   * Reading order is what the route returns by default — ordered by number — and it is
-   * deliberately not overridden. A listing sorted by title puts chapter 10 before
-   * chapter 2, which is the kind of ordering bug that looks like data corruption.
+   * Chapters are listed newest first, which is where a reader following a running
+   * series looks, and the order is remembered per reader and per series — a shelf
+   * holding both a finished manga and a weekly webtoon wants opposite answers, so one
+   * global setting would be wrong for one of them.
+   *
+   * Only the chapter number is ever sorted on. Sorting by title is what puts chapter
+   * 10 before chapter 2, which reads as corrupted data rather than a chosen order.
+   *
+   * Ordering is asked of the server, never applied to the array below: the listing is
+   * paged, so reversing a page here would show the oldest hundred backwards.
    *
    * Editing metadata is offered to any authenticated caller, because the server does
    * not gate it behind an administrator: it authorizes by what the caller can already
@@ -13,34 +20,71 @@
   import { onMount } from 'svelte'
   import { ChevronLeft, PencilLine } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
-  import { artworkUrl, listSeriesMediaItems, readSeries } from '../lib/api/catalog.js'
+  import {
+    SeriesOrder,
+    artworkUrl,
+    listSeriesMediaItems,
+    readResumePoint,
+    readSeries,
+  } from '../lib/api/catalog.js'
   import { eventHub } from '../lib/eventHub.js'
+  import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
+  import { session } from '../lib/session.js'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import SeriesActions from './SeriesActions.svelte'
   import SeriesMetadataForm from '../catalog/SeriesMetadataForm.svelte'
+  import SeriesOrderToggle from './SeriesOrderToggle.svelte'
 
   let { params } = $props()
 
+  const ORDERS = Object.values(SeriesOrder)
+  const readerId = $derived($session.user?.id ?? null)
+
   let series = $state(null)
   let items = $state(null)
+  let first = $state(null)
+  let resume = $state(null)
   let error = $state(null)
   let editing = $state(false)
+  let order = $state(SeriesOrder.NEWEST)
 
   async function load() {
     try {
-      const [detail, page] = await Promise.all([
+      const [detail, page, resumePoint] = await Promise.all([
         readSeries(params.id),
-        listSeriesMediaItems(params.id),
+        listSeriesMediaItems(params.id, { sort: order }),
+        readResumePoint(params.id),
       ])
       series = detail
       items = page
+      resume = resumePoint
+      // The earliest chapter is only the head of the listing when the listing runs
+      // that way; under newest-first it is on the last page, so it is asked for
+      // directly rather than guessed at from whichever page arrived.
+      first =
+        order === SeriesOrder.OLDEST
+          ? (page.items[0] ?? null)
+          : ((await listSeriesMediaItems(params.id, { size: 1, sort: SeriesOrder.OLDEST }))
+              .items[0] ?? null)
       error = null
     } catch (caught) {
       error = caught
     }
   }
 
+  function choose(next) {
+    order = next
+    writePreference(readerId, params.id, Preference.SORT, next)
+    load()
+  }
+
   onMount(() => {
+    order = oneOf(
+      readPreference(readerId, params.id, Preference.SORT, SeriesOrder.NEWEST),
+      ORDERS,
+      SeriesOrder.NEWEST,
+    )
     load()
     return eventHub.on(['series.changed', 'media-item.added', 'media-item.changed'], load)
   })
@@ -76,6 +120,14 @@
 
 {#if series?.metadata?.summary}
   <p class="summary">{series.metadata.summary}</p>
+{/if}
+
+<SeriesActions {first} {resume} />
+
+{#if items && items.items.length > 1}
+  <div class="ordering">
+    <SeriesOrderToggle {order} onchange={choose} />
+  </div>
 {/if}
 
 {#if items}
@@ -144,6 +196,13 @@
     padding: 0 var(--gutter-right) 0 var(--gutter-left);
     color: var(--text-secondary);
     font-size: var(--font-sm);
+  }
+  /* Hidden for a one-chapter series: an order control that cannot change any result
+     costs a reader the time it takes to work that out. */
+  .ordering {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0 var(--gutter-right) var(--space-2) var(--gutter-left);
   }
   .items {
     margin: 0;

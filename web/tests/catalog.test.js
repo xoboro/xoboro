@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   FEEDS,
   MAX_PAGE_DIMENSION,
+  SeriesOrder,
   artworkUrl,
   listSeriesMediaItems,
   pageUrl,
   readFeed,
   readNeighbour,
+  readResumePoint,
 } from '../src/lib/api/catalog.js'
 
 function reply(body, status = 200) {
@@ -60,16 +62,53 @@ describe('named feeds', () => {
 })
 
 describe('reading order', () => {
-  it('does not override the route default, which is number order', async () => {
-    // Sorting by title puts chapter 10 before chapter 2 — an ordering bug that reads as
-    // data corruption.
+  it('asks the server for newest-first by default', async () => {
+    // Asked of the server rather than applied to the response, because the listing is
+    // paged: reversing a page here would show the oldest hundred backwards and label it
+    // "newest" — right for a short series and quietly wrong for a long one.
     const fetchImpl = vi.fn().mockResolvedValue(reply({ items: [] }))
     globalThis.fetch = fetchImpl
 
     await listSeriesMediaItems('s1')
     const [url] = fetchImpl.mock.calls[0]
     expect(url).toContain('/series/s1/media-items')
-    expect(url).not.toContain('sort')
+    expect(decodeURIComponent(url)).toContain('sort=number,desc')
+  })
+
+  it('sorts only on number, in either direction', async () => {
+    // Sorting by title puts chapter 10 before chapter 2 — an ordering bug that reads as
+    // data corruption — so number is the only field either order names.
+    const fetchImpl = vi.fn().mockResolvedValue(reply({ items: [] }))
+    globalThis.fetch = fetchImpl
+
+    await listSeriesMediaItems('s1', { sort: SeriesOrder.OLDEST })
+    expect(decodeURIComponent(fetchImpl.mock.calls[0][0])).toContain('sort=number,asc')
+    expect(Object.values(SeriesOrder).every((sort) => sort.startsWith('number,'))).toBe(true)
+  })
+})
+
+describe('resume point', () => {
+  it('prefers a part-read item and falls back to the next unread one', async () => {
+    // Two steps because "resume" means two things: an item left part-read is where the
+    // reader stopped, and once none is part-read the next unread one is where they are
+    // going. Both filters resolve in SQL over the whole series, so neither depends on
+    // how the listing happens to be paged.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(reply({ items: [] }))
+      .mockResolvedValueOnce(reply({ items: [{ id: 'b7' }] }))
+    globalThis.fetch = fetchImpl
+
+    expect(await readResumePoint('s1')).toEqual({ id: 'b7' })
+    expect(fetchImpl.mock.calls[0][0]).toContain('keepReading=true')
+    expect(fetchImpl.mock.calls[1][0]).toContain('onDeck=true')
+  })
+
+  it('reports nothing to resume for a series the reader has not started', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({ items: [] }))
+    globalThis.fetch = fetchImpl
+
+    expect(await readResumePoint('s1')).toBeNull()
   })
 })
 

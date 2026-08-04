@@ -27,7 +27,16 @@
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import { createPriorityLoader } from './priorityLoader.js'
-  import { aspectRatio, buildViews, indexOfPage, pageLoadPriority, viewKey } from './views.js'
+  import {
+    DIRECTIONS,
+    aspectRatio,
+    buildViews,
+    indexOfPage,
+    pageLoadPriority,
+    viewKey,
+  } from './views.js'
+  import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
+  import { session } from '../lib/session.js'
 
   let { params } = $props()
 
@@ -50,15 +59,78 @@
     }
   }
 
-  let mode = $state(stored('mode', 'scroll'))
-  let direction = $state(stored('direction', 'ltr'))
+  /**
+   * Named combinations of layout and direction.
+   *
+   * `mode` and `direction` are separate axes, which is correct — a right-to-left
+   * webtoon exists — but it left the common cases undiscoverable: reading Japanese
+   * manga means knowing to pick `paged` *and* `rtl`, and nothing on the sheet said so.
+   * These name the three combinations a reader actually asks for; the axes stay below
+   * for anything else.
+   */
+  const PRESETS = Object.freeze([
+    { key: 'webtoon', mode: 'scroll', direction: 'ltr' },
+    { key: 'manga', mode: 'paged', direction: 'rtl' },
+    { key: 'comic', mode: 'paged', direction: 'ltr' },
+  ])
+
+  /**
+   * The series this item belongs to, once known.
+   *
+   * Layout and direction are remembered against it rather than globally: a shelf
+   * holding both Japanese manga and a webtoon wants opposite answers, and one global
+   * setting is wrong for one of them on every open.
+   */
+  let seriesId = $state(null)
+  const readerId = $derived($session.user?.id ?? null)
+
+  // Seeded from the series-less scope, which readPreference resolves to the legacy
+  // global value. That keeps a reader's existing choice until the item loads and its
+  // series has a say, instead of flashing the shipped default.
+  let mode = $state(oneOf(readPreference(null, null, Preference.MODE, 'scroll'), MODES, 'scroll'))
+  let direction = $state(
+    oneOf(readPreference(null, null, Preference.DIRECTION, 'ltr'), DIRECTIONS, 'ltr'),
+  )
   let fit = $state(stored('fit', 'width'))
   let width = $state(stored('width', '760'))
 
-  $effect(() => remember('mode', mode))
-  $effect(() => remember('direction', direction))
+  // Only fit and width are global. They describe the screen being read on, which does
+  // not change from one work to the next.
   $effect(() => remember('fit', fit))
   $effect(() => remember('width', width))
+
+  const activePreset = $derived(
+    PRESETS.find((preset) => preset.mode === mode && preset.direction === direction)?.key ?? null,
+  )
+
+  /** Applies what this reader last chose for this series, if anything. */
+  function restoreViewPreferences() {
+    mode = oneOf(readPreference(readerId, seriesId, Preference.MODE, mode), MODES, mode)
+    direction = oneOf(
+      readPreference(readerId, seriesId, Preference.DIRECTION, direction),
+      DIRECTIONS,
+      direction,
+    )
+  }
+
+  /**
+   * Records a view choice against the current series.
+   *
+   * Written on the action rather than from an effect on `mode`: an effect also fires
+   * for the programmatic restore above, which would store the value under whichever
+   * scope happened to be current at the time.
+   */
+  function chooseView(next) {
+    if (next.mode !== undefined) {
+      mode = next.mode
+      writePreference(readerId, seriesId, Preference.MODE, mode)
+    }
+    if (next.direction !== undefined) {
+      direction = next.direction
+      writePreference(readerId, seriesId, Preference.DIRECTION, direction)
+    }
+    realign()
+  }
 
   let item = $state(null)
   let pages = $state([])
@@ -127,6 +199,11 @@
       const [detail, manifest] = await Promise.all([readMediaItem(id), listPages(id)])
       if (token !== loadToken) return
       item = detail
+      // Restored before the first view is built: `index` below is derived from
+      // `direction`, so applying the series' direction afterwards would open a split
+      // spread on the wrong half and then jump.
+      seriesId = detail.seriesId ?? null
+      restoreViewPreferences()
       pages = manifest
       const start = resumePage(detail.readProgress, detail.media?.pageCount ?? manifest.length)
       current = start
@@ -416,6 +493,27 @@
 {#if settingsOpen}
   <Dialog title={$_('common.settings')} onclose={() => (settingsOpen = false)}>
     {#snippet children()}
+      <!-- First on the sheet, because it is the only control most readers need: the
+           two fieldsets under it are the same settings taken apart. A preset reads as
+           unselected once either axis is changed on its own, which is honest — the
+           layout no longer is that preset. -->
+      <fieldset>
+        <legend>{$_('reader.preset')}</legend>
+        <div class="options">
+          {#each PRESETS as preset (preset.key)}
+            <button
+              type="button"
+              class:on={activePreset === preset.key}
+              data-testid={`preset-${preset.key}`}
+              aria-pressed={activePreset === preset.key}
+              onclick={() => chooseView({ mode: preset.mode, direction: preset.direction })}
+            >
+              {$_(`reader.presets.${preset.key}`)}
+            </button>
+          {/each}
+        </div>
+      </fieldset>
+
       <fieldset>
         <legend>{$_('reader.mode')}</legend>
         <div class="options">
@@ -425,10 +523,7 @@
               class:on={mode === value}
               data-testid={`mode-${value}`}
               aria-pressed={mode === value}
-              onclick={() => {
-                mode = value
-                realign()
-              }}
+              onclick={() => chooseView({ mode: value })}
             >
               {$_(`reader.modes.${value}`)}
             </button>
@@ -445,10 +540,7 @@
               class:on={direction === value}
               data-testid={`direction-${value}`}
               aria-pressed={direction === value}
-              onclick={() => {
-                direction = value
-                realign()
-              }}
+              onclick={() => chooseView({ direction: value })}
             >
               {$_(`reader.directions.${value}`)}
             </button>
