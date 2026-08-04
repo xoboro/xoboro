@@ -14,7 +14,7 @@
   let { error, onretry = null } = $props()
 
   const text = $derived(
-    error ? $_(error.messageKey, { default: $_('errors.unknown') }) : '',
+    error ? $_(error.messageKey, { default: $_(error.fallbackMessageKey) }) : '',
   )
   // Throttling is the one failure that carries a usable number, so it says when
   // rather than only what.
