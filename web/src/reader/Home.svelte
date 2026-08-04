@@ -21,6 +21,7 @@
   import { eventHub } from '../lib/eventHub.js'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import Logo from '../components/Logo.svelte'
   import MediaShelf from '../components/MediaShelf.svelte'
   import StreamIndicator from '../components/StreamIndicator.svelte'
 
@@ -103,7 +104,10 @@
 </script>
 
 <header>
-  <h1>{$_('reader.title')}</h1>
+  <span class="brand">
+    <Logo size={26} label="Xoboro" />
+    <h1>{$_('reader.title')}</h1>
+  </span>
   <div class="actions">
     <StreamIndicator status={$streamStore} />
     {#if administrator}
@@ -180,9 +184,21 @@
     padding: max(var(--space-4), calc(var(--inset-top) + var(--space-2)))
       var(--gutter-right) var(--space-2) var(--gutter-left);
   }
+  /* Groups the mark with the heading so `justify-content: space-between` on the
+     header has two children to push apart rather than three. */
+  .brand {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--space-2);
+  }
   h1 {
+    min-width: 0;
     margin: 0;
+    overflow: hidden;
     font-size: var(--font-lg);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .actions {
     display: flex;

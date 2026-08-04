@@ -4,7 +4,36 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0e0e10" />
+    <meta name="theme-color" content="#111418" />
+    <!--
+      Every icon and manifest href is relative, for the same reason vite.config.js
+      pins `base: './'`: the server can be deployed under a context path, and an
+      absolute "/favicon.svg" would 404 under /xoboro. The paths inside the
+      manifest resolve against the manifest's own URL, so they travel too.
+
+      No favicon.ico. A browser's implicit request for one goes to the origin
+      root, which a context-path deployment does not own, so the file could not
+      answer it anyway; the explicit links below are what browsers actually use.
+    -->
+    <!--
+      The SVG is referenced out of src/ rather than copied into public/ so there is
+      one checked-in copy of the artwork; vite bundles and fingerprints it from
+      here. The PNGs beside it in public/ are rendered from this same file and
+      exist only where a platform will not take an SVG.
+    -->
+    <link rel="icon" href="./src/assets/xoboro.svg" type="image/svg+xml" />
+    <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="./favicon-16.png" sizes="16x16" type="image/png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <!--
+      Translucent rather than opaque: the reader deliberately draws under the
+      status bar (viewport-fit=cover), and every screen already reserves
+      --inset-top for it. An opaque bar would leave a band the tokens cannot
+      colour.
+    -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Xoboro" />
     <title>Xoboro</title>
   </head>
   <body>
