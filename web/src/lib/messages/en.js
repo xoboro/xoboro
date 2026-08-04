@@ -425,6 +425,10 @@ export default {
 
   catalog: {
     navigation: 'My library',
+    library: {
+      switcher: 'Library',
+      all: 'All',
+    },
     metadata: {
       seriesTitle: 'Edit series metadata',
       lockNote:

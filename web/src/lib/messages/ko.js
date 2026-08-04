@@ -424,6 +424,10 @@ export default {
 
   catalog: {
     navigation: '내 서재',
+    library: {
+      switcher: '라이브러리',
+      all: '전체',
+    },
     metadata: {
       seriesTitle: '시리즈 정보 수정',
       lockNote:
