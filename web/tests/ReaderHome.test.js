@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import Home from '../src/reader/Home.svelte'
 
@@ -66,5 +66,83 @@ describe('Reader home', () => {
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument())
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     expect(screen.queryByTestId('shelves-failed')).toBeNull()
+  })
+})
+
+/** Answers `/libraries` with the given libraries and everything else with an empty page. */
+function serverWithLibraries(libraries) {
+  return vi.fn(async (url) => {
+    if (url.includes('/libraries')) return reply(envelope(libraries))
+    return reply(envelope())
+  })
+}
+
+const TWO_LIBRARIES = [
+  { id: 'lib-comics', name: 'comics' },
+  { id: 'lib-webtoon', name: 'webtoon' },
+]
+
+describe('library switcher', () => {
+  it('offers every library plus all of them', async () => {
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await waitFor(() => expect(screen.getByTestId('library-lib-webtoon')).toBeInTheDocument())
+    expect(screen.getByTestId('library-lib-comics')).toBeInTheDocument()
+    // "All" is a choice of its own, not the absence of one.
+    expect(screen.getByTestId('library-all')).toBeInTheDocument()
+  })
+
+  it('stays hidden when there is only one library to choose', async () => {
+    // A control that cannot change any result costs a reader the time it takes to work
+    // that out.
+    globalThis.fetch = serverWithLibraries([TWO_LIBRARIES[0]])
+    render(Home)
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    expect(screen.queryByTestId('library-all')).toBeNull()
+  })
+
+  it('narrows the shelves as well as the grid', async () => {
+    // The shelves matter as much as the grid here: a reader who has narrowed to one
+    // library would otherwise still be offered chapters from the other one, which reads
+    // as the filter not working.
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-lib-webtoon'))
+
+    await waitFor(() => {
+      const urls = globalThis.fetch.mock.calls.map(([url]) => url)
+      expect(urls.some((url) => url.includes('/series?') && url.includes('libraryId=lib-webtoon')))
+        .toBe(true)
+      expect(urls.some((url) => url.includes('/feeds/') && url.includes('libraryId=lib-webtoon')))
+        .toBe(true)
+    })
+  })
+
+  it('remembers the chosen library for the next visit', async () => {
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-lib-webtoon'))
+
+    await waitFor(() =>
+      expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe('lib-webtoon'),
+    )
+  })
+
+  it('stores all-libraries as a decision rather than as no decision', async () => {
+    // Empty string, not a removed key: without the distinction, choosing "all" after
+    // narrowing could not be persisted and the narrow choice would come back.
+    localStorage.setItem('xoboro.pref.anonymous.global.library', 'lib-webtoon')
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-all'))
+
+    await waitFor(() =>
+      expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe(''),
+    )
   })
 })

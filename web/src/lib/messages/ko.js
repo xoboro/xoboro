@@ -333,6 +333,19 @@ export default {
     unread: '안 읽음',
     read: '완독',
     inProgress: '{page}쪽까지 읽음',
+    continue: '이어보기',
+    fromStart: '처음부터',
+    preset: '보기 방식',
+    presets: {
+      webtoon: '웹툰',
+      manga: '일본만화',
+      comic: '서양만화',
+    },
+    order: {
+      label: '정렬',
+      newest: '최신순',
+      oldest: '오래된순',
+    },
     conflictTitle: '다른 기기가 더 앞까지 읽었습니다',
     conflictBody: '{page}쪽까지 읽은 기록이 있습니다. 거기로 이동할까요?',
     conflictJump: '거기로 이동',
@@ -411,6 +424,10 @@ export default {
 
   catalog: {
     navigation: '내 서재',
+    library: {
+      switcher: '라이브러리',
+      all: '전체',
+    },
     metadata: {
       seriesTitle: '시리즈 정보 수정',
       lockNote:
@@ -426,6 +443,26 @@ export default {
       genres: '장르 (쉼표로 구분)',
       tags: '태그 (쉼표로 구분)',
       unset: '지정 안 함',
+      statuses: {
+        ONGOING: '연재중',
+        ENDED: '완결',
+        ABANDONED: '중단',
+        HIATUS: '휴재',
+      },
+      // Read-only labels. Separate from the ones above because those carry
+      // form-only hints like "(쉼표로 구분)", which make no sense beside a value.
+      display: {
+        status: '연재 상태',
+        publisher: '출판사',
+        language: '언어',
+        ageRating: '연령 등급',
+        ageRatingValue: '{age}세 이상',
+        books: '전체 화수',
+        bookCount: '{count}화',
+        genres: '장르',
+        tags: '태그',
+        links: '링크',
+      },
     },
     grouping: {
       name: '이름',

@@ -18,9 +18,13 @@
   import { _, applyLocale, locale } from '../lib/i18n.js'
   import { isAdministrator, session, signOut } from '../lib/session.js'
   import { artworkUrl, listSeries, readFeed } from '../lib/api/catalog.js'
+  import { listLibraries } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
+  import { Preference, readPreference, writePreference } from '../lib/preferences.js'
+  import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import Logo from '../components/Logo.svelte'
   import MediaShelf from '../components/MediaShelf.svelte'
   import StreamIndicator from '../components/StreamIndicator.svelte'
 
@@ -34,18 +38,36 @@
   let error = $state(null)
   /** How many of the four shelves failed to load. Zero renders nothing. */
   let shelvesFailed = $state(0)
+  /**
+   * Libraries this reader can see, and which one the shelf is narrowed to.
+   *
+   * `null` means all of them. The choice is remembered per reader, because a reader
+   * who keeps to one library should not have to narrow the shelf on every visit.
+   */
+  let libraries = $state([])
+  let libraryId = $state(null)
 
   const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
+
+  async function loadLibraries() {
+    // Settled with the rest: the switcher not loading must not blank the shelf, it
+    // just leaves the reader unable to narrow it.
+    try {
+      libraries = (await listLibraries()).items ?? []
+    } catch {
+      libraries = []
+    }
+  }
 
   async function loadShelves() {
     // Settled rather than all-or-nothing: a reader with no progress yet gets nothing
     // useful from keep-reading, and that must not blank the rest of the page.
     const [keep, deck, added, changed] = await Promise.allSettled([
-      readFeed('media-items', 'keep-reading'),
-      readFeed('media-items', 'on-deck'),
-      readFeed('series', 'new'),
-      readFeed('series', 'updated'),
+      readFeed('media-items', 'keep-reading', { libraryId }),
+      readFeed('media-items', 'on-deck', { libraryId }),
+      readFeed('series', 'new', { libraryId }),
+      readFeed('series', 'updated', { libraryId }),
     ])
     if (keep.status === 'fulfilled') keepReading = keep.value.items ?? []
     if (deck.status === 'fulfilled') onDeck = deck.value.items ?? []
@@ -60,7 +82,7 @@
 
   async function loadSeries() {
     try {
-      allSeries = await listSeries({ size: 100 })
+      allSeries = await listSeries({ size: 100, libraryId })
       error = null
     } catch (caught) {
       error = caught
@@ -71,7 +93,18 @@
     await Promise.all([loadShelves(), loadSeries()])
   }
 
+  function chooseLibrary(next) {
+    libraryId = next
+    writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
+    refresh()
+  }
+
   onMount(() => {
+    // Empty string is a stored "all libraries"; absent means never chosen. Both land on
+    // null here, but only the former survives a reload as a decision.
+    const remembered = readPreference(user?.id ?? null, null, Preference.LIBRARY, '')
+    libraryId = remembered === '' ? null : remembered
+    loadLibraries()
     refresh()
     const offCatalog = eventHub.on(
       ['series.added', 'series.changed', 'series.removed', 'media-item.added'],
@@ -103,7 +136,10 @@
 </script>
 
 <header>
-  <h1>{$_('reader.title')}</h1>
+  <span class="brand">
+    <Logo size={26} label="Xoboro" />
+    <h1>{$_('reader.title')}</h1>
+  </span>
   <div class="actions">
     <StreamIndicator status={$streamStore} />
     {#if administrator}
@@ -119,6 +155,8 @@
     </button>
   </div>
 </header>
+
+<LibrarySwitcher {libraries} selected={libraryId} onchange={chooseLibrary} />
 
 <nav class="library" aria-label={$_('catalog.navigation')}>
   <a href="#/search">
@@ -180,9 +218,21 @@
     padding: max(var(--space-4), calc(var(--inset-top) + var(--space-2)))
       var(--gutter-right) var(--space-2) var(--gutter-left);
   }
+  /* Groups the mark with the heading so `justify-content: space-between` on the
+     header has two children to push apart rather than three. */
+  .brand {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--space-2);
+  }
   h1 {
+    min-width: 0;
     margin: 0;
+    overflow: hidden;
     font-size: var(--font-lg);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .actions {
     display: flex;

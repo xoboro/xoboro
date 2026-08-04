@@ -11,6 +11,7 @@
   import { Treatment } from '../lib/errors.js'
   import { claimServer } from '../lib/session.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import Logo from '../components/Logo.svelte'
 
   let { onclaimed } = $props()
 
@@ -46,6 +47,9 @@
 
 <main>
   <form onsubmit={submit} novalidate>
+    <!-- Labelled for the same reason as the sign-in screen: the heading names the
+         task, not the product. -->
+    <div class="brand"><Logo size={56} label="Xoboro" /></div>
     <h1>{$_('session.setupTitle')}</h1>
     <p class="hint">{$_('session.setupHint')}</p>
 
@@ -104,6 +108,11 @@
     width: min(360px, 100%);
     flex-direction: column;
     gap: var(--space-2);
+  }
+  .brand {
+    display: flex;
+    justify-content: center;
+    margin: 0 0 var(--space-4);
   }
   h1 {
     margin: 0;
