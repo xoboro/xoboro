@@ -159,7 +159,7 @@
       <ErrorNotice error={generalError} />
       {#if fieldError}
         <p class="field-error" role="alert">
-          {$_(fieldError.messageKey, { default: $_('errors.unknown') })}
+          {$_(fieldError.messageKey, { default: $_(fieldError.fallbackMessageKey) })}
         </p>
       {/if}
     </form>

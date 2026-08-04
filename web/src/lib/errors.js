@@ -129,6 +129,25 @@ export class XoboroApiError extends Error {
   get messageKey() {
     return `errors.${this.code}`
   }
+
+  /**
+   * The key to render when [messageKey] has no catalog entry.
+   *
+   * Without this, every code the catalog has not named individually rendered as
+   * "something went wrong" — including the seventeen `*_forbidden` codes the
+   * server sends, which have a perfectly good shared message. A reader denied a
+   * page was told the server had a problem rather than that they lacked
+   * permission, and an operator who had just created a user got the same.
+   *
+   * The suffix is the contract here for the same reason it is in [treatment]: the
+   * catalog naming a code individually is an improvement on this, never a
+   * requirement, so adding a server code cannot silently degrade the message.
+   */
+  get fallbackMessageKey() {
+    if (this.code.endsWith('_forbidden') || this.code === 'forbidden') return 'errors.forbidden'
+    if (this.code.endsWith('_not_found') || this.code === 'not_found') return 'errors.not_found'
+    return 'errors.unknown'
+  }
 }
 
 /** A request that never got an answer. Distinct from a rejection by the server. */
@@ -140,6 +159,7 @@ export class XoboroNetworkError extends Error {
     this.treatment = Treatment.OFFLINE
     this.code = 'network_unreachable'
     this.messageKey = 'errors.network_unreachable'
+    this.fallbackMessageKey = 'errors.unknown'
   }
 }
 

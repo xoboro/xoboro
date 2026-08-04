@@ -107,3 +107,37 @@ describe('parseRetryAfter', () => {
     expect(parseRetryAfter('soon', now)).toBeNull()
   })
 })
+
+describe('fallbackMessageKey', () => {
+  it('renders a permission failure as a permission failure, not as an unknown error', async () => {
+    // Found on a real deployment: a user created with only ADMIN, and so without
+    // PAGE_STREAMING, opened a book and the reader said "something went wrong".
+    // The server had been explicit — 403 page_streaming_forbidden, "Page streaming
+    // permission is required" — and `treatment` already understood it. Only the
+    // message did not, because the catalog names `errors.forbidden` and the code
+    // asked for `errors.page_streaming_forbidden`.
+    expect(error('page_streaming_forbidden').fallbackMessageKey).toBe('errors.forbidden')
+    expect(error('file_download_forbidden').fallbackMessageKey).toBe('errors.forbidden')
+    expect(error('forbidden').fallbackMessageKey).toBe('errors.forbidden')
+    expect(error('media_item_not_found').fallbackMessageKey).toBe('errors.not_found')
+    expect(error('not_found').fallbackMessageKey).toBe('errors.not_found')
+    expect(error('something_we_have_never_seen').fallbackMessageKey).toBe('errors.unknown')
+    expect(new XoboroNetworkError(new Error('down')).fallbackMessageKey).toBe('errors.unknown')
+  })
+
+  it('names a key both catalogs actually carry', async () => {
+    // A fallback pointing at a missing key would put the raw key path on screen,
+    // which is worse than the generic sentence it replaced.
+    const [ko, en] = await Promise.all([
+      import('../src/lib/messages/ko.js'),
+      import('../src/lib/messages/en.js'),
+    ])
+    const keys = ['errors.forbidden', 'errors.not_found', 'errors.unknown']
+    for (const catalog of [ko.default ?? ko, en.default ?? en]) {
+      for (const key of keys) {
+        const value = key.split('.').reduce((node, part) => node?.[part], catalog)
+        expect(typeof value, `${key} must exist`).toBe('string')
+      }
+    }
+  })
+})

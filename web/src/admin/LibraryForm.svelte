@@ -99,7 +99,7 @@
       />
       {#if nameError}
         <p class="field-error" id="library-name-error" role="alert">
-          {$_(nameError.messageKey, { default: $_('errors.unknown') })}
+          {$_(nameError.messageKey, { default: $_(nameError.fallbackMessageKey) })}
         </p>
       {/if}
 
@@ -124,7 +124,7 @@
       />
       {#if locationError}
         <p class="field-error" id="library-location-error" role="alert">
-          {$_(locationError.messageKey, { default: $_('errors.unknown') })}
+          {$_(locationError.messageKey, { default: $_(locationError.fallbackMessageKey) })}
         </p>
       {/if}
 
