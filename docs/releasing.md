@@ -54,7 +54,23 @@ rather than only in the body: deciding a version must not require opening every 
    about the server and not about the release: the web UI is a separate build stage copied in, so an
    image shipping no user interface reports healthy.
 5. **Publish the container image** for the tag. `.github/workflows/container.yml` builds it and runs
-   the same script.
+   the same script, then pushes `linux/amd64` and `linux/arm64` to every configured registry.
+
+   `ghcr.io/xoboro/xoboro` always receives the push: it authenticates with the workflow's own
+   `GITHUB_TOKEN` and needs no setup. `docker.io` receives it as well once three settings exist —
+   the `DOCKERHUB_REPOSITORY` **variable** (e.g. `myuser/xoboro`) and the `DOCKERHUB_USERNAME` /
+   `DOCKERHUB_TOKEN` **secrets**. With any of them missing the job logs a notice and publishes to
+   GHCR only, so an unconfigured second registry cannot take the first one down with it.
+
+   A deployment then pulls rather than being handed an image out of band:
+
+   ```
+   docker compose pull && docker compose up -d
+   ```
+
+   with `XOBORO_IMAGE` set to the registry reference. Side-loading a locally built image
+   (`docker save | ssh … docker load`) leaves the host running something that exists in no registry
+   and matches no commit anyone can check out, so it is a debugging move, not a deployment.
 6. **Write the release notes** from the commit range. The convention exists so this is mechanical:
    `feat` subjects are the features, `fix` subjects are the fixes, `chore` is omitted, and anything with
    `!` goes first with its body quoted, because that body is where the migration instruction lives.

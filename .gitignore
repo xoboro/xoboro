@@ -53,3 +53,8 @@ out/
 node_modules/
 /web/dist/
 web/dist/
+
+# Playwright MCP writes screenshots and traces of the running app here. A screenshot
+# of a real library is real library data, and this repository never holds that.
+.playwright-mcp/
+*.png
