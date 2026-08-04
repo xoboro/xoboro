@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.4.10"
 ktor = "3.5.1"
-logback = "1.6.0"
+logback = "1.6.1"
 logstash-logback-encoder = "9.0"
 flyway = "13.0.0"
 hikari = "7.1.0"
@@ -14,12 +14,12 @@ kotlinx-coroutines = "1.11.0"
 password4j = "1.8.4"
 tsid-creator = "5.2.6"
 cryptohash = "1.0.2"
-jsoup = "1.21.1"
-jspecify = "1.0.0"
-pdfbox = "3.0.5"
+jsoup = "1.23.1"
+jspecify = "1.0.1"
+pdfbox = "3.0.8"
 junrar = "8.0.0"
 zxing = "3.5.4"
-twelvemonkeys = "3.12.0"
+twelvemonkeys = "3.14.0"
 
 [libraries]
 imageio-webp = { module = "com.twelvemonkeys.imageio:imageio-webp", version.ref = "twelvemonkeys" }
