@@ -542,7 +542,7 @@ class XoboroNativeArtworkTest {
         currentTimeMillis = { 1_000 },
         inactivityTimeoutMillis = 60_000,
       )
-    val token = sessions.create(user).plainToken
+    val token = requireNotNull(sessions.create(user)).plainToken
     val catalog = RecordingCatalog(syntheticBook(), syntheticSeries())
     val artworks = RecordingArtworkRepository()
     val processor = RecordingArtworkProcessor()

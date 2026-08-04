@@ -22,7 +22,16 @@ data class UserSession(
 interface UserSessionRepository {
   fun findByTokenDigestOrNull(tokenDigest: String): UserSession?
 
-  fun insertIfAbsent(session: UserSession): Boolean
+  /**
+   * Records a new session.
+   *
+   * Three outcomes for the same reason [touchIfActive] has three. [SessionInsert.DIGEST_TAKEN]
+   * means the digest is already in use and the caller should generate another token;
+   * [SessionInsert.UNAVAILABLE] means the store could not accept the row at all. Collapsing the
+   * two would spend the caller's generation attempts on a database that was never going to accept
+   * any token, and then report an exhausted-token bug for what is a busy moment.
+   */
+  fun insertIfAbsent(session: UserSession): SessionInsert
 
   /**
    * Records an access against a session and extends its sliding window.
@@ -44,6 +53,21 @@ interface UserSessionRepository {
   fun deleteByUserId(userId: UserId): Int
 
   fun deleteExpired(nowMillis: Long): Int
+}
+
+/** The outcome of recording a new session. See [UserSessionRepository.insertIfAbsent]. */
+enum class SessionInsert {
+  INSERTED,
+
+  /** The digest collided with an existing session. Generate another token and try again. */
+  DIGEST_TAKEN,
+
+  /**
+   * The store could not accept the session. Retrying with a different token will not help, so a
+   * caller for whom the session is optional should proceed without one, and a caller that was
+   * asked for a session should report a transient failure rather than a bug.
+   */
+  UNAVAILABLE,
 }
 
 /** The outcome of recording an access against a session. See [UserSessionRepository.touchIfActive]. */

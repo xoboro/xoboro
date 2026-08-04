@@ -207,7 +207,7 @@ class XoboroRuntimeTest {
             email = "admin@example.invalid",
             rawPassword = "synthetic-password",
           )
-        runtime.userSessionLifecycle.create(user).plainToken
+        requireNotNull(runtime.userSessionLifecycle.create(user)).plainToken
       }
 
     XoboroRuntime.open(config).use { runtime ->

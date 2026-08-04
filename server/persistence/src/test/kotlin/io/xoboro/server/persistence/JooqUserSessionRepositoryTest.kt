@@ -2,6 +2,7 @@ package io.xoboro.server.persistence
 
 import io.xoboro.core.application.TokenEncoder
 import io.xoboro.core.application.UserSessionLifecycle
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserId
@@ -11,6 +12,7 @@ import java.sql.DriverManager
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
@@ -31,6 +33,7 @@ class JooqUserSessionRepositoryTest {
         lifecycle(database, now = { now }, plainTokenFactory = { PLAIN_TOKEN })
           .create(user())
 
+      assertNotNull(created)
       assertEquals(PLAIN_TOKEN, created.plainToken)
       assertEquals(
         TOKEN_DIGEST,
@@ -62,8 +65,8 @@ class JooqUserSessionRepositoryTest {
       val repository = JooqUserSessionRepository(database)
       val session = session(expiresAtMillis = 200)
 
-      assertTrue(repository.insertIfAbsent(session))
-      assertFalse(repository.insertIfAbsent(session))
+      assertEquals(SessionInsert.INSERTED, repository.insertIfAbsent(session))
+      assertEquals(SessionInsert.DIGEST_TAKEN, repository.insertIfAbsent(session))
       assertEquals(SessionTouch.TOUCHED, repository.touchIfActive(TOKEN_DIGEST, 150, 650))
       assertEquals(SessionTouch.TOUCHED, repository.touchIfActive(TOKEN_DIGEST, 125, 625))
       assertEquals(
@@ -107,7 +110,7 @@ class JooqUserSessionRepositoryTest {
     XoboroDatabase.open(DatabaseConfig(path, busyTimeoutMillis = 50)).use { database ->
       JooqUserRepository(database).insert(user())
       val sessions = JooqUserSessionRepository(database)
-      assertTrue(sessions.insertIfAbsent(session()))
+      assertEquals(SessionInsert.INSERTED, sessions.insertIfAbsent(session()))
 
       DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { holder ->
         holder.autoCommit = false
@@ -131,6 +134,41 @@ class JooqUserSessionRepositoryTest {
         SessionTouch.TOUCHED,
         sessions.touchIfActive(TOKEN_DIGEST, accessedAtMillis = 100, expiresAtMillis = 600),
       )
+    }
+  }
+
+  @Test
+  fun `reports a locked database as unavailable rather than as a digest collision`() {
+    // The INSERT counterpart of the test above. That fix covered the UPDATE, so a client holding a
+    // session survived a busy database while one authenticating fresh with `Basic` still got a 500
+    // - which is the first request every Komga client and the PWA make.
+    //
+    // UNAVAILABLE has to be distinct from DIGEST_TAKEN because they ask the caller for opposite
+    // things: a collision wants another token, a busy store wants a different answer entirely.
+    //
+    // The lock is taken for real from a second connection, for the same reason as above: what is
+    // under test is the driver's result code surviving jOOQ's wrapping.
+    val path = tempDirectory.resolve("locked-insert.sqlite")
+    XoboroDatabase.open(DatabaseConfig(path, busyTimeoutMillis = 50)).use { database ->
+      JooqUserRepository(database).insert(user())
+      val sessions = JooqUserSessionRepository(database)
+
+      DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { holder ->
+        holder.autoCommit = false
+        holder.createStatement().use {
+          it.executeUpdate("UPDATE user_session SET last_accessed_at_ms = last_accessed_at_ms")
+        }
+        try {
+          assertEquals(SessionInsert.UNAVAILABLE, sessions.insertIfAbsent(session()))
+        } finally {
+          holder.rollback()
+        }
+      }
+
+      // Nothing was written while the lock was held, and the same insert succeeds once it is gone -
+      // so UNAVAILABLE really was "not yet", not "already there".
+      assertNull(sessions.findByTokenDigestOrNull(TOKEN_DIGEST))
+      assertEquals(SessionInsert.INSERTED, sessions.insertIfAbsent(session()))
     }
   }
 

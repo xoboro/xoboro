@@ -867,9 +867,9 @@ class XoboroNativeCollectionsTest {
         inactivityTimeoutMillis = 60_000,
       )
     val adminToken =
-      sessions.create(requireNotNull(users.findByIdOrNull(ADMIN_USER_ID))).plainToken
+      requireNotNull(sessions.create(requireNotNull(users.findByIdOrNull(ADMIN_USER_ID)))).plainToken
     val readerToken =
-      sessions.create(requireNotNull(users.findByIdOrNull(READER_USER_ID))).plainToken
+      requireNotNull(sessions.create(requireNotNull(users.findByIdOrNull(READER_USER_ID)))).plainToken
 
     fun assertNoWrites() {
       assertEquals(0, collections.insertCalls)

@@ -262,7 +262,7 @@ class XoboroNativeCatalogTest {
         currentTimeMillis = { 1_000 },
         inactivityTimeoutMillis = 60_000,
       )
-    val token = sessions.create(user).plainToken
+    val token = requireNotNull(sessions.create(user)).plainToken
     val libraries =
       LibraryAdministrationLifecycle(
         libraries = libraryRepository,

@@ -1,5 +1,6 @@
 package io.xoboro.server.security
 
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserSession
@@ -17,8 +18,8 @@ class InMemoryUserSessionRepositoryTest {
     val second = session("digest-2", "user-1", expiresAtMillis = 200)
     val third = session("digest-3", "user-2", expiresAtMillis = 300)
 
-    assertTrue(repository.insertIfAbsent(first))
-    assertFalse(repository.insertIfAbsent(first))
+    assertEquals(SessionInsert.INSERTED, repository.insertIfAbsent(first))
+    assertEquals(SessionInsert.DIGEST_TAKEN, repository.insertIfAbsent(first))
     repository.insertIfAbsent(second)
     repository.insertIfAbsent(third)
     assertEquals(SessionTouch.TOUCHED, repository.touchIfActive("digest-1", 10, 110))

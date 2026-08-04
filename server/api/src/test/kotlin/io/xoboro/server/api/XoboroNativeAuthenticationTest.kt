@@ -32,10 +32,13 @@ import io.xoboro.core.domain.AuthenticationActivity
 import io.xoboro.core.domain.AuthenticationActivityPage
 import io.xoboro.core.domain.AuthenticationActivityPageRequest
 import io.xoboro.core.domain.AuthenticationActivityRepository
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserRepository
+import io.xoboro.core.domain.UserSession
+import io.xoboro.core.domain.UserSessionRepository
 import io.xoboro.server.security.InMemoryUserSessionRepository
 import io.xoboro.server.security.Sha512TokenEncoder
 import java.util.concurrent.atomic.AtomicInteger
@@ -279,8 +282,9 @@ class XoboroNativeAuthenticationTest {
 
   private fun ApplicationTestBuilder.installNativeAuthentication(
     loginLimit: Int = 10,
+    sessionStore: UserSessionRepository = InMemoryUserSessionRepository(),
   ): Fixture {
-    val fixture = Fixture()
+    val fixture = Fixture(sessionStore)
     application {
       install(ContentNegotiation) {
         json()
@@ -344,12 +348,75 @@ class XoboroNativeAuthenticationTest {
       )
     }
 
+  @Test
+  fun `answers 503 rather than 500 when the session store cannot open a session`() =
+    testApplication {
+      // The counterpart of the Komga-compat behaviour, and deliberately different: `Basic` can serve
+      // the request without a session because the session is only an optimization there. Here the
+      // session *is* what was asked for, so there is nothing to degrade to.
+      //
+      // `503` and not `500`: the credentials were accepted and the caller should retry. A `500` tells
+      // a client the server is broken, which sends it looking for a bug that is not there.
+      val store = UnavailableInsertSessionRepository()
+      installNativeAuthentication(sessionStore = store)
+      // Setup commits the administrator before it asks for a session, so the store is only made
+      // busy afterwards. Otherwise this would exercise `POST /setup`, whose behaviour when the
+      // account exists but the session does not is a separate problem from the one under test.
+      claimAdministrator()
+      store.unavailable = true
+
+      val login =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+
+      assertEquals(HttpStatusCode.ServiceUnavailable, login.status)
+      assertEquals("session_unavailable", login.body<XoboroApiError>().code)
+      // No token is handed out, so a client cannot act on a session that was never stored.
+      assertNull(login.headers[HttpHeaders.SetCookie])
+    }
+
+  /** A store that accepts nothing, the way SQLite answers while another writer holds the lock. */
+  private class UnavailableInsertSessionRepository : UserSessionRepository {
+    private val delegate = InMemoryUserSessionRepository()
+
+    var unavailable = false
+
+    override fun insertIfAbsent(session: UserSession): SessionInsert =
+      if (unavailable) SessionInsert.UNAVAILABLE else delegate.insertIfAbsent(session)
+
+    override fun findByTokenDigestOrNull(tokenDigest: String) =
+      delegate.findByTokenDigestOrNull(tokenDigest)
+
+    override fun touchIfActive(
+      tokenDigest: String,
+      accessedAtMillis: Long,
+      expiresAtMillis: Long,
+    ) = delegate.touchIfActive(tokenDigest, accessedAtMillis, expiresAtMillis)
+
+    override fun deleteByTokenDigest(tokenDigest: String) =
+      delegate.deleteByTokenDigest(tokenDigest)
+
+    override fun deleteByUserId(userId: UserId) = delegate.deleteByUserId(userId)
+
+    override fun deleteExpired(nowMillis: Long) = delegate.deleteExpired(nowMillis)
+  }
+
   private fun io.ktor.client.request.HttpRequestBuilder.trustedBrowserMutation() {
     header(HttpHeaders.Origin, "http://localhost")
     header("Sec-Fetch-Site", "same-origin")
   }
 
-  private class Fixture {
+  private class Fixture(
+    sessionStore: UserSessionRepository = InMemoryUserSessionRepository(),
+  ) {
     private val repository = InMemoryUserRepository()
     private val tokenSequence = AtomicInteger()
     val recordedActivity = RecordingAuthenticationActivityRepository()
@@ -361,7 +428,7 @@ class XoboroNativeAuthenticationTest {
     val sessions =
       UserSessionLifecycle(
         users = repository,
-        sessions = InMemoryUserSessionRepository(),
+        sessions = sessionStore,
         tokenEncoder = Sha512TokenEncoder(),
         plainTokenFactory = { "session-${tokenSequence.incrementAndGet()}" },
         currentTimeMillis = { 1_000 },

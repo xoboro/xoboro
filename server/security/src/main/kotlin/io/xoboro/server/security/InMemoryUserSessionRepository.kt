@@ -1,5 +1,6 @@
 package io.xoboro.server.security
 
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserSession
@@ -12,8 +13,13 @@ class InMemoryUserSessionRepository : UserSessionRepository {
   override fun findByTokenDigestOrNull(tokenDigest: String): UserSession? =
     sessions[tokenDigest]
 
-  override fun insertIfAbsent(session: UserSession): Boolean =
-    sessions.putIfAbsent(session.tokenDigest, session) == null
+  /** A map is never busy, so [SessionInsert.UNAVAILABLE] is unreachable here by construction. */
+  override fun insertIfAbsent(session: UserSession): SessionInsert =
+    if (sessions.putIfAbsent(session.tokenDigest, session) == null) {
+      SessionInsert.INSERTED
+    } else {
+      SessionInsert.DIGEST_TAKEN
+    }
 
   override fun touchIfActive(
     tokenDigest: String,
