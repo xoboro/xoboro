@@ -753,7 +753,7 @@ class XoboroNativeUserAdminTest {
       userRepository.seed(reader)
     }
 
-    fun bearerToken(user: User): String = sessions.create(user).plainToken
+    fun bearerToken(user: User): String = requireNotNull(sessions.create(user)).plainToken
 
     fun addSecondAdministrator(): User =
       syntheticUser(

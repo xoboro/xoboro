@@ -1,5 +1,6 @@
 package io.xoboro.server.persistence
 
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.UserId
 import io.xoboro.core.domain.UserSession
@@ -16,20 +17,34 @@ class JooqUserSessionRepository(
       .map { it.toUserSession() }
       .singleOrNull()
 
-  override fun insertIfAbsent(session: UserSession): Boolean =
-    database.dsl.execute(
-      """
-      INSERT INTO user_session (
-        token_digest, user_id, created_at_ms, last_accessed_at_ms, expires_at_ms
-      ) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(token_digest) DO NOTHING
-      """.trimIndent(),
-      session.tokenDigest,
-      session.userId.value,
-      session.createdAtMillis,
-      session.lastAccessedAtMillis,
-      session.expiresAtMillis,
-    ) == 1
+  /**
+   * A locked database answers [SessionInsert.UNAVAILABLE] rather than throwing, for the same
+   * reason [touchIfActive] does - and reported apart from a digest collision, because the two ask
+   * the caller for opposite things: a collision wants another token, a busy store wants a
+   * different answer to the request. Observed against a library of 18,211 archives, where a scan
+   * held the write lock while a `Basic` request tried to open its session, and the escaping
+   * exception turned valid credentials into a `500`.
+   */
+  override fun insertIfAbsent(session: UserSession): SessionInsert =
+    try {
+      val inserted =
+        database.dsl.execute(
+          """
+          INSERT INTO user_session (
+            token_digest, user_id, created_at_ms, last_accessed_at_ms, expires_at_ms
+          ) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(token_digest) DO NOTHING
+          """.trimIndent(),
+          session.tokenDigest,
+          session.userId.value,
+          session.createdAtMillis,
+          session.lastAccessedAtMillis,
+          session.expiresAtMillis,
+        )
+      if (inserted == 1) SessionInsert.INSERTED else SessionInsert.DIGEST_TAKEN
+    } catch (failure: DataAccessException) {
+      if (failure.isDatabaseLocked()) SessionInsert.UNAVAILABLE else throw failure
+    }
 
   /**
    * A locked database answers [SessionTouch.UNAVAILABLE] rather than throwing.

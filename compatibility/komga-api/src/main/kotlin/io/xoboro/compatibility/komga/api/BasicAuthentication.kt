@@ -248,11 +248,24 @@ internal fun ApplicationCall.sessionTokenOrNull(): String? =
     request.cookies[KOMGA_SESSION_COOKIE]
   }
 
+/**
+ * Opens a session for an already-authenticated user, or `null` when the store could not accept
+ * one.
+ *
+ * For a `Basic` request the session is an optimization, not the authentication: the credentials
+ * were verified before this is called, so `null` means the caller should serve the request without
+ * a session rather than fail it. The client re-authenticates on its next request and pays the
+ * password hash again, which is the cheaper of the two mistakes - the alternative was a `500` for
+ * valid credentials whenever a scan held the write lock.
+ *
+ * A caller that was *asked* for a session - an explicit login - must not treat `null` this way;
+ * see `OAuth2Routes` and the native `POST /session`.
+ */
 internal fun ApplicationCall.issueSession(
   user: User,
   sessions: UserSessionLifecycle,
-): String {
-  val token = sessions.create(user).plainToken
+): String? {
+  val token = sessions.create(user)?.plainToken ?: return null
   attributes.put(ISSUED_SESSION_TOKEN, token)
   if (request.headers.contains(KOMGA_SESSION_HEADER)) {
     response.headers.append(KOMGA_SESSION_HEADER, token)

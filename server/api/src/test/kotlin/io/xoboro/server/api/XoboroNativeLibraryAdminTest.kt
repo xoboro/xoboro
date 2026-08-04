@@ -675,8 +675,8 @@ class XoboroNativeLibraryAdminTest {
         currentTimeMillis = { 1_000 },
         inactivityTimeoutMillis = 60_000,
       )
-    val adminToken = sessions.create(requireNotNull(users.findByIdOrNull(ADMIN_USER_ID))).plainToken
-    val readerToken = sessions.create(requireNotNull(users.findByIdOrNull(READER_USER_ID))).plainToken
+    val adminToken = requireNotNull(sessions.create(requireNotNull(users.findByIdOrNull(ADMIN_USER_ID)))).plainToken
+    val readerToken = requireNotNull(sessions.create(requireNotNull(users.findByIdOrNull(READER_USER_ID)))).plainToken
 
     fun assertNoSideEffects() {
       assertEquals(0, repository.insertCalls)

@@ -815,8 +815,8 @@ class XoboroNativeOpsTest {
         currentTimeMillis = { 1_000 },
         inactivityTimeoutMillis = 60_000,
       )
-    val adminToken = sessions.create(assertNotNull(users.findByIdOrNull(ADMIN_USER_ID))).plainToken
-    val readerToken = sessions.create(assertNotNull(users.findByIdOrNull(READER_USER_ID))).plainToken
+    val adminToken = requireNotNull(sessions.create(assertNotNull(users.findByIdOrNull(ADMIN_USER_ID)))).plainToken
+    val readerToken = requireNotNull(sessions.create(assertNotNull(users.findByIdOrNull(READER_USER_ID)))).plainToken
 
     fun assertNoWrites() {
       assertEquals(0, settings.putCalls)

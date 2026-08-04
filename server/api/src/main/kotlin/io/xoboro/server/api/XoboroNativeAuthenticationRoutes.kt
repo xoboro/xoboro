@@ -151,7 +151,15 @@ private suspend fun ApplicationCall.respondSession(
   sessions: UserSessionLifecycle,
   status: HttpStatusCode = HttpStatusCode.OK,
 ) {
-  val created = sessions.create(user)
+  // A session is the whole point of this request, so contention cannot be absorbed the way the
+  // `Basic` surface absorbs it. `503` rather than `500`: the credentials were accepted and the
+  // caller should try again, which is not what a server error tells a client to do.
+  val created =
+    sessions.create(user) ?: return respondNativeError(
+      HttpStatusCode.ServiceUnavailable,
+      "session_unavailable",
+      "The session store is busy; retry the request",
+    )
   if (transport == SessionTransport.COOKIE) {
     appendXoboroSessionCookie(created.plainToken)
   }

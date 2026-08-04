@@ -15,6 +15,10 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
+import io.xoboro.core.domain.SessionInsert
+import io.xoboro.core.domain.UserId
+import io.xoboro.core.domain.UserSession
+import io.xoboro.core.domain.UserSessionRepository
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqUserRepository
@@ -28,6 +32,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
@@ -162,6 +167,91 @@ class SessionRoutesTest {
         )
       }
     }
+  }
+
+  @Test
+  fun `serves a Basic request when the session store cannot open a session`() {
+    // Found on a public deployment: while a scan of 18,211 archives held the SQLite write lock, the
+    // INSERT that opens a session threw and a request with perfectly good credentials answered 500.
+    // The first request every Komga client and the PWA make is exactly this one.
+    //
+    // For `Basic` the session is an optimization - it saves re-hashing the password - so losing it
+    // costs one Argon2 hash on the next request. Losing the request costs the page.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("busy-sessions.sqlite"))).use {
+        database ->
+      val users = JooqUserRepository(database)
+      val userLifecycle =
+        UserLifecycle(
+          users = users,
+          passwordHasher = AdaptivePasswordHasher(),
+          userIdFactory = { "user-1" },
+          currentTimeMillis = { 1_000 },
+        )
+      val sessions =
+        UserSessionLifecycle(
+          users = users,
+          sessions = UnavailableInsertSessionRepository(),
+          tokenEncoder = Sha512TokenEncoder(),
+          plainTokenFactory = sessionTokens().iterator()::next,
+          currentTimeMillis = { 1_000 },
+          inactivityTimeoutMillis = SESSION_TIMEOUT,
+        )
+
+      testApplication {
+        application {
+          install(ServerContentNegotiation) { json(komgaJson) }
+          installKomgaBasicAuthentication(users = userLifecycle, sessions = sessions)
+          routing {
+            komgaClaimRoutes(userLifecycle)
+            komgaAuthenticatedUserRoutes(
+              users = userLifecycle,
+              libraries = JooqLibraryRepository(database),
+            )
+            komgaSessionRoutes(sessions)
+          }
+        }
+        val client = createClient { install(ContentNegotiation) { json(komgaJson) } }
+        client.post("/api/v1/claim") {
+          header("X-Komga-Email", USER_EMAIL)
+          header("X-Komga-Password", PASSWORD)
+        }
+
+        val response =
+          client.get("/api/v2/users/me") {
+            basicAuth(USER_EMAIL, PASSWORD)
+          }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(USER_EMAIL, response.body<UserDto>().email)
+        // No session was opened, so none is handed out. Silently sending a cookie whose token was
+        // never stored would be worse than sending none: every later request would present a token
+        // the server cannot find and be treated as anonymous.
+        assertNull(response.headers.getAll(HttpHeaders.SetCookie))
+      }
+    }
+  }
+
+  /** A store that accepts nothing, the way SQLite answers while another writer holds the lock. */
+  private class UnavailableInsertSessionRepository : UserSessionRepository {
+    private val delegate = InMemoryUserSessionRepository()
+
+    override fun insertIfAbsent(session: UserSession): SessionInsert = SessionInsert.UNAVAILABLE
+
+    override fun findByTokenDigestOrNull(tokenDigest: String) =
+      delegate.findByTokenDigestOrNull(tokenDigest)
+
+    override fun touchIfActive(
+      tokenDigest: String,
+      accessedAtMillis: Long,
+      expiresAtMillis: Long,
+    ) = delegate.touchIfActive(tokenDigest, accessedAtMillis, expiresAtMillis)
+
+    override fun deleteByTokenDigest(tokenDigest: String) =
+      delegate.deleteByTokenDigest(tokenDigest)
+
+    override fun deleteByUserId(userId: UserId) = delegate.deleteByUserId(userId)
+
+    override fun deleteExpired(nowMillis: Long) = delegate.deleteExpired(nowMillis)
   }
 
   private fun io.ktor.client.statement.HttpResponse.sessionCookieToken(): String {

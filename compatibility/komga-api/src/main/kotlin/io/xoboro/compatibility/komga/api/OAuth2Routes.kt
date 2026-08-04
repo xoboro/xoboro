@@ -74,7 +74,12 @@ fun Route.komgaOAuth2Routes(
         source = oauth2.authenticationSource(registrationId),
         details = call.authenticationRequestDetails(),
       )
-      call.issueSession(user, sessions)
+      // Redirecting without a session would land the browser on the application signed out, which
+      // reads as "the provider rejected me" rather than "try again in a moment". The flow itself
+      // succeeded, so this is reported as a failure of the login rather than of the provider.
+      if (call.issueSession(user, sessions) == null) {
+        return@get call.oauth2Failure(SESSION_UNAVAILABLE)
+      }
       call.respondRedirect("${call.contextPrefix()}/?server_redirect=Y")
     } catch (failure: OAuth2LoginException) {
       authenticationActivities?.recordFailure(
@@ -176,3 +181,9 @@ private fun io.ktor.server.application.ApplicationCall.expireOAuth2BindingCookie
 
 internal const val OAUTH2_BINDING_COOKIE = "XOBORO-OAUTH2"
 private const val OAUTH2_BINDING_MAX_AGE_SECONDS = 10 * 60
+
+/**
+ * The provider accepted the user but the session store would not record the session. Distinct from
+ * `oauth2_login_failed` on purpose: this one is worth retrying and says nothing about the account.
+ */
+internal const val SESSION_UNAVAILABLE = "session_unavailable"

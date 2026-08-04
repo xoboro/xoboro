@@ -1,5 +1,6 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserEmailAlreadyExistsException
@@ -9,6 +10,7 @@ import io.xoboro.core.domain.UserSession
 import io.xoboro.core.domain.UserSessionRepository
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class UserSessionLifecycleTest {
@@ -30,7 +32,7 @@ class UserSessionLifecycleTest {
         inactivityTimeoutMillis = 500,
       )
 
-    val created = lifecycle.create(user)
+    val created = assertNotNull(lifecycle.create(user))
     assertEquals("unique", created.plainToken)
     assertEquals(user, lifecycle.authenticate("unique"))
     assertEquals(600, sessions.findByTokenDigestOrNull("hash:unique")?.expiresAtMillis)
@@ -100,6 +102,37 @@ class UserSessionLifecycleTest {
     assertEquals(1_000, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
   }
 
+  @Test
+  fun `reports no session rather than an exhausted-token failure when the store is busy`() {
+    // The sibling of `keeps authenticating when the store cannot record the access`, found the same
+    // way: a scan of 18,211 archives held the write lock while a `Basic` request opened its
+    // session, and the INSERT - unlike the UPDATE that fix covered - still threw.
+    //
+    // What makes this its own case is that `insertIfAbsent` already had a false: "that digest is
+    // taken, generate another token". Folding contention into it would spend all three generation
+    // attempts on a store that was never going to accept any token, and then report
+    // `Failed to generate a unique session token` - a token-factory bug - for a busy moment.
+    val user = syntheticUser()
+    val sessions = InMemorySessionRepository()
+    sessions.insertUnavailable = true
+    var tokensGenerated = 0
+    val lifecycle =
+      UserSessionLifecycle(
+        users = SingleUserRepository(user),
+        sessions = sessions,
+        tokenEncoder = TokenEncoder { "hash:$it" },
+        plainTokenFactory = { "token-${++tokensGenerated}" },
+        currentTimeMillis = { 100 },
+        inactivityTimeoutMillis = 500,
+      )
+
+    assertNull(lifecycle.create(user))
+    // One attempt, not three: no token is going to be accepted, so the remaining attempts would
+    // only delay the answer the caller has to act on.
+    assertEquals(1, tokensGenerated)
+    assertNull(sessions.findByTokenDigestOrNull("hash:token-1"))
+  }
+
   private fun syntheticUser(): User =
     User(
       id = UserId("user-1"),
@@ -166,10 +199,14 @@ class UserSessionLifecycleTest {
       sessions[session.tokenDigest] = session
     }
 
-    override fun insertIfAbsent(session: UserSession): Boolean {
-      if (session.tokenDigest in sessions) return false
+    /** Makes the store refuse every insert, as a busy database does. */
+    var insertUnavailable = false
+
+    override fun insertIfAbsent(session: UserSession): SessionInsert {
+      if (insertUnavailable) return SessionInsert.UNAVAILABLE
+      if (session.tokenDigest in sessions) return SessionInsert.DIGEST_TAKEN
       sessions[session.tokenDigest] = session
-      return true
+      return SessionInsert.INSERTED
     }
 
     /** Makes the store report that it could not record the access, as a busy database does. */

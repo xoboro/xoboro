@@ -1,5 +1,6 @@
 package io.xoboro.core.application
 
+import io.xoboro.core.domain.SessionInsert
 import io.xoboro.core.domain.SessionTouch
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserRepository
@@ -23,7 +24,17 @@ class UserSessionLifecycle(
     require(inactivityTimeoutMillis > 0) { "Session inactivity timeout must be positive" }
   }
 
-  fun create(user: User): CreatedUserSession {
+  /**
+   * Opens a session, or `null` when the store could not accept one right now.
+   *
+   * `null` is reserved for contention and means "ask again later", never "something is wrong with
+   * this user". Exhausting [MAX_GENERATION_ATTEMPTS] stays an [error] because that is a broken
+   * token factory rather than a busy moment, and the two must not arrive at the caller as the same
+   * thing: against a real library a scan held the SQLite write lock long enough that the insert
+   * lost it, and reporting that as an exhausted-token bug both hid the cause and made a `500` out
+   * of a request whose credentials were perfectly good.
+   */
+  fun create(user: User): CreatedUserSession? {
     val now = now()
     repeat(MAX_GENERATION_ATTEMPTS) {
       val plainToken = plainTokenFactory()
@@ -36,8 +47,13 @@ class UserSessionLifecycle(
           createdAtMillis = now,
           expiresAtMillis = now + inactivityTimeoutMillis,
         )
-      if (sessions.insertIfAbsent(session)) {
-        return CreatedUserSession(session, plainToken)
+      when (sessions.insertIfAbsent(session)) {
+        SessionInsert.INSERTED -> return CreatedUserSession(session, plainToken)
+        // Another token might not collide, so this attempt is spent and the next one runs.
+        SessionInsert.DIGEST_TAKEN -> Unit
+        // No token will be accepted while the store is busy, so spending the remaining attempts
+        // on it would only delay the answer the caller already needs to act on.
+        SessionInsert.UNAVAILABLE -> return null
       }
     }
     error("Failed to generate a unique session token")
