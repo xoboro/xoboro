@@ -168,3 +168,48 @@ repetitions vary by about 4%.
 Running it at 3,050 and 15,050 items is the outstanding work. The two-point ratio
 above is suggestive but two points cannot distinguish superlinear growth from a
 fixed cost that happens to land between them.
+
+## Settled: a WebDAV library is bounded by the link, not by the adapter
+
+Same library from both sides — 234 series, 18,211 CBZ archives, 129.1 GB, average 7.26 MB
+per archive:
+
+| | listing | analysis | total |
+|---|---|---|---|
+| `local`, on the machine holding the files | 95 s | 5.5 items/s | **56 min** |
+| `webdav`, from another machine over a ~6 MB/s link | 87 s | 0.60 items/s | **~6 h** |
+
+Listing is not the difference: 234 `PROPFIND`s cost about the same as walking a directory
+tree. Analysis is, and the reason is a design choice rather than a protocol limit.
+`SourceMediaAccess.materialize()` returns a `Path`, so a remote source must produce a whole
+local file before an analyzer can open it. 129 GB over ~6 MB/s is about 6 hours, and the
+measured remaining time tracked that floor.
+
+**The adapter is not leaving throughput on the table.** It sustains 4.36 MB/s against a link
+that measured 4.4 MB/s on one stream and 6.3 MB/s on four. Four task workers each fetch then
+analyze in sequence, so a connection idles while its archive is being read; 69% of the
+four-stream ceiling is what that structure predicts.
+
+Three earlier readings of this said otherwise and were all measurement errors worth
+recording, because each is easy to repeat:
+
+- **0.30 items/s** — measured while a local-source benchmark was analyzing *the same external
+  disk on the other machine* at 5.5 items/s. The disk was the shared bottleneck. Comparing
+  two configurations by running them at the same time against one disk measures neither.
+- **144 items/h over 24 h** — dragged down by the transport being absent, not by slow work.
+  The SSH tunnel carrying the connection failed to connect 169 times in that day
+  (`ssh: connect to host ...: Undefined error: 0`), and every WebDAV `GET` during those gaps
+  got `Connection refused`.
+- **"we are at 36% of the link ceiling, so the problem is ours"** — arithmetic on the first
+  number above. With the confound removed it is 69%, which is what the fetch-then-analyze
+  structure predicts, so there was nothing to find there.
+
+What would actually lower the floor is not fetching whole files. The server advertises
+`Accept-Ranges: bytes`, and on one 20.5 MB archive a trailing 2 KB range returned in 0.24 s
+against 15.2 s for the whole file — a ZIP's central directory is at the end, and an analyzer
+needs kilobytes of it. That is an SPI change (`materialize` cannot express it) and is not
+free: with `analyzeDimensions` on, per-page headers mean many round trips at 23 ms RTT, so
+it only wins if reads are batched into windows covering many entries rather than issued per
+page. `hashFiles`, on by default, genuinely needs the whole file and would have to be off
+for a remote library to benefit.
+
