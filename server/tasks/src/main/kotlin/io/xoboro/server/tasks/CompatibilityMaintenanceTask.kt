@@ -121,7 +121,6 @@ class DurableCompatibilityMaintenanceRequester(
   }
 
   companion object {
-    const val GENERATED_ARTWORK_MAXIMUM_DIMENSION = 1_600
     internal const val BOOK_ID_FIELD = "bookId"
     internal const val ENTRY_NAMES_FIELD = "entryNames"
     internal const val PAGE_HASH_FIELD = "pageHash"
@@ -136,6 +135,8 @@ class FindBookArtworkTaskHandler(
   private val queue: DurableTaskQueue,
   private val taskIdFactory: () -> String,
   private val currentTimeMillis: () -> Long,
+  /** The same limit [GenerateBookArtworkTaskHandler] will apply, so `biggerOnly` compares against what a regenerated cover would actually be. */
+  private val maximumCoverDimension: () -> Int,
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -149,6 +150,10 @@ class FindBookArtworkTaskHandler(
         ?.contentOrNull
         ?.toBooleanStrictOrNull()
         ?: false
+    // Read once for the whole sweep, not per book: a setting changed midway would otherwise split
+    // one sweep into two policies, and which books got which would depend on paging order.
+    val limit = maximumCoverDimension()
+    require(limit > 0) { "Cover dimension limit must be positive" }
     var pageNumber = 0
     while (true) {
       val page =
@@ -163,8 +168,7 @@ class FindBookArtworkTaskHandler(
         if (
           !biggerOnly ||
           generated == null ||
-          maxOf(generated.width, generated.height) <
-          DurableCompatibilityMaintenanceRequester.GENERATED_ARTWORK_MAXIMUM_DIMENSION
+          maxOf(generated.width, generated.height) < limit
         ) {
           val now = currentTimeMillis()
           queue.enqueue(
@@ -200,6 +204,7 @@ class FindBookArtworkTaskHandler(
 class GenerateBookArtworkTaskHandler(
   private val content: BookContentAccess,
   private val artwork: ArtworkLifecycle,
+  private val maximumCoverDimension: () -> Int,
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -215,8 +220,7 @@ class GenerateBookArtworkTaskHandler(
           request =
             PageImageRequest(
               format = PageImageFormat.JPEG,
-              maximumDimension =
-                DurableCompatibilityMaintenanceRequester.GENERATED_ARTWORK_MAXIMUM_DIMENSION,
+              maximumDimension = maximumCoverDimension(),
             ),
         ),
       ) {

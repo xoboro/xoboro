@@ -1,6 +1,7 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.ArtworkLifecycle
+import io.xoboro.core.application.ThumbnailSize
 import io.xoboro.core.domain.ArtworkOwner
 import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.ArtworkType
@@ -200,6 +201,7 @@ class BookCoverGenerationLifecycleTest {
           series = series,
           content = content,
           artwork = artwork,
+          maximumCoverDimension = { ThumbnailSize.DEFAULT.maximumDimension },
         )
       libraries.insert(
         Library(

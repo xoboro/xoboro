@@ -1,10 +1,29 @@
 package io.xoboro.core.application
 
-enum class ThumbnailSize {
-  DEFAULT,
-  MEDIUM,
-  LARGE,
-  XLARGE,
+/**
+ * How large a generated cover may be, as the longest edge in pixels.
+ *
+ * The names are the values the settings API accepts, so they are fixed. The pixel mapping is not:
+ * no API exposes it, so nothing a client can observe depends on these particular numbers, and they
+ * are chosen here rather than copied from anywhere. They are what a cover grid needs - [DEFAULT] is
+ * sharp at the size a list renders a cover, [XLARGE] is sharp when one is opened on its own - and
+ * are deliberately far below a full page: a cover is never the image a reader looks at.
+ *
+ * A cover is only ever scaled **down**. A source page shorter than the limit is stored at its own
+ * size, so raising this setting does not invent detail that was never in the page.
+ */
+enum class ThumbnailSize(
+  val maximumDimension: Int,
+) {
+  DEFAULT(300),
+  MEDIUM(600),
+  LARGE(900),
+  XLARGE(1_200),
+  ;
+
+  init {
+    require(maximumDimension > 0) { "Thumbnail dimension must be positive" }
+  }
 }
 
 data class SettingMultiSource<T>(
