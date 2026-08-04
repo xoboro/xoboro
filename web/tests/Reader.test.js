@@ -186,7 +186,9 @@ describe('Reader', () => {
     expect(container.querySelector('.slot').getAttribute('style')).toContain('aspect-ratio')
   })
 
-  it('remembers the layout choice', async () => {
+  it('remembers the layout choice against the series, not globally', async () => {
+    // Per series because one shelf holds both Japanese manga and a webtoon, which want
+    // opposite layouts; a single global setting is wrong for one of them on every open.
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
@@ -194,7 +196,58 @@ describe('Reader', () => {
     await fireEvent.click(screen.getByTestId('open-settings'))
     await fireEvent.click(screen.getByTestId('mode-paged'))
 
-    await waitFor(() => expect(localStorage.getItem('xoboro.reader.mode')).toBe('paged'))
+    await waitFor(() => expect(localStorage.getItem('xoboro.pref.anonymous.s1.mode')).toBe('paged'))
+    // The old global key is what made every series share one answer.
+    expect(localStorage.getItem('xoboro.reader.mode')).toBeNull()
+  })
+
+  it('restores the layout stored for this series and ignores another series', async () => {
+    // Both halves matter and each fails differently. Reading the series' own value is
+    // what the old global-only code could not do; ignoring s9's is what breaks if the
+    // series ever drops out of the key.
+    localStorage.setItem('xoboro.pref.anonymous.s1.direction', 'rtl')
+    localStorage.setItem('xoboro.pref.anonymous.s9.mode', 'paged')
+    globalThis.fetch = standardRoutes()
+    render(Reader, { params: { id: 'm1' } })
+
+    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(screen.getByTestId('open-settings'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('direction-rtl').getAttribute('aria-pressed')).toBe('true'),
+    )
+    expect(screen.getByTestId('mode-scroll').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('mode-paged').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('falls back to the pre-upgrade global layout for a series with none stored', async () => {
+    // The upgrade must not reset readers who had already chosen: the old global key is
+    // still read, below the per-series value.
+    localStorage.setItem('xoboro.reader.mode', 'paged')
+    globalThis.fetch = standardRoutes()
+    render(Reader, { params: { id: 'm1' } })
+
+    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(screen.getByTestId('open-settings'))
+
+    expect(screen.getByTestId('mode-paged').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('sets both axes from the Japanese manga preset', async () => {
+    // The gap this closes: reading manga meant knowing to pick `paged` *and* `rtl`, and
+    // nothing on the sheet said the two went together.
+    globalThis.fetch = standardRoutes()
+    render(Reader, { params: { id: 'm1' } })
+
+    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(screen.getByTestId('open-settings'))
+    await fireEvent.click(screen.getByTestId('preset-manga'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mode-paged').getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByTestId('direction-rtl').getAttribute('aria-pressed')).toBe('true')
+    })
+    expect(localStorage.getItem('xoboro.pref.anonymous.s1.direction')).toBe('rtl')
   })
 
   it('disables navigation at the end of the series rather than wrapping', async () => {

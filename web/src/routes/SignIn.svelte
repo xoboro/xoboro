@@ -13,6 +13,7 @@
   import { Treatment } from '../lib/errors.js'
   import { signIn } from '../lib/session.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import Logo from '../components/Logo.svelte'
 
   let email = $state('')
   let password = $state('')
@@ -55,6 +56,9 @@
 
 <main>
   <form onsubmit={submit} novalidate>
+    <!-- The mark is labelled here: the heading reads "로그인", so nothing else on
+         this screen tells a screen reader which server it is signing in to. -->
+    <div class="brand"><Logo size={56} label="Xoboro" /></div>
     <h1>{$_('session.signInTitle')}</h1>
 
     <label for="signin-email">{$_('session.email')}</label>
@@ -109,6 +113,11 @@
     width: min(360px, 100%);
     flex-direction: column;
     gap: var(--space-2);
+  }
+  .brand {
+    display: flex;
+    justify-content: center;
+    margin: 0 0 var(--space-4);
   }
   h1 {
     margin: 0 0 var(--space-4);

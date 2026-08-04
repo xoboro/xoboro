@@ -332,6 +332,19 @@ export default {
     unread: 'Unread',
     read: 'Finished',
     inProgress: 'Read to page {page}',
+    continue: 'Continue',
+    fromStart: 'From the start',
+    preset: 'Reading style',
+    presets: {
+      webtoon: 'Webtoon',
+      manga: 'Japanese manga',
+      comic: 'Western comic',
+    },
+    order: {
+      label: 'Order',
+      newest: 'Newest first',
+      oldest: 'Oldest first',
+    },
     conflictTitle: 'Another device has read further',
     conflictBody: 'There is progress up to page {page}. Jump there?',
     conflictJump: 'Jump there',
@@ -412,6 +425,10 @@ export default {
 
   catalog: {
     navigation: 'My library',
+    library: {
+      switcher: 'Library',
+      all: 'All',
+    },
     metadata: {
       seriesTitle: 'Edit series metadata',
       lockNote:
@@ -427,6 +444,26 @@ export default {
       genres: 'Genres (comma separated)',
       tags: 'Tags (comma separated)',
       unset: 'Not set',
+      statuses: {
+        ONGOING: 'Ongoing',
+        ENDED: 'Completed',
+        ABANDONED: 'Abandoned',
+        HIATUS: 'On hiatus',
+      },
+      // Read-only labels. Separate from the ones above because those carry form-only
+      // hints like "(comma separated)", which make no sense beside a value.
+      display: {
+        status: 'Status',
+        publisher: 'Publisher',
+        language: 'Language',
+        ageRating: 'Age rating',
+        ageRatingValue: '{age}+',
+        books: 'Chapters',
+        bookCount: '{count}',
+        genres: 'Genres',
+        tags: 'Tags',
+        links: 'Links',
+      },
     },
     grouping: {
       name: 'Name',

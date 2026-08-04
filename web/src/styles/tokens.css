@@ -12,41 +12,67 @@
 :root {
   color-scheme: dark;
 
+  /*
+   * The palette is taken from the product mark: a fried-soboro bun in a golden
+   * wrapper on a near-black field. Sampling it rather than inventing a scheme is
+   * what keeps the installed icon, the splash colour and the interface reading as
+   * one product. Every pair below was measured against WCAG AA, and the ratios are
+   * recorded beside the values that carry text.
+   */
+
   /* ── surface ───────────────────────────────────────────────────────────── */
-  --surface: #0e0e10;           /* page background */
-  --surface-raised: #14141a;    /* inputs, cards, chips at rest */
-  --surface-selected: #202027;  /* a chip or row that is chosen */
-  --surface-inset: #17171c;     /* a well inside a raised surface */
-  --surface-control: #292930;   /* neutral button background */
+  --surface: #111418;           /* page background — the mark's own field */
+  --surface-raised: #191c20;    /* inputs, cards, chips at rest */
+  --surface-selected: #23272c;  /* a chip or row that is chosen */
+  --surface-inset: #15181c;     /* a well inside a raised surface */
+  --surface-control: #2b2f35;   /* neutral button background */
 
   /* Fixed bars, sheets and panels sit over content and are deliberately
      translucent, so they are colour-with-alpha rather than a flat surface. */
-  --surface-overlay: rgba(20, 20, 26, 0.97);
+  --surface-overlay: rgba(25, 28, 32, 0.97);
   --surface-scrim: rgba(0, 0, 0, 0.58);
 
   /* ── line ──────────────────────────────────────────────────────────────── */
-  --line: #26262f;              /* default border */
-  --line-strong: #34343d;       /* border on an interactive control */
-  --line-subtle: #23232c;       /* divider inside a panel */
+  --line: #292d33;              /* default border */
+  --line-strong: #383d45;       /* border on an interactive control */
+  --line-subtle: #23262b;       /* divider inside a panel */
 
   /* ── text ──────────────────────────────────────────────────────────────── */
-  --text: #ececf1;
+  /* Warmed off pure grey so text belongs to the same family as the accent
+     rather than reading as a cool overlay on a warm brand. 15.7:1 on --surface. */
+  --text: #f0ece6;
   --text-strong: #ffffff;
-  --text-secondary: #c8c8ce;    /* a label; still fully legible */
-  /* Secondary only. Never carries information the user needs — it does not meet
-     WCAG AA against --surface for small text at every weight. */
-  --text-muted: #8a8a99;
+  --text-secondary: #cbc6bf;    /* a label; still fully legible — 10.9:1 */
+  /*
+   * The quietest text in the system, and — unlike the value it replaces — it does
+   * clear AA for small text, at 5.4:1. So the constraint on it is editorial rather
+   * than accessible: it is for text that should recede, not for text a reader is
+   * forbidden to need. Anything load-bearing still belongs in --text-secondary,
+   * because 5.4:1 is the floor of comfortable and 10.9:1 is not.
+   */
+  --text-muted: #8f8a84;
 
   /* ── intent ────────────────────────────────────────────────────────────── */
-  --accent: #00d564;
-  --accent-contrast: #04140a;   /* text ON --accent */
-  --accent-quiet: rgba(0, 213, 100, 0.15);
-  --accent-text: #56ef9e;       /* accent used as text on a dark surface */
-  --danger: #ff5a5a;
+  /* The wrapper's golden amber. 9.4:1 against --surface as a filled control. */
+  --accent: #edad34;
+  --accent-contrast: #1a1206;   /* text ON --accent — 9.4:1 */
+  --accent-quiet: rgba(237, 173, 52, 0.15);
+  /* The wrapper's highlight, brighter than the fill because this one has to work
+     as small text: 11.6:1 on --surface, 10.8:1 on --surface-raised. */
+  --accent-text: #fdc539;
+  --danger: #ff6b6b;            /* 6.7:1 */
   --danger-contrast: #1a0505;
-  --danger-quiet: rgba(255, 90, 90, 0.12);
-  --warning: #ffb84d;
-  --success: #00d564;
+  --danger-quiet: rgba(255, 107, 107, 0.12);
+  /*
+   * Pushed from amber towards red — the brand now owns amber, and a warning that
+   * shares the accent's hue reads as a highlight rather than a caution. It sits
+   * about 19° from --accent and 21° from --danger, which separates it from both
+   * but strongly from neither: an amber brand cannot have a wide amber/orange/red
+   * split. So warning must never be carried by colour alone; every use of it needs
+   * its own icon or wording.
+   */
+  --warning: #ff8a4c;           /* 7.9:1 */
+  --success: #00d564;           /* 9.4:1 — green, and now distinct from --accent */
 
   /* ── geometry ──────────────────────────────────────────────────────────── */
   --radius-sm: 8px;

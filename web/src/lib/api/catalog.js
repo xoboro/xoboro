@@ -30,7 +30,7 @@ export const FEEDS = Object.freeze({
  * @param {keyof FEEDS} feed
  * @param {{size?: number}} [options] paging only — a feed owns its order.
  */
-export function readFeed(collection, feed, { size = 20 } = {}) {
+export function readFeed(collection, feed, { size = 20, libraryId = null } = {}) {
   const definition = FEEDS[feed]
   if (!definition) throw new Error(`unknown feed: ${feed}`)
   if (!definition.collections.includes(collection)) {
@@ -39,7 +39,10 @@ export function readFeed(collection, feed, { size = 20 } = {}) {
     // question with no meaning rather than an empty answer.
     throw new Error(`the ${feed} feed does not exist for ${collection}`)
   }
-  return request(`/${collection}/feeds/${feed}`, { query: { size } })
+  // A feed refuses `sort` — its ordering is part of its definition — but it does take
+  // the library filter, and it has to: a reader who has narrowed the shelf to one
+  // library would otherwise still be offered chapters from the other one.
+  return request(`/${collection}/feeds/${feed}`, { query: { size, libraryId } })
 }
 
 export function listSeries({ page = 0, size = 50, libraryId = null, query = null } = {}) {
@@ -50,15 +53,48 @@ export function readSeries(seriesId) {
   return request(`/series/${seriesId}`)
 }
 
+/** Series listing orders, as the `sort` parameter spells them. */
+export const SeriesOrder = Object.freeze({
+  NEWEST: 'number,desc',
+  OLDEST: 'number,asc',
+})
+
 /**
- * Lists a series' media items in reading order.
+ * Lists a series' media items, newest chapter first by default.
  *
- * The route orders by number unless an explicit sort is given, and reading order is
- * what a reader means by "the next one" — a listing sorted by title would put
- * chapter 10 before chapter 2. Nothing here overrides it.
+ * Ordering is asked of the server rather than applied to the returned array. The
+ * listing is paged, so reversing a page client-side would show the oldest hundred
+ * backwards and label it "newest" — right for a short series and quietly wrong for a
+ * long one.
+ *
+ * Only `number` is offered as the field. Sorting by title is what puts chapter 10
+ * before chapter 2, which reads as corrupted data rather than a chosen order.
  */
-export function listSeriesMediaItems(seriesId, { page = 0, size = 100 } = {}) {
-  return request(`/series/${seriesId}/media-items`, { query: { page, size } })
+export function listSeriesMediaItems(
+  seriesId,
+  { page = 0, size = 100, sort = SeriesOrder.NEWEST } = {},
+) {
+  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort } })
+}
+
+/**
+ * The item a reader would resume, or `null` when they have not started the series.
+ *
+ * Asked of the server in two steps because "resume" means two different things: an
+ * item left part-read is where the reader actually stopped, and once none is
+ * part-read the next unread one is where they are going. Both filters are resolved
+ * in SQL over the whole series, so neither depends on how the listing happens to be
+ * paged.
+ */
+export async function readResumePoint(seriesId) {
+  for (const filter of [{ keepReading: true }, { onDeck: true }]) {
+    const page = await request(`/series/${seriesId}/media-items`, {
+      query: { page: 0, size: 1, sort: SeriesOrder.OLDEST, ...filter },
+    })
+    const [item] = page.items ?? []
+    if (item) return item
+  }
+  return null
 }
 
 export function readMediaItem(mediaItemId) {
