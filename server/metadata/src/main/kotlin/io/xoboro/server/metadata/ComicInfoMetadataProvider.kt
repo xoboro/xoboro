@@ -12,7 +12,11 @@ import io.xoboro.core.domain.ReadingDirection
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.WebLink
 import io.xoboro.server.media.SourceMediaAccess
+import io.xoboro.server.media.SourceRandomAccess
 import io.xoboro.server.media.UnknownSourceMediaAccessException
+import io.xoboro.server.media.ZipCentralDirectory
+import io.xoboro.server.media.ZipDirectoryUnreadableException
+import io.xoboro.server.media.ZipRangedEntryReader
 import java.net.URI
 import java.time.DateTimeException
 import java.time.LocalDate
@@ -23,13 +27,17 @@ import javax.xml.stream.XMLStreamConstants
 
 class ComicInfoMetadataProvider(
   accesses: Collection<SourceMediaAccess>,
+  randomAccesses: Collection<SourceRandomAccess> = emptyList(),
 ) : BookMetadataProvider,
   SeriesMetadataProvider {
   private val accessesBySourceId = accesses.associateBy(SourceMediaAccess::sourceId)
+  private val randomAccessesBySourceId = randomAccesses.associateBy(SourceRandomAccess::sourceId)
 
   init {
     require(accesses.none { it.sourceId.isBlank() }) { "Media source IDs must not be blank" }
     require(accessesBySourceId.size == accesses.size) { "Media source IDs must be unique" }
+    require(randomAccesses.none { it.sourceId.isBlank() }) { "Random access source IDs must not be blank" }
+    require(randomAccessesBySourceId.size == randomAccesses.size) { "Random access source IDs must be unique" }
   }
 
   override fun provide(
@@ -123,10 +131,67 @@ class ComicInfoMetadataProvider(
   override fun shouldApplySeriesMetadata(library: Library): Boolean =
     library.settings.importComicInfoSeries
 
+  /**
+   * Reads `ComicInfo.xml` by byte range when the source can serve one, falling back to fetching the
+   * whole archive only when it cannot.
+   *
+   * 99.6% of the books in the library this was measured against carry a `ComicInfo.xml`, so skipping
+   * absent ones would have saved nothing - what saves is reading the one entry rather than the 7.26 MB
+   * around it. This was the last caller of `materialize` left on the scan path: with analysis and
+   * cover generation already ranged, 10,112 pending `REFRESH_BOOK_METADATA` tasks would still have
+   * pulled about 73 GB between them.
+   */
+  private fun readComicInfoByRange(
+    library: Library,
+    book: Book,
+  ): RangedComicInfo {
+    val randomAccess = randomAccessesBySourceId[library.root.sourceId] ?: return RangedComicInfo.Unavailable
+    return try {
+      randomAccess.open(library.root.itemId, book.sourceItemId).use { opened ->
+        val entry =
+          ZipCentralDirectory
+            .read(opened)
+            .firstOrNull { it.name.equals(COMIC_INFO_FILE, ignoreCase = true) }
+            // Read, and the answer is "this archive has none". Fetching the whole file to confirm an
+            // absence the central directory already settled is the one thing this must not do.
+            ?: return RangedComicInfo.Read(null)
+        if (entry.uncompressedSize > MAX_METADATA_BYTES) return RangedComicInfo.Read(null)
+        RangedComicInfo.Read(parseComicInfo(ZipRangedEntryReader.read(opened, entry)))
+      }
+    } catch (_: ZipDirectoryUnreadableException) {
+      RangedComicInfo.Unavailable
+    } catch (_: java.io.IOException) {
+      RangedComicInfo.Unavailable
+    } catch (_: SecurityException) {
+      RangedComicInfo.Unavailable
+    } catch (_: javax.xml.stream.XMLStreamException) {
+      // Malformed XML is the archive's problem, not the transport's; the whole-file path would read
+      // the same bytes and fail the same way.
+      RangedComicInfo.Read(null)
+    }
+  }
+
+  /**
+   * Three outcomes, not two. "The archive holds no `ComicInfo.xml`" and "this source cannot serve
+   * ranges" both have no metadata to return, and collapsing them means every archive without one gets
+   * downloaded in full to establish what was already known.
+   */
+  private sealed interface RangedComicInfo {
+    data class Read(
+      val values: Map<String, String>?,
+    ) : RangedComicInfo
+
+    data object Unavailable : RangedComicInfo
+  }
+
   private fun readComicInfo(
     library: Library,
     book: Book,
   ): Map<String, String>? {
+    when (val ranged = readComicInfoByRange(library, book)) {
+      is RangedComicInfo.Read -> return ranged.values
+      RangedComicInfo.Unavailable -> Unit
+    }
     val access =
       accessesBySourceId[library.root.sourceId]
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)

@@ -33,12 +33,16 @@ class BookContentService(
   private val books: BookRepository,
   private val media: BookMediaRepository,
   accesses: Collection<SourceMediaAccess>,
+  randomAccesses: Collection<SourceRandomAccess> = emptyList(),
 ) : BookContentAccess {
   private val accessesBySourceId = accesses.associateBy(SourceMediaAccess::sourceId)
+  private val randomAccessesBySourceId = randomAccesses.associateBy(SourceRandomAccess::sourceId)
 
   init {
     require(accesses.none { it.sourceId.isBlank() }) { "Media source IDs must not be blank" }
     require(accessesBySourceId.size == accesses.size) { "Media source IDs must be unique" }
+    require(randomAccesses.none { it.sourceId.isBlank() }) { "Random access source IDs must not be blank" }
+    require(randomAccessesBySourceId.size == randomAccesses.size) { "Random access source IDs must be unique" }
   }
 
   override fun pages(bookId: BookId): List<BookPage>? {
@@ -68,6 +72,7 @@ class BookContentService(
     }
     val page = analyzed.pages.getOrNull(pageNumber - 1) ?: return null
     val library = libraries.findById(book.libraryId)
+    openArchivePageByRange(book, library, analyzed, page, request)?.let { return it }
     val access =
       accessesBySourceId[library.root.sourceId]
         ?: throw UnknownSourceMediaAccessException(library.root.sourceId)
@@ -139,6 +144,65 @@ class BookContentService(
       }
       throw failure
     }
+  }
+
+  /**
+   * Reads one page out of a ZIP comic archive by byte range, returning `null` when that is not
+   * possible so the caller falls back to fetching the whole archive.
+   *
+   * This is what stops a scan of a remote library from transferring it. Analysis stopped needing the
+   * archive once the trailer could be read directly, but cover generation still called through here
+   * for page 1, and the WebDAV server's log showed the result plainly: a `206` of 65,557 bytes for
+   * every book, immediately followed by a `200` of the whole archive.
+   *
+   * `null` for RAR, EPUB and PDF - those readers need a real file - and `null` when the archive's
+   * trailer or the page's own header does not parse, which is how a `.cbz` that is really a RAR ends
+   * up on the materializing path.
+   */
+  private fun openArchivePageByRange(
+    book: io.xoboro.core.domain.Book,
+    library: io.xoboro.core.domain.Library,
+    analyzed: io.xoboro.core.domain.BookMedia,
+    page: BookPage,
+    request: PageImageRequest,
+  ): OpenBookContent? {
+    if (book.mediaKind != MediaKind.COMIC_ARCHIVE) return null
+    if (analyzed.mediaType == RarMediaAnalyzer.RAR_MEDIA_TYPE) return null
+    val randomAccess = randomAccessesBySourceId[library.root.sourceId] ?: return null
+    val bytes =
+      try {
+        randomAccess.open(library.root.itemId, book.sourceItemId).use { opened ->
+          val entry =
+            ZipCentralDirectory
+              .read(opened)
+              .firstOrNull { it.name == page.fileName }
+              ?: return null
+          ZipRangedEntryReader.read(opened, entry)
+        }
+      } catch (_: ZipDirectoryUnreadableException) {
+        return null
+      } catch (_: java.io.IOException) {
+        return null
+      } catch (_: SecurityException) {
+        return null
+      }
+    if (request.format == null && request.maximumDimension == null) {
+      return OpenBookContent(
+        input = ByteArrayInputStream(bytes),
+        fileName = page.fileName.substringAfterLast('/'),
+        mediaType = page.mediaType,
+        contentLength = bytes.size.toLong(),
+        closeResources = {},
+      )
+    }
+    val converted = ByteArrayInputStream(bytes).use { input -> convertImage(input, request) }
+    return OpenBookContent(
+      input = ByteArrayInputStream(converted.bytes),
+      fileName = converted.fileName(page.fileName),
+      mediaType = converted.format.mediaType,
+      contentLength = converted.bytes.size.toLong(),
+      closeResources = {},
+    )
   }
 
   private fun openArchivePage(

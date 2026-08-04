@@ -30,17 +30,27 @@ class FakeWebDavServer(
   private val credentials: WebDavCredentials? = null,
   /** Relative slash-joined paths (e.g. `"Alpha/Missing"`) whose PROPFIND always answers `500`, to exercise a mid-walk failure deterministically. */
   private val failingPropfindPaths: Set<String> = emptySet(),
+  /**
+   * Answers `200` with the whole body even when a `Range` header was sent, which is how a server
+   * that does not implement ranges behaves - and the case a ranged reader must detect rather than
+   * mistake for a satisfied range.
+   */
+  private val ignoreRangeRequests: Boolean = false,
 ) : AutoCloseable {
   private val basePath = "/dav"
   val port: Int = findFreePort()
   val baseUrl: String = "http://127.0.0.1:$port$basePath"
 
   private val getRequestCounts = ConcurrentHashMap<String, AtomicInteger>()
+  private val rangeRequestCounts = ConcurrentHashMap<String, AtomicInteger>()
 
   private val server =
     embeddedServer(Netty, port = port, module = { module() }).also { it.start(wait = false) }
 
   fun getRequestCount(path: String): Int = getRequestCounts[path]?.get() ?: 0
+
+  /** Counts satisfied `206` responses, which is how a test pins how many ranges a read cost. */
+  fun rangeRequestCount(path: String): Int = rangeRequestCounts[path]?.get() ?: 0
 
   override fun close() {
     server.stop(gracePeriodMillis = 0, timeoutMillis = 200)
@@ -71,6 +81,7 @@ class FakeWebDavServer(
             relativeSegments,
             request.header("If-None-Match"),
             request.header("If-Modified-Since"),
+            request.header("Range"),
           )
         else -> call.respondText("unsupported method", status = HttpStatusCode.MethodNotAllowed)
       }
@@ -118,10 +129,15 @@ class FakeWebDavServer(
     segments: List<String>,
     ifNoneMatch: String?,
     ifModifiedSince: String?,
+    range: String?,
   ) {
     val node = tree.navigate(segments)
     if (node !is FixtureFile) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (range != null && !ignoreRangeRequests) {
+      handleRangeGet(call, rawPath, node, range)
       return
     }
     val quotedEtag = node.etag?.let { "\"$it\"" }
@@ -137,6 +153,45 @@ class FakeWebDavServer(
     quotedEtag?.let { call.response.header("ETag", it) }
     node.lastModifiedHttpDate?.let { call.response.header("Last-Modified", it) }
     call.respondBytes(node.bytes, ContentType.Application.OctetStream, HttpStatusCode.OK)
+  }
+
+  /** Serves `bytes=first-last` and the suffix form `bytes=-count`, as a real WebDAV server does. */
+  private suspend fun handleRangeGet(
+    call: ApplicationCall,
+    rawPath: String,
+    node: FixtureFile,
+    range: String,
+  ) {
+    val total = node.bytes.size
+    val specifier = range.removePrefix("bytes=")
+    val first: Int
+    val last: Int
+    if (specifier.startsWith("-")) {
+      val count = specifier.drop(1).toIntOrNull()
+      if (count == null || count <= 0) {
+        call.respondText("bad range", status = HttpStatusCode.RequestedRangeNotSatisfiable)
+        return
+      }
+      first = (total - count).coerceAtLeast(0)
+      last = total - 1
+    } else {
+      val bounds = specifier.split('-')
+      val start = bounds.getOrNull(0)?.toIntOrNull()
+      if (start == null || start >= total) {
+        call.respondText("bad range", status = HttpStatusCode.RequestedRangeNotSatisfiable)
+        return
+      }
+      first = start
+      last = bounds.getOrNull(1)?.takeIf(String::isNotEmpty)?.toIntOrNull()?.coerceAtMost(total - 1) ?: (total - 1)
+    }
+    rangeRequestCounts.computeIfAbsent(rawPath) { AtomicInteger() }.incrementAndGet()
+    call.response.header("Content-Range", "bytes $first-$last/$total")
+    node.etag?.let { call.response.header("ETag", "\"$it\"") }
+    call.respondBytes(
+      node.bytes.copyOfRange(first, last + 1),
+      ContentType.Application.OctetStream,
+      HttpStatusCode.PartialContent,
+    )
   }
 
   private fun responseXml(

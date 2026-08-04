@@ -39,6 +39,78 @@ class BookContentServiceTest {
   @TempDir
   lateinit var temporaryDirectory: Path
 
+  /**
+   * The half of "do not transfer a remote library" that analysis alone did not buy. Cover generation
+   * calls straight through here for page 1, so while this materialized, every scanned book still
+   * fetched its whole archive - the WebDAV server's log showed a `206` of 65,557 bytes followed
+   * immediately by a `200` of the entire file, once per book.
+   */
+  @Test
+  fun `serves a page by range without materializing the archive`() {
+    val expected = byteArrayOf(1, 3, 5, 7)
+    val archive = archive(mapOf("nested/001.png" to expected, "ignored.txt" to byteArrayOf(9)))
+    val probe = PageRangeProbe(Files.readAllBytes(archive), sourceId = "synthetic")
+    val service = service(access = RefusingAccess(), randomAccesses = listOf(probe))
+
+    val opened = requireNotNull(service.openPage(BOOK_ID, 1))
+
+    assertContentEquals(expected, opened.input.readBytes())
+    assertEquals("image/png", opened.mediaType)
+    assertEquals(1, probe.opened)
+  }
+
+  @Test
+  fun `converts a ranged page without materializing the archive`() {
+    val encodedPng =
+      ByteArrayOutputStream()
+        .also { ImageIO.write(BufferedImage(8, 12, BufferedImage.TYPE_INT_RGB), "png", it) }
+        .toByteArray()
+    val archive = archive(mapOf("nested/001.png" to encodedPng))
+    val probe = PageRangeProbe(Files.readAllBytes(archive), sourceId = "synthetic")
+    val service = service(access = RefusingAccess(), randomAccesses = listOf(probe))
+
+    val opened =
+      requireNotNull(
+        service.openPage(BOOK_ID, 1, PageImageRequest(format = PageImageFormat.JPEG)),
+      )
+
+    assertEquals(PageImageFormat.JPEG.mediaType, opened.mediaType)
+    assertTrue(opened.input.readBytes().isNotEmpty())
+    assertEquals(1, probe.opened)
+  }
+
+  /** RAR needs a real file, so a ranged source must not divert it. */
+  @Test
+  fun `materializes a RAR archive even when a ranged source is registered`() {
+    val archive = archive(mapOf("nested/001.png" to byteArrayOf(1, 2, 3, 4)))
+    val access = RecordingAccess(archive)
+    val probe = PageRangeProbe(Files.readAllBytes(archive), sourceId = access.sourceId)
+    val service =
+      service(
+        access = access,
+        mediaType = RarMediaAnalyzer.RAR_MEDIA_TYPE,
+        randomAccesses = listOf(probe),
+      )
+
+    assertFailsWith<Exception> { service.openPage(BOOK_ID, 1) }
+
+    assertEquals(0, probe.opened, "a RAR page must never be attempted by range")
+  }
+
+  @Test
+  fun `falls back to materializing when the ranged read cannot parse the archive`() {
+    val expected = byteArrayOf(2, 4, 6, 8)
+    val archive = archive(mapOf("nested/001.png" to expected))
+    val access = RecordingAccess(archive)
+    val probe = PageRangeProbe(ByteArray(2_048) { 0x3f }, sourceId = access.sourceId)
+    val service = service(access = access, randomAccesses = listOf(probe))
+
+    val opened = requireNotNull(service.openPage(BOOK_ID, 1))
+
+    assertContentEquals(expected, opened.input.readBytes())
+    assertEquals(1, probe.opened)
+  }
+
   @Test
   fun `streams the indexed archive entry and closes materialization`() {
     val expected = byteArrayOf(1, 3, 5, 7)
@@ -295,7 +367,7 @@ class BookContentServiceTest {
   }
 
   private fun service(
-    access: RecordingAccess,
+    access: SourceMediaAccess,
     status: MediaStatus = MediaStatus.READY,
     mediaKind: MediaKind = MediaKind.COMIC_ARCHIVE,
     mediaType: String = "application/zip",
@@ -310,6 +382,7 @@ class BookContentServiceTest {
         ),
       ),
     files: List<MediaFile> = emptyList(),
+    randomAccesses: Collection<SourceRandomAccess> = emptyList(),
   ): BookContentService {
     val library =
       Library(
@@ -345,7 +418,35 @@ class BookContentServiceTest {
       books = SingleBookRepository(book),
       media = SingleMediaRepository(analyzed),
       accesses = listOf(access),
+      randomAccesses = randomAccesses,
     )
+  }
+
+  /** Serves an archive's bytes by range under the same source ID a [SourceMediaAccess] uses. */
+  private class PageRangeProbe(
+    private val bytes: ByteArray,
+    override val sourceId: String,
+  ) : SourceRandomAccess {
+    var opened: Int = 0
+      private set
+
+    override fun open(
+      rootItemId: String,
+      itemId: String,
+    ): RandomAccessMedia {
+      opened++
+      return ByteArrayRandomAccessMedia(bytes)
+    }
+  }
+
+  /** Fails the test outright if the whole archive is fetched, rather than counting after the fact. */
+  private class RefusingAccess(
+    override val sourceId: String = "synthetic",
+  ) : SourceMediaAccess {
+    override fun materialize(
+      rootItemId: String,
+      itemId: String,
+    ): MaterializedMedia = throw AssertionError("The archive must not be materialized to serve one page")
   }
 
   private fun archive(entries: Map<String, ByteArray>): Path {
