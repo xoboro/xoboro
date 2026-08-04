@@ -88,4 +88,21 @@ class WebDavHttpClientRetryTest {
     }.apply { isDaemon = true }.start()
     Thread.sleep(50)
   }
+
+  @Test
+  fun `the default retry window outlives a transport that takes tens of seconds to come back`() {
+    // Sized against the observed failure, not guessed. The tunnel carrying this connection failed
+    // to connect 169 times in a day - "ssh: connect to host ...: Undefined error: 0" - and each
+    // outage lasted longer than the 3s the first version waited, which is why 370 ANALYZE_BOOK
+    // tasks still died after retrying was added. The window has to cover a transport that is
+    // absent for tens of seconds, so this pins the budget rather than the constants.
+    val backoff =
+      (0 until WebDavHttpClient.DEFAULT_TRANSPORT_ATTEMPTS - 1)
+        .sumOf { WebDavHttpClient.DEFAULT_RETRY_BACKOFF_MILLIS * (it + 1) }
+
+    assertTrue(
+      backoff >= 20_000,
+      "a $backoff ms retry window is shorter than the outages this exists to ride out",
+    )
+  }
 }
