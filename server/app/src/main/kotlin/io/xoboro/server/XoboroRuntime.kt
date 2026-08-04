@@ -129,11 +129,13 @@ import io.xoboro.server.sources.local.LocalSourceArtworkAccess
 import io.xoboro.server.sources.local.LocalSourceInventory
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
 import io.xoboro.server.sources.local.LocalSourceMutationAccess
+import io.xoboro.server.sources.local.LocalSourceRandomAccess
 import io.xoboro.server.sources.local.LocalSourceSidecarAccess
 import io.xoboro.server.sources.webdav.WebDavLibraryRootInspector
 import io.xoboro.server.sources.webdav.WebDavSourceArtworkAccess
 import io.xoboro.server.sources.webdav.WebDavSourceInventory
 import io.xoboro.server.sources.webdav.WebDavSourceMediaAccess
+import io.xoboro.server.sources.webdav.WebDavSourceRandomAccess
 import io.xoboro.server.sources.webdav.WebDavSourceSidecarAccess
 import io.xoboro.server.tasks.ActivityRetentionScheduler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
@@ -716,12 +718,16 @@ class XoboroRuntime private constructor(
           WebDavSourceMediaAccess(
             cacheDirectory = config.databasePath.toAbsolutePath().parent.resolve("webdav-cache"),
           )
+        // Analysis that needs no entry bytes reads an archive's trailer by range instead, which is
+        // what keeps a remote scan from transferring the whole library. See AnalyzeBook.
+        val randomAccesses = listOf(LocalSourceRandomAccess(), WebDavSourceRandomAccess())
         val bookContentAccess =
           BookContentService(
             libraries = libraries,
             books = books,
             media = media,
             accesses = listOf(localMediaAccess, webDavMediaAccess),
+            randomAccesses = randomAccesses,
           )
         val kepubContentAccess =
           ExternalKepubContentAccess(
@@ -737,7 +743,7 @@ class XoboroRuntime private constructor(
                 .resolve("cache/kepub"),
           )
         val comicInfoMetadataProvider =
-          ComicInfoMetadataProvider(listOf(localMediaAccess, webDavMediaAccess))
+          ComicInfoMetadataProvider(listOf(localMediaAccess, webDavMediaAccess), randomAccesses)
         val epubMetadataProvider =
           EpubMetadataProvider(listOf(localMediaAccess, webDavMediaAccess))
         val pdfMetadataProvider =
@@ -865,6 +871,7 @@ class XoboroRuntime private constructor(
             accesses = listOf(localMediaAccess, webDavMediaAccess),
             media = media,
             zipAnalyzer = ZipMediaAnalyzer(),
+            randomAccesses = randomAccesses,
             currentTimeMillis = System::currentTimeMillis,
           )
         val bookCoverGeneration =

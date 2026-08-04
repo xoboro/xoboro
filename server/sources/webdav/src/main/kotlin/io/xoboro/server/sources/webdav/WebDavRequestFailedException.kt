@@ -30,3 +30,16 @@ class WebDavAuthenticationException(
   method: String,
   url: String,
 ) : WebDavRequestFailedException(method, url, 401)
+
+/**
+ * The server would not serve a byte range, so nothing can be read without fetching the whole item.
+ *
+ * Separate from a status failure because the caller's response is different: the request succeeded,
+ * the server simply declines to be read piecewise, and the analysis path must fall back to
+ * materializing the file rather than retry. [reason] names which way it declined, since "answered
+ * 200 and ignored Range" and "sent a Content-Range whose total is unknown" are different server bugs.
+ */
+class WebDavRangeUnsupportedException(
+  url: String,
+  reason: String,
+) : IOException("WebDAV GET $url cannot be read by range: $reason")

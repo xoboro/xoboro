@@ -22,6 +22,21 @@ sealed interface WebDavGetOutcome {
 }
 
 /**
+ * A satisfied range request: the bytes returned, and the item's total length from `Content-Range`.
+ *
+ * Not a `data class` on purpose - [bytes] is an array, and a generated `equals` comparing arrays by
+ * identity is a trap for anyone who assumes value semantics from the shape.
+ */
+class WebDavRange(
+  val bytes: ByteArray,
+  val totalLength: Long,
+) {
+  init {
+    require(totalLength >= 0) { "WebDAV range total length must not be negative" }
+  }
+}
+
+/**
  * The only place `java.net.http.HttpClient` is used by this module. No other class builds a
  * request directly, which keeps "credentials go in the `Authorization` header and nowhere else"
  * and "every failure message is safe to log" true by construction rather than by convention.
@@ -122,6 +137,75 @@ class WebDavHttpClient(
       }
     }
   }
+
+  /**
+   * `GET`s the last [length] bytes of [url] with a suffix `Range`, returning them alongside the
+   * item's total length taken from `Content-Range`.
+   *
+   * A suffix range rather than a `HEAD` followed by an explicit range: a trailer-based format needs
+   * both the size and the trailer, and asking this way gets them in one round trip. Over a link
+   * where a round trip costs ~25 ms and a book's whole point is its ~4 KB trailer, that halving is
+   * the difference between one request per book and two.
+   */
+  fun fetchSuffix(
+    url: String,
+    credentials: WebDavCredentials?,
+    length: Int,
+  ): WebDavRange? {
+    require(length > 0) { "WebDAV suffix length must be positive" }
+    return fetchRanged(url, credentials, "bytes=-$length", length)
+  }
+
+  /** `GET`s [length] bytes of [url] starting at [offset], as an explicit `Range` request. */
+  fun fetchRange(
+    url: String,
+    credentials: WebDavCredentials?,
+    offset: Long,
+    length: Int,
+  ): WebDavRange? {
+    require(offset >= 0) { "WebDAV range offset must not be negative" }
+    require(length > 0) { "WebDAV range length must be positive" }
+    return fetchRanged(url, credentials, "bytes=$offset-${offset + length - 1}", length)
+  }
+
+  private fun fetchRanged(
+    url: String,
+    credentials: WebDavCredentials?,
+    rangeHeader: String,
+    maximumBytes: Int,
+  ): WebDavRange? {
+    val request =
+      requestBuilder(URI(url), credentials)
+        .GET()
+        .header("Range", rangeHeader)
+        .build()
+    val response = send(request, HttpResponse.BodyHandlers.ofInputStream())
+    return when (response.statusCode()) {
+      206 -> {
+        val totalLength =
+          response.headers().firstValue("Content-Range").orElse(null)?.parseContentRangeTotal()
+            ?: throw WebDavRangeUnsupportedException(url, "a 206 response without a usable Content-Range total")
+        response.body().use { input -> WebDavRange(input.readNBytes(maximumBytes), totalLength) }
+      }
+      // The server ignored `Range` and started sending the whole item. The body is left unread and
+      // closed rather than consumed, so declining costs nothing on a 129 GB library.
+      200 -> {
+        response.body().close()
+        throw WebDavRangeUnsupportedException(url, "the server answered 200 and ignored the Range header")
+      }
+      404 -> {
+        response.body().close()
+        null
+      }
+      else -> {
+        response.body().close()
+        throw failureFor("GET", url, response.statusCode())
+      }
+    }
+  }
+
+  /** Reads the total length out of `bytes 0-99/12345`, or `null` when the server sent `*`. */
+  private fun String.parseContentRangeTotal(): Long? = substringAfterLast('/', "").trim().toLongOrNull()
 
   private fun requestBuilder(
     uri: URI,
