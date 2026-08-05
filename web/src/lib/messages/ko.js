@@ -413,6 +413,11 @@ export default {
       progressHint:
         '두 조건은 동시에 성립하지 않습니다. 읽기 시작한 편은 아직 펼치지 않은 편이 아닙니다. 둘 다 고르면 아무것도 찾지 못합니다.',
       noChoices: '아직 이 서재에는 골라 좁힐 값이 없습니다',
+      selectedCount: '{count}개 선택',
+      findInGroup: '{group}에서 찾기',
+      showMore: '{count}개 더 보기',
+      showLess: '접기',
+      noMatch: '해당하는 값이 없습니다',
       choicesFailed: '좁히기 값을 읽지 못했습니다. 비어 있는 것이 아니라 일부 항목이 빠져 있습니다.',
       clear: '좁히기 지우기',
     },
