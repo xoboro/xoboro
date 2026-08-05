@@ -23,8 +23,13 @@ class RefreshMetadataTaskEmitter(
   private val books: BookRepository,
   private val series: SeriesRepository,
   private val queue: DurableTaskQueue,
+  private val chunkSize: Int = FAN_OUT_CHUNK_SIZE,
   private val currentTimeMillis: () -> Long,
 ) {
+  init {
+    require(chunkSize > 0) { "Fan-out chunk size must be positive" }
+  }
+
   /**
    * Queues one task that will fan [refreshLibrary] out from a worker.
    *
@@ -64,30 +69,99 @@ class RefreshMetadataTaskEmitter(
     )
   }
 
+  /**
+   * Emits at most [chunkSize] of a library's refresh tasks, chaining a successor for the remainder.
+   *
+   * Series first, and that order still matters. A library's books outnumber its series by two orders
+   * of magnitude - 24,696 against 314 in one real library - while the series sidecar carries the
+   * title, summary and status a refresh visibly produces. Book metadata has a second route to the
+   * same place, because a successful analysis chains its own refresh, so it is the half that can
+   * afford to go last: with books first, a library sat at 27 of 314 series filled while the queue
+   * looked healthy.
+   *
+   * Ordering was the mitigation; chunking is the fix. See [LibraryFanOutCursor] for why a single
+   * unbounded pass could never be relied on to reach its own end.
+   */
   fun refreshLibrary(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
+    from: LibraryFanOutCursor = LibraryFanOutCursor.START,
   ): Int {
     val nowMillis = now()
     var emitted = 0
-    // Series first, and this order is the whole point. A library's series outnumber nothing and its
-    // books outnumber them by two orders of magnitude - 314 against 24,696 in one real library - while
-    // the series sidecar is what carries the title, summary and status a refresh visibly produces.
-    // Contention stops this fan-out partway and the retry restarts it from the top, so whatever comes
-    // second may never be reached: with books first, a library sat at 27 of 314 series filled while
-    // the queue looked healthy. Book metadata has a second route to the same place, because a
-    // successful analysis chains its own refresh, so it is the half that can afford to go last.
+    var budget = chunkSize
+    var cursor = from
+
+    if (cursor.stage == LibraryFanOutCursor.Stage.SERIES) {
+      for (id in liveSeriesIds(libraryId, cursor.afterId)) {
+        if (budget == 0) return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis) }
+        if (enqueueSeries(id, priority, nowMillis)) emitted += 1
+        cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.SERIES, id.value)
+        budget -= 1
+      }
+      cursor = LibraryFanOutCursor.BOOKS_START
+    }
+    for (book in liveBooks(libraryId, cursor.afterId)) {
+      if (budget == 0) return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis) }
+      if (enqueueBook(book, priority, nowMillis)) emitted += 1
+      cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.BOOKS, book.id.value)
+      budget -= 1
+    }
+    return emitted
+  }
+
+  private fun liveSeriesIds(
+    libraryId: LibraryId,
+    afterId: String?,
+  ): List<SeriesId> =
     series
       .findAllByLibraryId(libraryId)
-      .asSequence()
       .filter { it.deletedAtMillis == null }
-      .forEach { if (enqueueSeries(it.id, priority, nowMillis)) emitted += 1 }
+      .map { it.id }
+      .sortedBy { it.value }
+      .filter { afterId == null || it.value > afterId }
+
+  private fun liveBooks(
+    libraryId: LibraryId,
+    afterId: String?,
+  ): List<Book> =
     books
       .findAllByLibraryId(libraryId)
-      .asSequence()
       .filter { it.deletedAtMillis == null }
-      .forEach { if (enqueueBook(it, priority, nowMillis)) emitted += 1 }
-    return emitted
+      .sortedBy { it.id.value }
+      .filter { afterId == null || it.id.value > afterId }
+
+  /**
+   * Queues the chunk that carries on from [cursor].
+   *
+   * Deliberately [enqueueOrRetry]: a busy store here must fail the task so the worker re-runs this
+   * same chunk, because losing the successor would abandon the rest of the library silently. The
+   * chunk's own id encodes the cursor, so the re-run queues the same successor rather than a second
+   * one.
+   */
+  private fun resumeAt(
+    libraryId: LibraryId,
+    priority: Int,
+    cursor: LibraryFanOutCursor,
+    nowMillis: Long,
+  ) {
+    queue.enqueueOrRetry(
+      task =
+        DurableTask(
+          id = "${libraryTaskId(libraryId)}$RESUME_SEPARATOR${cursor.encode()}",
+          type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+          payloadJson =
+            buildJsonObject {
+              put(RefreshLibraryMetadataTaskHandler.LIBRARY_ID_FIELD, libraryId.value)
+              put(RefreshLibraryMetadataTaskHandler.CURSOR_FIELD, cursor.encode())
+            }.toString(),
+          priority = priority,
+          groupId = libraryId.value,
+          availableAtMillis = nowMillis,
+          maxAttempts = FAN_OUT_MAX_ATTEMPTS,
+        ),
+      nowMillis = nowMillis,
+    )
   }
 
   fun refreshBook(
@@ -173,6 +247,25 @@ class RefreshMetadataTaskEmitter(
   companion object {
     internal const val FAN_OUT_MAX_ATTEMPTS: Int = 10
 
+    /**
+     * How many enqueues one fan-out chunk performs before handing the rest to a successor.
+     *
+     * Sized against what contention costs when it interrupts a chunk: the chunk re-runs whole, so a
+     * thousand is a second or two of re-queuing rather than a whole library's worth. It is also the
+     * bound on how far ahead of the work the queue runs, which matters because each chunk re-reads
+     * the library's rows to find its starting point.
+     */
+    internal const val FAN_OUT_CHUNK_SIZE: Int = 1_000
+
+    /**
+     * Separates a resumed chunk's cursor from the library task id it continues.
+     *
+     * A distinct id per chunk is what lets a successor be queued while its predecessor is still
+     * `RUNNING` - an `enqueue` collision on a running row keeps the old payload and would drop the
+     * cursor. Shared with [AnalyzeBookTaskEmitter], which chains the same way.
+     */
+    internal const val RESUME_SEPARATOR: String = "__RESUME__"
+
     fun bookTaskId(bookId: BookId): String = "REFRESH_BOOK_METADATA_${bookId.value}"
 
     fun seriesTaskId(seriesId: SeriesId): String = "REFRESH_SERIES_METADATA_${seriesId.value}"
@@ -191,19 +284,28 @@ class RefreshMetadataTaskEmitter(
  * handler free of the repositories the fan-out reads.
  */
 class RefreshLibraryMetadataTaskHandler(
-  private val refreshLibrary: (LibraryId) -> Unit,
+  private val refreshLibrary: (LibraryId, LibraryFanOutCursor) -> Unit,
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
 
   override fun handle(task: DurableTask) {
     require(task.type == taskType) { "Unexpected task type: ${task.type}" }
-    refreshLibrary(LibraryId(task.requiredStringPayload(json, LIBRARY_ID_FIELD, TASK_TYPE)))
+    refreshLibrary(
+      LibraryId(task.requiredStringPayload(json, LIBRARY_ID_FIELD, TASK_TYPE)),
+      LibraryFanOutCursor.decode(
+        task.optionalStringPayload(json, CURSOR_FIELD),
+        LibraryFanOutCursor.START,
+      ),
+    )
   }
 
   companion object {
     const val TASK_TYPE: String = "REFRESH_LIBRARY_METADATA"
     internal const val LIBRARY_ID_FIELD: String = "libraryId"
+
+    /** Absent on the task a request queues, present on every chunk that continues it. */
+    internal const val CURSOR_FIELD: String = "cursor"
   }
 }
 
@@ -250,10 +352,16 @@ private fun DurableTask.requiredStringPayload(
   field: String,
   taskType: String,
 ): String =
+  optionalStringPayload(json, field)
+    ?: throw IllegalArgumentException("$taskType payload must contain a non-blank $field")
+
+internal fun DurableTask.optionalStringPayload(
+  json: Json,
+  field: String,
+): String? =
   json.parseToJsonElement(payloadJson)
     .jsonObject[field]
     ?.jsonPrimitive
     ?.takeIf { it.isString }
     ?.contentOrNull
     ?.takeIf(String::isNotBlank)
-    ?: throw IllegalArgumentException("$taskType payload must contain a non-blank $field")
