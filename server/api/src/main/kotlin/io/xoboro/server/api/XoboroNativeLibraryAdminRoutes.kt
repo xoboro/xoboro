@@ -1,10 +1,12 @@
 package io.xoboro.server.api
 
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.AuthenticationStrategy
 import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receive
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
@@ -15,6 +17,7 @@ import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryAvailabilityProbe
 import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryScanRequester
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.domain.DuplicateLibraryNameException
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRootMissingException
@@ -123,16 +126,14 @@ fun Route.xoboroNativeLibraryAdminRoutes(
           if (!call.requireLibraryAdministrator(user)) return@post
           val id = LibraryId(call.requiredParameter("libraryId"))
           if (!call.requireExistingLibrary(libraries, id)) return@post
-          maintenanceRequester.analyze(id)
-          call.respond(HttpStatusCode.Accepted)
+          call.respondQueued(maintenanceRequester.analyze(id))
         }
         post("/{libraryId}/metadata-refresh") {
           val user = call.nativeUser()
           if (!call.requireLibraryAdministrator(user)) return@post
           val id = LibraryId(call.requiredParameter("libraryId"))
           if (!call.requireExistingLibrary(libraries, id)) return@post
-          maintenanceRequester.refreshMetadata(id)
-          call.respond(HttpStatusCode.Accepted)
+          call.respondQueued(maintenanceRequester.refreshMetadata(id))
         }
         post("/{libraryId}/empty-trash") {
           val user = call.nativeUser()
@@ -201,3 +202,26 @@ private suspend fun ApplicationCall.respondLibraryValidationFailure(
     ),
   )
 }
+
+/**
+ * Answers a maintenance request that was queued as a single fan-out task.
+ *
+ * [TaskEnqueue.ALREADY_RUNNING] joins [TaskEnqueue.QUEUED] as a `202`: both mean the work is under
+ * way, and asking twice is not an error. [TaskEnqueue.UNAVAILABLE] is a retryable `503` carrying
+ * `Retry-After`, matching how a busy session store is reported - answering `202` would tell an
+ * operator their library was being refreshed when nothing had been queued at all.
+ */
+private suspend fun ApplicationCall.respondQueued(outcome: TaskEnqueue) {
+  if (outcome == TaskEnqueue.UNAVAILABLE) {
+    response.header(HttpHeaders.RetryAfter, TASK_STORE_RETRY_AFTER_SECONDS.toString())
+    respondNativeError(
+      HttpStatusCode.ServiceUnavailable,
+      "task_store_unavailable",
+      "The task store is busy; retry the request",
+    )
+    return
+  }
+  respond(HttpStatusCode.Accepted)
+}
+
+private const val TASK_STORE_RETRY_AFTER_SECONDS: Int = 30

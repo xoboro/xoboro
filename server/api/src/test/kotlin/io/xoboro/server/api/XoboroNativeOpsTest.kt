@@ -45,6 +45,7 @@ import io.xoboro.core.application.OperationalMetricsSnapshotProvider
 import io.xoboro.core.application.OperationalStatusSnapshot
 import io.xoboro.core.application.SeriesCatalogQuery
 import io.xoboro.core.application.TaskCounts
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.ClientSettingsLifecycle
@@ -1069,7 +1070,7 @@ class XoboroNativeOpsTest {
     override fun enqueue(
       task: DurableTask,
       nowMillis: Long,
-    ): Boolean = error("enqueue is not used by the operations API")
+    ): TaskEnqueue = error("enqueue is not used by the operations API")
 
     override fun claimNext(
       workerId: String,

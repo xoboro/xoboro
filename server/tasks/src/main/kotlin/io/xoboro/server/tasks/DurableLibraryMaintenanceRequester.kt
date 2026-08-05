@@ -1,6 +1,7 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.LibraryMaintenanceRequester
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.domain.LibraryId
 
 class DurableLibraryMaintenanceRequester(
@@ -8,11 +9,11 @@ class DurableLibraryMaintenanceRequester(
   private val metadata: RefreshMetadataTaskEmitter,
   private val trash: EmptyLibraryTrashTaskEmitter,
 ) : LibraryMaintenanceRequester {
-  override fun analyze(libraryId: LibraryId): Int =
-    analysis.analyzeLibrary(libraryId)
+  override fun analyze(libraryId: LibraryId): TaskEnqueue =
+    analysis.analyzeLibraryDeferred(libraryId)
 
-  override fun refreshMetadata(libraryId: LibraryId): Int =
-    metadata.refreshLibrary(libraryId)
+  override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue =
+    metadata.refreshLibraryDeferred(libraryId)
 
   override fun emptyTrash(libraryId: LibraryId): Boolean =
     trash.emptyTrash(libraryId)

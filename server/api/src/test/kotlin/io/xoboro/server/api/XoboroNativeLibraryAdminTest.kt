@@ -36,6 +36,7 @@ import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryRootAccess
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RootType
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.TokenEncoder
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.Library
@@ -494,6 +495,48 @@ class XoboroNativeLibraryAdminTest {
     }
 
   @Test
+  fun `reports a busy task store as retryable rather than as accepted`() =
+    testApplication {
+      // 202 means "queued". When the task store is busy nothing was queued at all, so answering 202
+      // tells an operator their library is being refreshed while it sits untouched - and they have
+      // no reason to ask again. Observed against a library of 145,105 archives, where a scan held
+      // the SQLite write lock for the whole of its run.
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+      fixture.maintenance.outcome = TaskEnqueue.UNAVAILABLE
+
+      for (suffix in listOf("analyze", "metadata-refresh")) {
+        val response =
+          client.post("$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/$suffix") {
+            bearerAuth(fixture.adminToken)
+          }
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, response.status, suffix)
+        assertEquals("task_store_unavailable", response.body<XoboroApiError>().code, suffix)
+        // Retryable is only actionable if the client is told when to come back.
+        assertNotNull(response.headers[HttpHeaders.RetryAfter], suffix)
+      }
+    }
+
+  @Test
+  fun `accepts a request that collided with a fan-out already running`() =
+    testApplication {
+      // A second click while the first refresh is still queued is not an error and must not be
+      // reported as one: the work is in flight, which is what the caller wanted. This is the state
+      // that a busy store used to be indistinguishable from.
+      val fixture = Fixture()
+      installLibraryAdministration(fixture)
+      fixture.maintenance.outcome = TaskEnqueue.ALREADY_RUNNING
+
+      assertEquals(
+        HttpStatusCode.Accepted,
+        client.post("$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/metadata-refresh") {
+          bearerAuth(fixture.adminToken)
+        }.status,
+      )
+    }
+
+  @Test
   fun `returns not found without enqueueing any task for a nonexistent library`() =
     testApplication {
       val fixture = Fixture()
@@ -819,14 +862,20 @@ class XoboroNativeLibraryAdminTest {
     val totalCalls: Int
       get() = analyzeCalls + metadataRefreshCalls + emptyTrashCalls
 
-    override fun analyze(libraryId: LibraryId): Int {
+    /**
+     * Set per test to drive the route's contention branch. Defaults to [TaskEnqueue.QUEUED], which
+     * is what every pre-existing case here expects.
+     */
+    var outcome: TaskEnqueue = TaskEnqueue.QUEUED
+
+    override fun analyze(libraryId: LibraryId): TaskEnqueue {
       analyses += libraryId
-      return 1
+      return outcome
     }
 
-    override fun refreshMetadata(libraryId: LibraryId): Int {
+    override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue {
       metadataRefreshes += libraryId
-      return 1
+      return outcome
     }
 
     override fun emptyTrash(libraryId: LibraryId): Boolean {

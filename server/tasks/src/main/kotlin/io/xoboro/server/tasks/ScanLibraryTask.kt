@@ -6,6 +6,7 @@ import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.LibraryAvailabilityLifecycle
 import io.xoboro.core.application.SourceInventoryUnavailableException
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.LibraryRepository
@@ -28,7 +29,7 @@ class ScanLibraryTaskEmitter(
   ): Boolean {
     val nowMillis = currentTimeMillis()
     require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
-    return queue.enqueue(
+    return queue.enqueueOrRetry(
       task =
         DurableTask(
           id = taskId(libraryId, deep),

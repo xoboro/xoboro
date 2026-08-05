@@ -4,9 +4,11 @@ import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskCounts
+import io.xoboro.core.application.TaskEnqueue
 import java.util.logging.Level
 import java.util.logging.Logger
 import org.jooq.Record
+import org.jooq.exception.DataAccessException
 
 class JooqDurableTaskQueue(
   private val database: XoboroDatabase,
@@ -25,9 +27,16 @@ class JooqDurableTaskQueue(
    *   returns to `DEAD` after that single run. A task that keeps dying therefore costs one
    *   attempt per external re-enqueue rather than a fresh `max_attempts` budget, and
    *   `attempt_count` and `last_error` survive as the record of how often it has died.
-   * - `RUNNING` — left alone, and the enqueue reports false. Mutating a row under a live lease
-   *   would race `complete`/`fail`, which key on `lease_token`. A lease that is genuinely stuck
-   *   is recovered by [claimNext], which is the right place for it.
+   * - `RUNNING` — left alone, reported as [TaskEnqueue.ALREADY_RUNNING]. Mutating a row under a
+   *   live lease would race `complete`/`fail`, which key on `lease_token`. A lease that is
+   *   genuinely stuck is recovered by [claimNext], which is the right place for it.
+   *
+   * A locked store answers [TaskEnqueue.UNAVAILABLE] rather than throwing. SQLite admits one
+   * writer and a library scan holds the lock for minutes, so this insert can fail for reasons that
+   * have nothing to do with the task. Letting it escape turned
+   * `POST /api/v1/libraries/{id}/metadata/refresh` into a `500` mid-way through its fan-out,
+   * against a library of 145,105 archives. Distinct from [TaskEnqueue.ALREADY_RUNNING] because
+   * that one means the work is in flight while this one means the caller still owes it.
    *
    * Reviving matters because the previous guard only matched `PENDING`: a single death made a
    * deterministic id permanently un-enqueueable, silently, with no log line, and the only
@@ -41,39 +50,45 @@ class JooqDurableTaskQueue(
   override fun enqueue(
     task: DurableTask,
     nowMillis: Long,
-  ): Boolean {
+  ): TaskEnqueue {
     require(nowMillis >= 0) { "Current timestamp must not be negative" }
-    return database.dsl.execute(
-      """
-      INSERT INTO task (
-        id, task_type, payload_json, priority, group_id, state, attempt_count,
-        max_attempts, available_at_ms, created_at_ms, updated_at_ms
-      ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        task_type = excluded.task_type,
-        payload_json = excluded.payload_json,
-        priority = excluded.priority,
-        group_id = excluded.group_id,
-        max_attempts = excluded.max_attempts,
-        state = 'PENDING',
-        available_at_ms =
-          CASE
-            WHEN task.state = 'DEAD' THEN excluded.available_at_ms
-            ELSE min(task.available_at_ms, excluded.available_at_ms)
-          END,
-        updated_at_ms = excluded.updated_at_ms
-      WHERE task.state IN ('PENDING', 'DEAD')
-      """.trimIndent(),
-      task.id,
-      task.type,
-      task.payloadJson,
-      task.priority,
-      task.groupId,
-      task.maxAttempts,
-      task.availableAtMillis,
-      nowMillis,
-      nowMillis,
-    ) > 0
+    val written =
+      try {
+        database.dsl.execute(
+          """
+          INSERT INTO task (
+            id, task_type, payload_json, priority, group_id, state, attempt_count,
+            max_attempts, available_at_ms, created_at_ms, updated_at_ms
+          ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            task_type = excluded.task_type,
+            payload_json = excluded.payload_json,
+            priority = excluded.priority,
+            group_id = excluded.group_id,
+            max_attempts = excluded.max_attempts,
+            state = 'PENDING',
+            available_at_ms =
+              CASE
+                WHEN task.state = 'DEAD' THEN excluded.available_at_ms
+                ELSE min(task.available_at_ms, excluded.available_at_ms)
+              END,
+            updated_at_ms = excluded.updated_at_ms
+          WHERE task.state IN ('PENDING', 'DEAD')
+          """.trimIndent(),
+          task.id,
+          task.type,
+          task.payloadJson,
+          task.priority,
+          task.groupId,
+          task.maxAttempts,
+          task.availableAtMillis,
+          nowMillis,
+          nowMillis,
+        )
+      } catch (failure: DataAccessException) {
+        if (failure.isDatabaseLocked()) return TaskEnqueue.UNAVAILABLE else throw failure
+      }
+    return if (written > 0) TaskEnqueue.QUEUED else TaskEnqueue.ALREADY_RUNNING
   }
 
   override fun claimNext(

@@ -4,6 +4,7 @@ import io.xoboro.core.application.ArtworkLifecycle
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.ArtworkOwner
 import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.ArtworkRepository
@@ -62,7 +63,7 @@ class OrganizationArtworkTaskEmitter(
       .filter { (owner, updatedAtMillis) -> needsArtwork(owner, updatedAtMillis) }
       .map { (owner, _) -> owner }
       .count { owner ->
-        queue.enqueue(
+        queue.enqueueOrRetry(
           DurableTask(
             id = "${OrganizationArtworkTaskHandler.TASK_TYPE}_${owner.kind.name}_${owner.id}",
             type = OrganizationArtworkTaskHandler.TASK_TYPE,

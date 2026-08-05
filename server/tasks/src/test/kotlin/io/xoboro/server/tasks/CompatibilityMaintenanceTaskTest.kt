@@ -13,6 +13,7 @@ import io.xoboro.core.application.CatalogSeries
 import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.SeriesCatalogQuery
@@ -603,9 +604,9 @@ class CompatibilityMaintenanceTaskTest {
     override fun enqueue(
       task: DurableTask,
       nowMillis: Long,
-    ): Boolean {
+    ): TaskEnqueue {
       enqueued += task
-      return true
+      return TaskEnqueue.QUEUED
     }
 
     override fun claimNext(

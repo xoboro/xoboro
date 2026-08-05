@@ -1,9 +1,12 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.EmptyTrashResult
 import io.xoboro.core.application.LibraryTrashStore
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.TaskStoreUnavailableException
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
@@ -29,6 +32,117 @@ import org.junit.jupiter.api.io.TempDir
 class LibraryMaintenanceTaskTest {
   @TempDir
   lateinit var tempDirectory: Path
+
+  @Test
+  fun `a library request queues one fan-out task instead of one task per book`() {
+    // The shape this pins is the whole point of the fix. Fanning out inline meant a request
+    // performed one insert per book and per series - 24,696 of them for a library of 314 webtoon
+    // series - which held the write lock for the duration and had nowhere to go when the lock was
+    // already held by a scan. It died mid-loop with a 500 and a half-queued library.
+    //
+    // Asserting on the count rather than on the absence of an exception, because a fan-out that
+    // merely stopped throwing would still be wrong: the request must do a fixed, small amount of
+    // work no matter how large the library is.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out.sqlite"))).use { database ->
+      val queue = JooqDurableTaskQueue(database)
+      insertCatalog(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+        )
+      val analysis =
+        AnalyzeBookTaskEmitter(
+          books = JooqBookRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+        )
+
+      assertEquals(TaskEnqueue.QUEUED, metadata.refreshLibraryDeferred(LIBRARY_ID))
+      assertEquals(TaskEnqueue.QUEUED, analysis.analyzeLibraryDeferred(LIBRARY_ID))
+
+      // Two rows for two requests. The inline emitters that these defer to would have queued three
+      // between them against this same catalog (see the two tests below).
+      assertEquals(2L, queue.counts().pending)
+      assertEquals(
+        mapOf(
+          RefreshLibraryMetadataTaskHandler.TASK_TYPE to 1,
+          AnalyzeLibraryTaskHandler.TASK_TYPE to 1,
+        ),
+        queue.countsByType(),
+      )
+    }
+  }
+
+  @Test
+  fun `the fan-out handlers run the per-book emission a request used to do inline`() {
+    // A fan-out task that is queued but never handled is worse than the bug it replaced: the
+    // request reports 202 and nothing whatsoever happens. This pins that each handler accepts its
+    // own type's payload and performs the emission.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out-handled.sqlite"))).use {
+        database ->
+      val queue = JooqDurableTaskQueue(database)
+      insertCatalog(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+        )
+      val fanned = mutableListOf<LibraryId>()
+
+      RefreshLibraryMetadataTaskHandler(refreshLibrary = { fanned += it }).handle(
+        DurableTask(
+          id = RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID),
+          type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+          payloadJson = """{"libraryId":"${LIBRARY_ID.value}"}""",
+          availableAtMillis = 100,
+        ),
+      )
+      assertEquals(listOf(LIBRARY_ID), fanned)
+
+      // And the emission it delegates to is the pre-existing inline one, unchanged: two tasks for
+      // this catalog's one active book and one series.
+      assertEquals(2, metadata.refreshLibrary(LIBRARY_ID))
+    }
+  }
+
+  @Test
+  fun `a fan-out stops on a busy store rather than counting the dropped task as a skip`() {
+    // Under `enqueue`'s old boolean, a busy store and a live lease were both `false`, so a fan-out
+    // tallied a task it had failed to queue as one it had deliberately skipped: the loop ran to
+    // completion, the count came back short, and nobody could tell short-because-busy from
+    // short-because-already-queued. Those books' metadata then simply never refreshed.
+    //
+    // Inside a task a throw is the correct outcome - the worker retries with backoff and the
+    // deterministic ids make the retry idempotent - so what this pins is that the drop is loud.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("busy-fan-out.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = UnavailableQueue(JooqDurableTaskQueue(database)),
+          currentTimeMillis = { 100 },
+        )
+
+      assertFailsWith<TaskStoreUnavailableException> { metadata.refreshLibrary(LIBRARY_ID) }
+    }
+  }
+
+  /** A queue whose store is permanently busy, delegating everything else to the real one. */
+  private class UnavailableQueue(
+    private val delegate: JooqDurableTaskQueue,
+  ) : DurableTaskQueue by delegate {
+    override fun enqueue(
+      task: DurableTask,
+      nowMillis: Long,
+    ): TaskEnqueue = TaskEnqueue.UNAVAILABLE
+  }
 
   @Test
   fun `analysis emitter queues only active books with high priority and series exclusion`() {

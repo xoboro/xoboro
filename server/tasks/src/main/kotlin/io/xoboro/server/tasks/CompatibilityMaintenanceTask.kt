@@ -14,6 +14,7 @@ import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.PageHashRepository
 import io.xoboro.core.application.SourceMutationAccess
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.ArtworkOwner
 import io.xoboro.core.domain.ArtworkOwnerKind
 import io.xoboro.core.domain.ArtworkType
@@ -107,7 +108,7 @@ class DurableCompatibilityMaintenanceRequester(
     require(now >= 0) { "Compatibility maintenance timestamp must not be negative" }
     val suffix = taskIdFactory().trim()
     require(suffix.isNotEmpty()) { "Compatibility maintenance task ID must not be blank" }
-    return queue.enqueue(
+    return queue.enqueueOrRetry(
       DurableTask(
         id = "${type}_$suffix",
         type = type,
@@ -171,7 +172,7 @@ class FindBookArtworkTaskHandler(
           maxOf(generated.width, generated.height) < limit
         ) {
           val now = currentTimeMillis()
-          queue.enqueue(
+          queue.enqueueOrRetry(
             DurableTask(
               id = "${GenerateBookArtworkTaskHandler.TASK_TYPE}_${taskIdFactory()}",
               type = GenerateBookArtworkTaskHandler.TASK_TYPE,

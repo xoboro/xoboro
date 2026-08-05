@@ -24,11 +24,12 @@ import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.LibraryEvent
 import io.xoboro.core.application.LibraryLifecycle
-import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryMaintenanceQueue
+import io.xoboro.core.application.LibraryMaintenanceRequester
 import io.xoboro.core.application.LibraryRootAccess
 import io.xoboro.core.application.LibraryScanRequester
 import io.xoboro.core.application.RootType
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
@@ -407,14 +408,14 @@ class LibraryRoutesTest {
                 },
               maintenanceRequester =
                 object : LibraryMaintenanceRequester {
-                  override fun analyze(libraryId: LibraryId): Int {
+                  override fun analyze(libraryId: LibraryId): TaskEnqueue {
                     analyses += libraryId
-                    return 1
+                    return TaskEnqueue.QUEUED
                   }
 
-                  override fun refreshMetadata(libraryId: LibraryId): Int {
+                  override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue {
                     metadataRefreshes += libraryId
-                    return 1
+                    return TaskEnqueue.QUEUED
                   }
 
                   override fun emptyTrash(libraryId: LibraryId): Boolean {

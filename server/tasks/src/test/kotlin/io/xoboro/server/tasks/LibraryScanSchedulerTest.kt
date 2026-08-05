@@ -3,6 +3,7 @@ package io.xoboro.server.tasks
 import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
@@ -156,9 +157,9 @@ class LibraryScanSchedulerTest {
     override fun enqueue(
       task: DurableTask,
       nowMillis: Long,
-    ): Boolean {
+    ): TaskEnqueue {
       tasks += task
-      return true
+      return TaskEnqueue.QUEUED
     }
 
     override fun claimNext(

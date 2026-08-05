@@ -120,6 +120,7 @@ import io.xoboro.server.persistence.JooqUserRepository
 import io.xoboro.server.persistence.JooqUserSessionRepository
 import io.xoboro.server.persistence.LocalDatabaseBackupRequester
 import io.xoboro.server.persistence.XoboroDatabase
+import io.xoboro.server.persistence.isStoreContention
 import io.xoboro.server.security.AdaptivePasswordHasher
 import io.xoboro.server.security.InMemoryOAuth2PendingAuthorizationStore
 import io.xoboro.server.security.Sha512TokenEncoder
@@ -140,6 +141,7 @@ import io.xoboro.server.sources.webdav.WebDavSourceSidecarAccess
 import io.xoboro.server.tasks.ActivityRetentionScheduler
 import io.xoboro.server.tasks.AnalyzeBookTaskEmitter
 import io.xoboro.server.tasks.AnalyzeBookTaskHandler
+import io.xoboro.server.tasks.AnalyzeLibraryTaskHandler
 import io.xoboro.server.tasks.ArchiveMaintenanceTaskEmitter
 import io.xoboro.server.tasks.ArchiveMaintenanceTaskHandler
 import io.xoboro.server.tasks.BookCoverGenerationLifecycle
@@ -161,6 +163,7 @@ import io.xoboro.server.tasks.LibraryScanScheduler
 import io.xoboro.server.tasks.OrganizationArtworkTaskEmitter
 import io.xoboro.server.tasks.OrganizationArtworkTaskHandler
 import io.xoboro.server.tasks.RefreshBookMetadataTaskHandler
+import io.xoboro.server.tasks.RefreshLibraryMetadataTaskHandler
 import io.xoboro.server.tasks.RefreshMetadataTaskEmitter
 import io.xoboro.server.tasks.RefreshSeriesMetadataTaskHandler
 import io.xoboro.server.tasks.RemoveDuplicatePagesTaskHandler
@@ -886,6 +889,7 @@ class XoboroRuntime private constructor(
             content = bookContentAccess,
             artwork = artworkLifecycle,
             maximumCoverDimension = maximumCoverDimension,
+            isStoreBusy = ::isStoreContention,
           )
         val catalogSourceFileLifecycle =
           CatalogSourceFileLifecycle(
@@ -937,6 +941,15 @@ class XoboroRuntime private constructor(
                       bookCoverGeneration.generateForSeries(book.seriesId)
                     }
                   },
+                ),
+                // The library-wide fan-outs. Both run the per-book emission a request used to do
+                // inline, where a busy task store failed the request half-way through. Registered
+                // here and nowhere else: an unregistered type leaves its row PENDING forever.
+                AnalyzeLibraryTaskHandler(
+                  analyzeLibrary = { analyzeBookTaskEmitter.analyzeLibrary(it) },
+                ),
+                RefreshLibraryMetadataTaskHandler(
+                  refreshLibrary = { refreshMetadataTaskEmitter.refreshLibrary(it) },
                 ),
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
                 RefreshBookMetadataTaskHandler(
