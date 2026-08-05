@@ -105,7 +105,7 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
     page: CatalogPageRequest,
   ): CatalogPage<CatalogSeries> {
-    sweepFor(page.sorts)
+    sweepFor(query, page.sorts)
     val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     val countFilter =
@@ -141,7 +141,8 @@ class JooqCatalogReadRepository(
     id: SeriesId,
     access: CatalogAccess,
   ): CatalogSeries? {
-    // No sweep here: this ends in hydrateSeries, which rebuilds exactly what it is about to read.
+    // No sweep here, and none in hydrateSeries either: nothing in this answer is read out of the
+    // aggregation, so a not-yet-rebuilt row costs a moment's freshness rather than correctness.
     val from = seriesFrom(access)
     val filter =
       seriesFilter(
@@ -169,8 +170,11 @@ class JooqCatalogReadRepository(
     query: SeriesCatalogQuery,
     access: CatalogAccess,
   ): List<CatalogGroupCount> {
-    // Groups on `sm.title_sort`, so nothing in the answer comes from the aggregation and there is
-    // nothing here worth rebuilding one for. Sweeping anyway cost this route 8.4s per call.
+    // Groups on `sm.title_sort`, so the counts themselves owe the aggregation nothing - sweeping for
+    // them unconditionally cost this route 8.4s per call. What the *filter* narrows to can still
+    // come out of it, though, and a series missing from a filtered count is as wrong here as a
+    // series missing from the filtered listing.
+    sweepFor(query)
     val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     return database.dsl
@@ -323,10 +327,12 @@ class JooqCatalogReadRepository(
     if (ids.isEmpty()) return emptyList()
     val items = series.findAllByIds(ids).associateBy { it.id }
     val metadata = seriesMetadata.findAllBySeriesIds(ids).associateBy { it.seriesId }
-    // Exactly the series this response carries, so a page pays for its own freshness and nothing
-    // else's. Sweeping an arbitrary batch instead meant every read took the write lock for 500
-    // series, which on a database that admits one writer is a cost the whole process shares.
-    bookMetadataAggregations.refreshDirty(ids)
+    // Read only. Rebuilding the page it was about to return made this a writer, and on a database
+    // that admits one writer a listing then queues behind whatever scan or metadata fan-out holds
+    // the lock: 2 to 16s per page against 145,105 archives, where the alphabet grouping - the one
+    // series route that already swept nothing - answered the same load in 0.058s. Freshness is
+    // SeriesAggregationScheduler's job now; an unbuilt row reads as empty, which is a state this
+    // already tolerates.
     val aggregations = bookMetadataAggregations.findAllBySeriesIds(ids)
     val progresses =
       userId
@@ -738,23 +744,40 @@ class JooqCatalogReadRepository(
   }
 
   /**
-   * Sweeps the dirty aggregation as much as this query's answer actually needs.
+   * Sweeps the dirty aggregation when, and only when, this query's answer comes out of it.
    *
-   * The listing selects nothing from `series_book_metadata_aggregation`; the hydration step loads it
-   * separately per page. The join exists for one sortable column, [AGGREGATED_SORT], and only a
-   * query ordering on that column can be answered wrongly by a stale row - so only that query pays
-   * for a full rebuild. Everything else sweeps one bounded batch and lets the backlog drain across
-   * calls.
+   * Which rows a series listing returns, and in what order, can depend on the aggregation two ways:
+   * ordering on [AGGREGATED_SORT], and filtering on one of [AGGREGATION_BACKED_FIELDS] - author and
+   * tag resolve through `series_book_metadata_aggregation_author`/`_tag`, and release date through
+   * `ba.release_date`. A stale row costs those queries correctness, not freshness: a series whose
+   * aggregation has not been rebuilt is simply missing from the result. Everything else - which is
+   * every ordinary page and every hydration - sweeps nothing and lets `SeriesAggregationScheduler`
+   * drain the backlog off the request path.
    *
    * Before this, every series read swept the whole dirty table. A scan dirties every series, so the
    * first listing after one rebuilt the entire library inside the request: 22s for `GET /series` and
    * 61s for the alphabet grouping against 145,105 archives, decaying to under a second once drained.
+   * Bounding the batch only spread that cost across more readers - each page still took the write
+   * lock, so each page still queued behind the scan that created the backlog.
    */
-  private fun sweepFor(sorts: List<CatalogSort>) {
-    if (sorts.any { it.property == AGGREGATED_SORT }) {
+  private fun sweepFor(
+    query: SeriesCatalogQuery,
+    sorts: List<CatalogSort> = emptyList(),
+  ) {
+    val needed =
+      sorts.any { it.property == AGGREGATED_SORT } ||
+        query.condition?.readsAggregation() == true
+    if (needed) {
       bookMetadataAggregations.refreshAllDirty()
     }
   }
+
+  private fun CatalogSearchCondition.readsAggregation(): Boolean =
+    when (this) {
+      is CatalogSearchCondition.AllOf -> conditions.any { it.readsAggregation() }
+      is CatalogSearchCondition.AnyOf -> conditions.any { it.readsAggregation() }
+      is CatalogSearchCondition.Predicate -> field in AGGREGATION_BACKED_FIELDS
+    }
 
   private fun seriesFrom(access: CatalogAccess): SqlFrom {
     val bindings = mutableListOf<Any?>()
@@ -952,6 +975,18 @@ class JooqCatalogReadRepository(
      * stale row can get wrong. See [sweepFor].
      */
     private const val AGGREGATED_SORT = "booksMetadata.releaseDate"
+
+    /**
+     * The series search fields whose SQL reads the aggregation rather than `series_metadata`, and so
+     * the ones a stale row can drop a matching series from. `TAG` counts even though it unions
+     * `series_metadata_tag` in: half its input still comes from the aggregation. See [sweepFor].
+     */
+    private val AGGREGATION_BACKED_FIELDS =
+      setOf(
+        CatalogSearchField.AUTHOR,
+        CatalogSearchField.RELEASE_DATE,
+        CatalogSearchField.TAG,
+      )
 
     private val SERIES_SORTS =
       mapOf(
