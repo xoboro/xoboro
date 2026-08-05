@@ -46,6 +46,25 @@ internal class JooqBookMetadataAggregationRepository(
     }
   }
 
+  /**
+   * Rebuilds at most one batch, and reports whether more is waiting.
+   *
+   * [refreshAllDirty] is unbounded, and a read path that calls it pays for every series any recent
+   * write dirtied. A scan dirties all of them - a trigger fires per book and per book_metadata row -
+   * so the first listing after a scan of 145,105 archives rebuilt the whole library inside one
+   * request: measured at 22s for `GET /series` and 61s for the alphabet grouping, decaying to under
+   * a second once drained.
+   *
+   * Bounded sweeping is only correct because the listing LEFT JOINs the aggregation (see
+   * [JooqCatalogReadRepository.seriesFrom]): a series whose row has not been built yet still
+   * appears, so draining across successive reads costs freshness rather than visibility. A caller
+   * whose answer actually depends on the aggregation - sorting on it - still has to sweep it all.
+   */
+  fun refreshSomeDirty(): Boolean {
+    val refreshed = sweepOrNull { it.claimOldestDirty() } ?: return true
+    return refreshed >= QUERY_BATCH_SIZE
+  }
+
   fun findAllBySeriesIds(ids: Collection<SeriesId>): Map<SeriesId, BookMetadataAggregation> {
     val requested = ids.distinct()
     if (requested.isEmpty()) return emptyMap()
