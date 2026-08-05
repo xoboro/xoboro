@@ -189,6 +189,14 @@ class LibraryScanSchedulerTest {
       nowMillis: Long,
     ): Boolean = error("not used")
 
+    override fun release(
+      taskId: String,
+      leaseToken: String,
+      reason: String,
+      retryAtMillis: Long,
+      nowMillis: Long,
+    ): Boolean = error("not used")
+
     override fun counts(): TaskCounts = error("not used")
   }
 

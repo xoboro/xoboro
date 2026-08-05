@@ -534,6 +534,42 @@ class JooqDurableTaskQueueTest {
     }
   }
 
+  @Test
+  fun `releasing a task hands its attempt back and keeps it claimable`() {
+    withQueue("release") { queue, database ->
+      assertQueued(queue.enqueue(taskFixture(maxAttempts = 1), 1L))
+      val claim = requireNotNull(queue.claim("worker-1", "lease-1", 1L))
+      assertEquals(1, claim.attempt)
+
+      assertTrue(queue.release("task-1", "lease-1", "store busy", 40L, 10L))
+
+      // maxAttempts is 1, so a released task is only still claimable if the attempt was given back:
+      // `fail` in the same position would have dead-lettered it.
+      assertEquals(0, database.attemptCountOf("task-1"))
+      assertEquals("PENDING", database.stateOf("task-1"))
+      assertNull(queue.claim("worker-1", "lease-2", 39L), "the retry delay must be respected")
+      assertEquals(1, requireNotNull(queue.claim("worker-1", "lease-3", 40L)).attempt)
+    }
+  }
+
+  @Test
+  fun `releasing a task whose lease is gone reports the loss`() {
+    withQueue("release-lost-lease") { queue, _ ->
+      assertQueued(queue.enqueue(taskFixture(), 1L))
+      queue.claim("worker-1", "lease-1", 1L)
+
+      assertFalse(queue.release("task-1", "someone-elses-lease", "store busy", 40L, 10L))
+    }
+  }
+
+  private fun XoboroDatabase.attemptCountOf(taskId: String): Int? =
+    dsl
+      .fetchOne("SELECT attempt_count FROM task WHERE id = ?", taskId)
+      ?.get("attempt_count", Int::class.java)
+
+  private fun XoboroDatabase.stateOf(taskId: String): String? =
+    dsl.fetchOne("SELECT state FROM task WHERE id = ?", taskId)?.get("state", String::class.java)
+
   private fun withQueue(
     name: String,
     block: (JooqDurableTaskQueue, XoboroDatabase) -> Unit,

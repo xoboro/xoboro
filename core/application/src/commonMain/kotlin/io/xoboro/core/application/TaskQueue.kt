@@ -150,6 +150,30 @@ interface DurableTaskQueue {
     nowMillis: Long,
   ): Boolean
 
+  /**
+   * Returns a claimed task to `PENDING` **without charging it an attempt**.
+   *
+   * [fail] spends part of a task's `max_attempts` budget, which is right when the task itself is at
+   * fault and wrong when the store merely could not be written to. A library scan holds SQLite's one
+   * write lock for as long as its reconciliation takes, and a fan-out that has to enqueue thousands
+   * of children will meet that lock; charged as failures, contention alone dead-lettered a
+   * `REFRESH_LIBRARY_METADATA` task at 10/10 attempts and left a library's metadata unfilled. The
+   * work was never invalid, so the attempt is given back and the task waits instead.
+   *
+   * This has no attempt ceiling of its own, deliberately: a store that stays unwritable forever is
+   * an outage, and the task deferring until it clears is better than the task being discarded during
+   * it. [retryAtMillis] is what keeps that from becoming a spin.
+   *
+   * Returns whether the lease still held, on the same terms as [fail].
+   */
+  fun release(
+    taskId: String,
+    leaseToken: String,
+    reason: String,
+    retryAtMillis: Long,
+    nowMillis: Long,
+  ): Boolean
+
   fun counts(): TaskCounts
 
   /**

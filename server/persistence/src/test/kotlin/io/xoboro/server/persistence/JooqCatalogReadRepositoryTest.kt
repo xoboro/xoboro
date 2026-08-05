@@ -579,10 +579,17 @@ class JooqCatalogReadRepositoryTest {
         ).booksMetadata
       assertEquals("Refreshed synthetic summary", refreshed.summary)
       assertEquals("2019-01-01", refreshed.releaseDate)
+      // Scoped to the series that was read. A read rebuilds what its own answer carries and leaves
+      // the rest of the backlog to the background sweep; it used to drain the whole table, which is
+      // what made the first listing after a scan rebuild an entire library inside the request.
       assertEquals(
         0,
         database.dsl.fetchValue(
-          "SELECT count(*) FROM series_book_metadata_aggregation_dirty",
+          """
+          SELECT count(*)
+          FROM series_book_metadata_aggregation_dirty
+          WHERE series_id = 'series-a'
+          """.trimIndent(),
           Int::class.java,
         ),
       )
