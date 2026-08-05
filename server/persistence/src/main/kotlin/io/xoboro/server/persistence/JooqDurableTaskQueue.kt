@@ -335,12 +335,19 @@ class JooqDurableTaskQueue(
     }
     // `claimNext` charged the attempt on the way in, so handing it back is a decrement rather than a
     // no-op. Clamped at zero so a row that somehow arrives here uncharged cannot go negative and
-    // violate the table's non-negative check.
+    // violate the table's non-negative check, and clamped below `max_attempts` at the top: a task
+    // revived from `DEAD` keeps a count already past its ceiling, and leaving it there would mean a
+    // release that claims the attempt never happened still left the row one recovery sweep from
+    // being dead-lettered for having spent them all.
     return database.dsl.execute(
       """
       UPDATE task SET
         state = 'PENDING',
-        attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END,
+        attempt_count = CASE
+          WHEN attempt_count >= max_attempts THEN max_attempts - 1
+          WHEN attempt_count > 0 THEN attempt_count - 1
+          ELSE 0
+        END,
         available_at_ms = ?,
         lease_owner = NULL,
         lease_token = NULL,

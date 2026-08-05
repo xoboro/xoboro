@@ -553,6 +553,26 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `releasing a task revived past its ceiling brings it back under the ceiling`() {
+    withQueue("release-revived") { queue, database ->
+      // A task revived from DEAD keeps a count already at or past its ceiling, by design: a task that
+      // keeps dying costs one attempt per re-enqueue rather than getting a fresh budget. Releasing it
+      // has to undo more than one attempt then, or a release that claims the attempt never happened
+      // leaves the row one recovery sweep from being dead-lettered for having spent them all - which
+      // is how contention alone killed a REFRESH_LIBRARY_METADATA task at 12 attempts of 10.
+      assertQueued(queue.enqueue(taskFixture(maxAttempts = 2), 1L))
+      database.dsl.execute("UPDATE task SET attempt_count = 5 WHERE id = ?", "task-1")
+      val claim = requireNotNull(queue.claim("worker-1", "lease-1", 1L))
+      assertEquals(6, claim.attempt)
+
+      assertTrue(queue.release("task-1", "lease-1", "store busy", 40L, 10L))
+
+      assertEquals(1, database.attemptCountOf("task-1"), "must land below max_attempts")
+      assertEquals(2, requireNotNull(queue.claim("worker-1", "lease-2", 40L)).attempt)
+    }
+  }
+
+  @Test
   fun `releasing a task whose lease is gone reports the loss`() {
     withQueue("release-lost-lease") { queue, _ ->
       assertQueued(queue.enqueue(taskFixture(), 1L))
