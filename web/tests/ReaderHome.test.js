@@ -46,7 +46,99 @@ function server({ feedStatus = 200 } = {}) {
   })
 }
 
+/**
+ * A catalog larger than one page, answered the way the server answers it.
+ *
+ * `totalItems` and `totalPages` describe the whole set while `items` carries only this
+ * page - the distinction the grid used to discard.
+ */
+function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {}) {
+  const totalPages = Math.ceil(totalItems / size)
+  return vi.fn(async (url) => {
+    if (url.includes('/libraries')) return reply(envelope(libraries))
+    if (url.includes('/feeds/')) return reply(envelope())
+    if (url.includes('/series?')) {
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+      const first = page * size
+      const count = Math.max(0, Math.min(size, totalItems - first))
+      return reply({
+        items: Array.from({ length: count }, (_, index) => ({
+          id: `series-${first + index}`,
+          title: `Synthetic series ${first + index}`,
+          mediaItemCount: 1,
+        })),
+        page,
+        size,
+        totalItems,
+        totalPages,
+        hasPrevious: page > 0,
+        hasNext: page < totalPages - 1,
+      })
+    }
+    return reply(envelope())
+  })
+}
+
 describe('Reader home', () => {
+  it('reaches a catalog larger than one page', async () => {
+    // The grid asked for one page of 100 and rendered it as "all series", so a library of
+    // 3,339 showed its first 100 and offered no route to the other 3,239. The listing it
+    // calls has taken a `page` since it existed; nothing passed one.
+    globalThis.fetch = pagedSeriesServer()
+    render(Home)
+
+    await screen.findByText('Synthetic series 0')
+    const next = await screen.findByTestId('all-series-page-next')
+    expect(next.disabled).toBe(false)
+
+    await fireEvent.click(next)
+
+    // The second page's contents, from the server, and not a slice of the first.
+    await screen.findByText('Synthetic series 100')
+    expect(screen.queryByText('Synthetic series 0')).toBeNull()
+    await waitFor(() => {
+      const urls = globalThis.fetch.mock.calls.map(([url]) => url)
+      expect(urls.some((url) => url.includes('/series?') && url.includes('page=1'))).toBe(true)
+    })
+  })
+
+  it('cannot page past either end', async () => {
+    globalThis.fetch = pagedSeriesServer({ totalItems: 40 })
+    render(Home)
+
+    await screen.findByText('Synthetic series 0')
+    // One page holds the whole set, so both directions are dead ends and the envelope says
+    // so - `hasNext` and `hasPrevious`, not a count of the rows on screen.
+    expect((await screen.findByTestId('all-series-page-previous')).disabled).toBe(true)
+    expect((await screen.findByTestId('all-series-page-next')).disabled).toBe(true)
+  })
+
+  it('restarts at the first page when the reader narrows to a library', async () => {
+    // Page 7 of one library is usually past the end of another, so carrying the page
+    // number across a narrowing would ask for a page that does not exist and land the
+    // reader on an empty grid - which reads as an empty library.
+    globalThis.fetch = pagedSeriesServer({ libraries: TWO_LIBRARIES })
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await screen.findByText('Synthetic series 100')
+
+    globalThis.fetch.mockClear()
+    await fireEvent.click(await screen.findByTestId('library-lib-webtoon'))
+
+    await waitFor(() => {
+      const seriesUrls = globalThis.fetch.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.includes('/series?'))
+      expect(seriesUrls.length).toBeGreaterThan(0)
+      // Every request the narrowing makes is for the first page of the new set.
+      for (const url of seriesUrls) {
+        expect(url).toContain('libraryId=lib-webtoon')
+        expect(url).toContain('page=0')
+      }
+    })
+  })
+
   it('says how many shelves could not be read', async () => {
     globalThis.fetch = server({ feedStatus: 500 })
     render(Home)
