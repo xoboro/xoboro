@@ -134,6 +134,52 @@ class LibraryMaintenanceTaskTest {
     }
   }
 
+  @Test
+  fun `a fan-out queues series metadata before it queues books`() {
+    // Contention stops the fan-out partway and the retry restarts it from the top, so whatever it
+    // emits second may never be reached at all. A library's series carry the sidecar with the title,
+    // summary and status a refresh visibly produces, and they are outnumbered by its books two orders
+    // of magnitude - 314 against 24,696 in one real library. With books emitted first, that library
+    // sat at 27 of 314 series filled while the queue looked perfectly healthy.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out-order.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val recorder = RecordingOrderQueue(JooqDurableTaskQueue(database))
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = recorder,
+          currentTimeMillis = { 100 },
+        )
+
+      metadata.refreshLibrary(LIBRARY_ID)
+
+      assertEquals(
+        listOf(
+          RefreshSeriesMetadataTaskHandler.TASK_TYPE,
+          RefreshBookMetadataTaskHandler.TASK_TYPE,
+        ),
+        recorder.types,
+      )
+    }
+  }
+
+  /** Records the order types were queued in, delegating everything else to the real queue. */
+  private class RecordingOrderQueue(
+    private val delegate: JooqDurableTaskQueue,
+  ) : DurableTaskQueue by delegate {
+    val types = mutableListOf<String>()
+
+    override fun enqueue(
+      task: DurableTask,
+      nowMillis: Long,
+    ): TaskEnqueue {
+      if (types.lastOrNull() != task.type) types += task.type
+      return delegate.enqueue(task, nowMillis)
+    }
+  }
+
   /** A queue whose store is permanently busy, delegating everything else to the real one. */
   private class UnavailableQueue(
     private val delegate: JooqDurableTaskQueue,

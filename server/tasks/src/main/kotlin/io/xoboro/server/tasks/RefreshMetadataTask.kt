@@ -70,16 +70,23 @@ class RefreshMetadataTaskEmitter(
   ): Int {
     val nowMillis = now()
     var emitted = 0
-    books
-      .findAllByLibraryId(libraryId)
-      .asSequence()
-      .filter { it.deletedAtMillis == null }
-      .forEach { if (enqueueBook(it, priority, nowMillis)) emitted += 1 }
+    // Series first, and this order is the whole point. A library's series outnumber nothing and its
+    // books outnumber them by two orders of magnitude - 314 against 24,696 in one real library - while
+    // the series sidecar is what carries the title, summary and status a refresh visibly produces.
+    // Contention stops this fan-out partway and the retry restarts it from the top, so whatever comes
+    // second may never be reached: with books first, a library sat at 27 of 314 series filled while
+    // the queue looked healthy. Book metadata has a second route to the same place, because a
+    // successful analysis chains its own refresh, so it is the half that can afford to go last.
     series
       .findAllByLibraryId(libraryId)
       .asSequence()
       .filter { it.deletedAtMillis == null }
       .forEach { if (enqueueSeries(it.id, priority, nowMillis)) emitted += 1 }
+    books
+      .findAllByLibraryId(libraryId)
+      .asSequence()
+      .filter { it.deletedAtMillis == null }
+      .forEach { if (enqueueBook(it, priority, nowMillis)) emitted += 1 }
     return emitted
   }
 
