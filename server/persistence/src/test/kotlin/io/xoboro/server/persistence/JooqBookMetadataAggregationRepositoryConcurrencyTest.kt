@@ -23,16 +23,16 @@ import org.junit.jupiter.api.io.TempDir
 
 /**
  * Regression coverage for the SQLITE_BUSY_SNAPSHOT race between
- * [JooqBookMetadataAggregationRepository.refreshDirty] and a concurrent, independent writer touching
+ * [JooqBookMetadataAggregationRepository.refreshSomeDirty] and a concurrent, independent writer touching
  * `book_metadata` for the same series on another pooled connection.
  *
- * Before the fix, refreshDirty read `series_book_metadata_aggregation_dirty` and only then wrote to
+ * Before the fix, the sweep read `series_book_metadata_aggregation_dirty` and only then wrote to
  * it, so its transaction began as SQLite's default deferred (reader) transaction. If another
  * connection committed a write in between, SQLite refused to silently upgrade the now-stale read
  * snapshot to a writer and raised SQLITE_BUSY_SNAPSHOT - and `busy_timeout` does not wait out a
  * mid-transaction lock upgrade the way it waits for a fresh transaction's first write.
  *
- * refreshDirty now claims its work by *deleting* the dirty rows and reading their ids from
+ * A sweep now claims its work by *deleting* the dirty rows and reading their ids from
  * `RETURNING`, so the transaction's first statement is a write and there is no upgrade to fail.
  * This test hammers both sides concurrently and asserts zero failures.
  */
@@ -41,7 +41,7 @@ class JooqBookMetadataAggregationRepositoryConcurrencyTest {
   lateinit var tempDirectory: Path
 
   @Test
-  fun `refreshDirty survives a concurrent writer without a busy-snapshot failure`() {
+  fun `a sweep survives a concurrent writer without a busy-snapshot failure`() {
     val databasePath = tempDirectory.resolve("aggregation-race.sqlite")
     val seriesId = SeriesId("race-series")
     val bookIds = (1..40).map { BookId("race-book-$it") }
@@ -140,14 +140,14 @@ class JooqBookMetadataAggregationRepositoryConcurrencyTest {
           }
         }
 
-      // A GET /series{,/{id}}-style read path stand-in: refreshes the same series concurrently.
+      // The background sweep's stand-in: rebuilds the same series over and over, concurrently.
       val testStart = System.currentTimeMillis()
       val readers =
         (1..readerThreads).map {
           executor.submit {
             repeat(iterationsPerReader) { iteration ->
               val callStart = System.currentTimeMillis()
-              runCatching { aggregations.refreshDirty(listOf(seriesId)) }
+              runCatching { aggregations.refreshSomeDirty() }
                 .onFailure { failure ->
                   failures.incrementAndGet()
                   val now = System.currentTimeMillis()
@@ -166,7 +166,7 @@ class JooqBookMetadataAggregationRepositoryConcurrencyTest {
       writers.forEach { it.get(30, TimeUnit.SECONDS) }
       executor.shutdown()
 
-      assertEquals(0, failures.get(), "Unexpected refreshDirty failures: $failureMessages")
+      assertEquals(0, failures.get(), "Unexpected sweep failures: $failureMessages")
     }
   }
 

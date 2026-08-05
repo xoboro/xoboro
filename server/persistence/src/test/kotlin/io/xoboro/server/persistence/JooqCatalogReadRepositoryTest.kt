@@ -446,8 +446,155 @@ class JooqCatalogReadRepositoryTest {
   }
 
   @Test
+  fun `reads a series without rebuilding its aggregation`() {
+    withCatalog("aggregation-read-only") { database ->
+      val aggregations = JooqBookMetadataAggregationRepository(database)
+      aggregations.refreshAllDirty()
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
+          summary = "Synthetic summary a read must not rebuild",
+          updatedAtMillis = 20,
+        ),
+      )
+      assertEquals(1, dirtyAggregationCount(database, "series-a"))
+
+      val catalog = JooqCatalogReadRepository(database)
+      catalog.findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess())
+      catalog.findSeries(SeriesCatalogQuery(), CatalogAccess(), CatalogPageRequest())
+
+      // The whole point: a listing is a reader. It used to rebuild the page it was about to return,
+      // which made every series read take the write lock on a database that admits one writer, and
+      // put the listing behind whatever scan or metadata fan-out held it - 2 to 16s per page against
+      // 145,105 archives, while the same route with the sweep removed answered in 0.058s.
+      assertEquals(1, dirtyAggregationCount(database, "series-a"))
+
+      aggregations.refreshAllDirty()
+      assertEquals(0, dirtyAggregationCount(database, "series-a"))
+      assertEquals(
+        "Synthetic summary a read must not rebuild",
+        requireNotNull(
+          catalog.findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()),
+        ).booksMetadata.summary,
+      )
+    }
+  }
+
+  @Test
+  fun `sorting on the aggregation still rebuilds it first`() {
+    withCatalog("aggregation-sorted") { database ->
+      val aggregations = JooqBookMetadataAggregationRepository(database)
+      aggregations.refreshAllDirty()
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
+          releaseDate = "2019-01-01",
+          updatedAtMillis = 21,
+        ),
+      )
+      assertEquals(1, dirtyAggregationCount(database, "series-a"))
+
+      // Unlike every other route, this one's answer - the order itself - comes out of the
+      // aggregation, so a stale row does not cost freshness but correctness. It is the one read
+      // that still pays to sweep.
+      JooqCatalogReadRepository(database).findSeries(
+        query = SeriesCatalogQuery(),
+        access = CatalogAccess(),
+        page =
+          CatalogPageRequest(
+            sorts = listOf(CatalogSort("booksMetadata.releaseDate", CatalogSortDirection.ASC)),
+          ),
+      )
+
+      assertEquals(0, dirtyAggregationCount(database, "series-a"))
+    }
+  }
+
+  @Test
+  fun `filtering on the aggregation still rebuilds it first`() {
+    withCatalog("aggregation-filtered") { database ->
+      val aggregations = JooqBookMetadataAggregationRepository(database)
+      aggregations.refreshAllDirty()
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
+          releaseDate = "2019-01-01",
+          authors = listOf(Author("Filtered Author", "writer")),
+          tags = setOf("filtered"),
+          updatedAtMillis = 22,
+        ),
+      )
+      assertEquals(1, dirtyAggregationCount(database, "series-a"))
+
+      // Author, tag and release date resolve through the aggregation, so a stale row does not make
+      // these answers less fresh - it drops the series out of them entirely. This is the case the
+      // sort-only guard missed: two Komga compatibility route tests went from finding series-1 to
+      // finding nothing at all.
+      val catalog = JooqCatalogReadRepository(database)
+      listOf(
+        predicate(CatalogSearchField.RELEASE_DATE, CatalogSearchOperator.BEFORE, "2020-01-01T00:00:00Z"),
+        predicate(CatalogSearchField.TAG, CatalogSearchOperator.IS, "filtered"),
+        CatalogSearchCondition.Predicate(
+          field = CatalogSearchField.AUTHOR,
+          operator = CatalogSearchOperator.IS,
+          attributes = mapOf("name" to "Filtered Author", "role" to "writer"),
+        ),
+      ).forEach { condition ->
+        assertEquals(
+          listOf("series-a"),
+          catalog
+            .findSeries(
+              query = SeriesCatalogQuery(condition = condition),
+              access = CatalogAccess(),
+              page = CatalogPageRequest(),
+            ).content
+            .map { it.series.id.value },
+          "Filtering on $condition dropped the series",
+        )
+      }
+
+      // Same for the grouped counts, which narrow with the same filter before grouping on a column
+      // the aggregation has nothing to do with.
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
+          tags = setOf("filtered", "regrouped"),
+          updatedAtMillis = 23,
+        ),
+      )
+      assertEquals(1, dirtyAggregationCount(database, "series-a"))
+      assertEquals(
+        1,
+        catalog
+          .countSeriesByFirstCharacter(
+            query =
+              SeriesCatalogQuery(
+                condition = predicate(CatalogSearchField.TAG, CatalogSearchOperator.IS, "regrouped"),
+              ),
+            access = CatalogAccess(),
+          ).sumOf { it.count },
+      )
+    }
+  }
+
+  private fun dirtyAggregationCount(
+    database: XoboroDatabase,
+    seriesId: String,
+  ): Int =
+    database.dsl.fetchValue(
+      """
+      SELECT count(*)
+      FROM series_book_metadata_aggregation_dirty
+      WHERE series_id = '$seriesId'
+      """.trimIndent(),
+      Int::class.java,
+    ) as Int
+
+  @Test
   fun `aggregates the first nonblank summary earliest release authors and tags`() {
     withCatalog("aggregation") { database ->
+      // The rebuild is what this test is about, so it is invoked explicitly. Reads do not rebuild:
+      // see `reads a series without rebuilding its aggregation`.
+      val aggregations = JooqBookMetadataAggregationRepository(database)
       val metadata = JooqBookMetadataRepository(database)
       metadata.upsert(
         requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(
@@ -481,6 +628,7 @@ class JooqCatalogReadRepositoryTest {
         ),
       )
 
+      aggregations.refreshAllDirty()
       val result =
         requireNotNull(
           JooqCatalogReadRepository(database)
@@ -572,6 +720,7 @@ class JooqCatalogReadRepositoryTest {
           Int::class.java,
         ),
       )
+      aggregations.refreshAllDirty()
       val refreshed =
         requireNotNull(
           JooqCatalogReadRepository(database)
@@ -579,9 +728,7 @@ class JooqCatalogReadRepositoryTest {
         ).booksMetadata
       assertEquals("Refreshed synthetic summary", refreshed.summary)
       assertEquals("2019-01-01", refreshed.releaseDate)
-      // Scoped to the series that was read. A read rebuilds what its own answer carries and leaves
-      // the rest of the backlog to the background sweep; it used to drain the whole table, which is
-      // what made the first listing after a scan rebuild an entire library inside the request.
+      // Claimed by the sweep above, not by the read that followed it.
       assertEquals(
         0,
         database.dsl.fetchValue(
@@ -609,6 +756,7 @@ class JooqCatalogReadRepositoryTest {
           Int::class.java,
         ),
       )
+      aggregations.refreshAllDirty()
       val catalog = JooqCatalogReadRepository(database)
       val oldParent =
         requireNotNull(catalog.findSeriesByIdOrNull(SeriesId("series-a"), CatalogAccess()))
@@ -641,6 +789,7 @@ class JooqCatalogReadRepositoryTest {
         )
       }
 
+      JooqBookMetadataAggregationRepository(database).refreshAllDirty()
       val aggregate =
         requireNotNull(
           JooqCatalogReadRepository(database)
@@ -699,7 +848,7 @@ class JooqCatalogReadRepositoryTest {
           updatedAtMillis = 2,
         ),
       )
-      JooqCatalogReadRepository(database).findSeriesByIdOrNull(seriesId, CatalogAccess())
+      JooqBookMetadataAggregationRepository(database).refreshAllDirty()
       metadata.upsert(
         requireNotNull(metadata.findByBookIdOrNull(bookId)).copy(
           summary = "Restart repaired summary",
@@ -716,6 +865,10 @@ class JooqCatalogReadRepositoryTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      // A dirty marker survives the restart, so the aggregation is repairable from a cold start -
+      // which is the point of persisting the marker rather than an in-memory queue. The sweeper the
+      // runtime schedules is what calls this in production.
+      JooqBookMetadataAggregationRepository(database).refreshAllDirty()
       val repaired =
         requireNotNull(
           JooqCatalogReadRepository(database)
