@@ -1,6 +1,7 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.BookCatalogQuery
+import io.xoboro.core.application.BookMetadataAggregation
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogGroupCount
@@ -23,6 +24,7 @@ import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.ReadProgressRepository
+import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadataRepository
 import io.xoboro.core.domain.SeriesRepository
@@ -103,7 +105,7 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
     page: CatalogPageRequest,
   ): CatalogPage<CatalogSeries> {
-    bookMetadataAggregations.refreshAllDirty()
+    sweepFor(page.sorts)
     val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     val countFilter =
@@ -167,7 +169,8 @@ class JooqCatalogReadRepository(
     query: SeriesCatalogQuery,
     access: CatalogAccess,
   ): List<CatalogGroupCount> {
-    bookMetadataAggregations.refreshAllDirty()
+    // Groups on `sm.title_sort`, so nothing in the answer comes from the aggregation.
+    bookMetadataAggregations.refreshSomeDirty()
     val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     return database.dsl
@@ -331,11 +334,34 @@ class JooqCatalogReadRepository(
       CatalogSeries(
         series = item,
         metadata = metadata[id] ?: return@mapNotNull null,
-        booksMetadata = requireNotNull(aggregations[id]),
+        // A series whose aggregation has not been rebuilt yet reads as empty, not as a fault. This
+        // asserted the row existed, which held only because every read swept the whole dirty table
+        // first - the sweep that made the first listing after a scan take 22s. With the sweep now
+        // bounded, an unbuilt row is an ordinary state and the next sweep fills it in.
+        booksMetadata = aggregations[id] ?: item.emptyAggregation(),
         readProgress = progresses[id],
       )
     }
   }
+
+  /**
+   * What a series' aggregated book metadata is before anything has been aggregated.
+   *
+   * Timestamps come from the series itself, matching what the rebuild falls back to when a series
+   * has no book metadata to aggregate (`coalesce(min(metadata.created_at_ms), series.created_at_ms)`),
+   * so an unbuilt row and a built-but-empty one are not distinguishable from outside - which is
+   * correct, because they mean the same thing to a reader.
+   */
+  private fun Series.emptyAggregation(): BookMetadataAggregation =
+    BookMetadataAggregation(
+      authors = emptyList(),
+      tags = emptySet(),
+      releaseDate = null,
+      summary = "",
+      summaryNumber = "",
+      createdAtMillis = createdAtMillis,
+      updatedAtMillis = updatedAtMillis,
+    )
 
   private fun bookFilter(
     query: BookCatalogQuery,
@@ -707,6 +733,27 @@ class JooqCatalogReadRepository(
     )
   }
 
+  /**
+   * Sweeps the dirty aggregation as much as this query's answer actually needs.
+   *
+   * The listing selects nothing from `series_book_metadata_aggregation`; the hydration step loads it
+   * separately per page. The join exists for one sortable column, [AGGREGATED_SORT], and only a
+   * query ordering on that column can be answered wrongly by a stale row - so only that query pays
+   * for a full rebuild. Everything else sweeps one bounded batch and lets the backlog drain across
+   * calls.
+   *
+   * Before this, every series read swept the whole dirty table. A scan dirties every series, so the
+   * first listing after one rebuilt the entire library inside the request: 22s for `GET /series` and
+   * 61s for the alphabet grouping against 145,105 archives, decaying to under a second once drained.
+   */
+  private fun sweepFor(sorts: List<CatalogSort>) {
+    if (sorts.any { it.property == AGGREGATED_SORT }) {
+      bookMetadataAggregations.refreshAllDirty()
+    } else {
+      bookMetadataAggregations.refreshSomeDirty()
+    }
+  }
+
   private fun seriesFrom(access: CatalogAccess): SqlFrom {
     val bindings = mutableListOf<Any?>()
     val progressJoin =
@@ -723,7 +770,7 @@ class JooqCatalogReadRepository(
         """
         series s
         JOIN series_metadata sm ON sm.series_id = s.id
-        JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
+        LEFT JOIN series_book_metadata_aggregation ba ON ba.series_id = s.id
         $progressJoin
         """.trimIndent(),
       bindings = bindings,
@@ -898,6 +945,12 @@ class JooqCatalogReadRepository(
           )
           """.trimIndent(),
       )
+    /**
+     * The one sort key served by the denormalized aggregation, and so the one query whose order a
+     * stale row can get wrong. See [sweepFor].
+     */
+    private const val AGGREGATED_SORT = "booksMetadata.releaseDate"
+
     private val SERIES_SORTS =
       mapOf(
         "booksCount" to "s.book_count",
@@ -910,7 +963,7 @@ class JooqCatalogReadRepository(
         "title" to "sm.title COLLATE NOCASE",
         "titleSort" to "sm.title_sort COLLATE NOCASE",
         "metadata.titleSort" to "sm.title_sort COLLATE NOCASE",
-        "booksMetadata.releaseDate" to "ba.release_date",
+        AGGREGATED_SORT to "ba.release_date",
         "readDate" to "sort_series_progress.last_read_at_ms",
         "collection.number" to
           """

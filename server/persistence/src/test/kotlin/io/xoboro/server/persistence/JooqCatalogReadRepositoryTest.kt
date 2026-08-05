@@ -1254,6 +1254,54 @@ class JooqCatalogReadRepositoryTest {
   ): CatalogSearchCondition.Predicate =
     CatalogSearchCondition.Predicate(field, operator, value)
 
+  @Test
+  fun `lists a series whose denormalized aggregation has not been built yet`() {
+    // The listing joined `series_book_metadata_aggregation` for exactly one sortable column,
+    // `booksMetadata.releaseDate`, and joined it INNER - so a series with no aggregation row was
+    // silently absent from the library. Nothing in the response comes from that table; the
+    // hydration step loads it separately per page. A join added for a sort key had become a filter.
+    //
+    // That is why every series read had to sweep the whole dirty table first: without the sweep,
+    // series disappeared. A scan dirties all of them, so the first listing after one rebuilt the
+    // entire library inside the request - 22s for `GET /series` against 145,105 archives.
+    withCatalog("missing-aggregation") { database ->
+      val catalog = JooqCatalogReadRepository(database)
+      val access = CatalogAccess()
+      val before =
+        catalog.findSeries(
+          query = SeriesCatalogQuery(deleted = false),
+          access = access,
+          page = CatalogPageRequest(size = 20),
+        )
+      assertEquals(setOf("series-a", "series-b"), before.content.map { it.series.id.value }.toSet())
+
+      // The state a never-swept series is in: no aggregation row, and no dirty marker either, so
+      // this read cannot quietly rebuild it and hide the regression.
+      database.dsl.execute(
+        "DELETE FROM series_book_metadata_aggregation WHERE series_id = ?",
+        "series-b",
+      )
+      database.dsl.execute(
+        "DELETE FROM series_book_metadata_aggregation_dirty WHERE series_id = ?",
+        "series-b",
+      )
+
+      val after =
+        catalog.findSeries(
+          query = SeriesCatalogQuery(deleted = false),
+          access = access,
+          page = CatalogPageRequest(size = 20),
+        )
+      assertEquals(setOf("series-a", "series-b"), after.content.map { it.series.id.value }.toSet())
+      assertEquals(2, after.totalElements)
+      // Empty rather than absent, and not an exception either: hydration used to assert the row
+      // existed, so a missing aggregation turned the listing into a 500 rather than a gap.
+      val unbuilt = after.content.single { it.series.id.value == "series-b" }
+      assertEquals("", unbuilt.booksMetadata.summary)
+      assertEquals(emptyList(), unbuilt.booksMetadata.authors)
+    }
+  }
+
   private fun withCatalog(
     name: String,
     block: (XoboroDatabase) -> Unit,
