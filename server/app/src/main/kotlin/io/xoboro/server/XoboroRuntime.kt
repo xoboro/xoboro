@@ -287,7 +287,7 @@ class XoboroRuntime private constructor(
         XoboroDatabase.open(
           DatabaseConfig(
             path = config.databasePath,
-            maximumPoolSize = (config.workerCount + 2).coerceAtMost(16),
+            maximumPoolSize = DatabaseConfig.poolSizeForWorkers(config.workerCount),
           ),
         )
       var heartbeat: ScheduledLeaseHeartbeat? = null
