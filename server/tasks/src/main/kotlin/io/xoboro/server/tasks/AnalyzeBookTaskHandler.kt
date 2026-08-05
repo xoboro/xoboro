@@ -19,8 +19,13 @@ import kotlinx.serialization.json.put
 class AnalyzeBookTaskEmitter(
   private val books: BookRepository,
   private val queue: DurableTaskQueue,
+  private val chunkSize: Int = RefreshMetadataTaskEmitter.FAN_OUT_CHUNK_SIZE,
   private val currentTimeMillis: () -> Long,
 ) {
+  init {
+    require(chunkSize > 0) { "Fan-out chunk size must be positive" }
+  }
+
   /**
    * Queues one task that will fan [analyzeLibrary] out from a worker.
    *
@@ -52,14 +57,69 @@ class AnalyzeBookTaskEmitter(
     )
   }
 
+  /**
+   * Emits at most [chunkSize] of a library's analyses, chaining a successor for the remainder.
+   *
+   * See [LibraryFanOutCursor]: an unbounded pass over 24,696 books cannot be relied on to reach its
+   * own end, because one busy enqueue defers the whole task and the re-run starts over - re-queuing
+   * every book it had already analysed, since a completed task leaves no row behind.
+   */
   fun analyzeLibrary(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
-  ): Int =
-    enqueueBooks(
-      books.findAllByLibraryId(libraryId).asSequence(),
-      priority,
+    from: LibraryFanOutCursor = LibraryFanOutCursor.BOOKS_START,
+  ): Int {
+    val nowMillis = currentTimeMillis()
+    require(nowMillis >= 0) { "Task emission timestamp must not be negative" }
+    val pending =
+      books
+        .findAllByLibraryId(libraryId)
+        .filter { it.deletedAtMillis == null }
+        .sortedBy { it.id.value }
+        .filter { from.afterId == null || it.id.value > from.afterId }
+    val chunk = pending.take(chunkSize)
+    val emitted = enqueueBooks(chunk.asSequence(), priority)
+    if (pending.size > chunk.size) {
+      resumeAfter(libraryId, priority, chunk.last().id.value, nowMillis)
+    }
+    return emitted
+  }
+
+  /**
+   * Queues the chunk that carries on after [afterId].
+   *
+   * [enqueueOrRetry] on purpose: a busy store must fail this task so the worker re-runs the same
+   * chunk, because losing the successor abandons the rest of the library with nothing to say so.
+   * The successor's id encodes its cursor, so the re-run queues the same one rather than a second.
+   */
+  private fun resumeAfter(
+    libraryId: LibraryId,
+    priority: Int,
+    afterId: String,
+    nowMillis: Long,
+  ) {
+    val cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.BOOKS, afterId)
+    queue.enqueueOrRetry(
+      task =
+        DurableTask(
+          id =
+            AnalyzeLibraryTaskHandler.taskId(libraryId) +
+              RefreshMetadataTaskEmitter.RESUME_SEPARATOR +
+              cursor.encode(),
+          type = AnalyzeLibraryTaskHandler.TASK_TYPE,
+          payloadJson =
+            buildJsonObject {
+              put(AnalyzeLibraryTaskHandler.LIBRARY_ID_FIELD, libraryId.value)
+              put(AnalyzeLibraryTaskHandler.CURSOR_FIELD, cursor.encode())
+            }.toString(),
+          priority = priority,
+          groupId = libraryId.value,
+          availableAtMillis = nowMillis,
+          maxAttempts = RefreshMetadataTaskEmitter.FAN_OUT_MAX_ATTEMPTS,
+        ),
+      nowMillis = nowMillis,
     )
+  }
 
   fun analyzeBook(
     bookId: BookId,
@@ -145,7 +205,7 @@ class AnalyzeBookTaskHandler(
  * that asked for it. See [AnalyzeBookTaskEmitter.analyzeLibraryDeferred].
  */
 class AnalyzeLibraryTaskHandler(
-  private val analyzeLibrary: (LibraryId) -> Unit,
+  private val analyzeLibrary: (LibraryId, LibraryFanOutCursor) -> Unit,
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -160,12 +220,21 @@ class AnalyzeLibraryTaskHandler(
         ?.contentOrNull
         ?.takeIf(String::isNotBlank)
         ?: throw IllegalArgumentException("$TASK_TYPE payload must contain a non-blank libraryId")
-    analyzeLibrary(LibraryId(libraryId))
+    analyzeLibrary(
+      LibraryId(libraryId),
+      LibraryFanOutCursor.decode(
+        task.optionalStringPayload(json, CURSOR_FIELD),
+        LibraryFanOutCursor.BOOKS_START,
+      ),
+    )
   }
 
   companion object {
     const val TASK_TYPE: String = "ANALYZE_LIBRARY"
     internal const val LIBRARY_ID_FIELD = "libraryId"
+
+    /** Absent on the task a request queues, present on every chunk that continues it. */
+    internal const val CURSOR_FIELD = "cursor"
 
     fun taskId(libraryId: LibraryId): String = "${TASK_TYPE}_${libraryId.value}"
   }
