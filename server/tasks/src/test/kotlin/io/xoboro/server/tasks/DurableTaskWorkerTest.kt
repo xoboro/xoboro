@@ -240,11 +240,50 @@ class DurableTaskWorkerTest {
     }
   }
 
+  @Test
+  fun `a handler's own busy database defers the task rather than spending an attempt`() {
+    withQueue("handler-store-busy") { queue ->
+      // A scan stages its candidates through the store directly, so a busy database reaches the
+      // worker as whatever the driver raised - not as a TaskStoreUnavailableException. Charged as a
+      // failure, that dead-lettered SCAN_LIBRARY at 3 of 3 while it was competing with a metadata
+      // fan-out for the write lock.
+      queue.enqueue(task(maxAttempts = 1), nowMillis = 1)
+      val driverFailure = IllegalStateException("[SQLITE_BUSY] The database file is locked")
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { throw driverFailure },
+          times = ArrayDeque(listOf(100L, 100L)),
+          isStoreBusy = { it === driverFailure },
+        )
+
+      assertEquals(TaskRunResult.Deferred("task-1"), worker.runOnce("worker-1"))
+      assertEquals(TaskCounts(pending = 1, running = 0, dead = 0), queue.counts())
+    }
+  }
+
+  @Test
+  fun `a worker with no contention predicate still fails an ordinary handler error`() {
+    withQueue("handler-plain-failure") { queue ->
+      queue.enqueue(task(maxAttempts = 1), nowMillis = 1)
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { error("synthetic failure") },
+          times = ArrayDeque(listOf(100L, 100L, 100L)),
+        )
+
+      assertEquals(TaskRunResult.Failed("task-1", willRetry = false), worker.runOnce("worker-1"))
+      assertEquals(TaskCounts(pending = 0, running = 0, dead = 1), queue.counts())
+    }
+  }
+
   private fun worker(
     queue: JooqDurableTaskQueue,
     handler: TaskHandler,
     times: ArrayDeque<Long>,
     heartbeat: LeaseHeartbeat = noHeartbeat(),
+    isStoreBusy: (Throwable) -> Boolean = { false },
   ): DurableTaskWorker =
     DurableTaskWorker(
       queue = queue,
@@ -252,6 +291,7 @@ class DurableTaskWorkerTest {
       heartbeat = heartbeat,
       currentTimeMillis = times::removeFirst,
       leaseTokenFactory = { "lease-${times.size}" },
+      isStoreBusy = isStoreBusy,
       policy =
         TaskWorkerPolicy(
           leaseDurationMillis = 30,
