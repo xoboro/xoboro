@@ -21,9 +21,13 @@ import org.jooq.exception.DataAccessException
  *
  * The busy handler applying is not the same as the write always succeeding, which this doc used to
  * claim. `busy_timeout` still expires, and a library scan holds the write lock for minutes - far
- * past any timeout worth configuring. [sweepOrNull] is where that outcome is absorbed, because
- * every series read path sweeps before it reads and none of them may fail over a stale
- * denormalized view.
+ * past any timeout worth configuring. [sweepOrNull] is where that outcome is absorbed: a sweep is
+ * always allowed to answer "not yet" and leave the backlog for whoever comes next.
+ *
+ * Sweeping is no longer something a read does. [findAllBySeriesIds] is a reader, and every series
+ * route reads an unbuilt row as empty rather than as a fault, so the only caller that must still
+ * sweep is the one whose answer comes *out* of the aggregation - a query ordering on it. Everything
+ * else is drained by `SeriesAggregationScheduler` off the request path.
  *
  * Claiming by deleting also means concurrent refreshers do not duplicate work: the write lock
  * serializes them, and whoever loses the race finds the rows already claimed and skips the rebuild
@@ -57,8 +61,8 @@ class JooqBookMetadataAggregationRepository(
    *
    * Bounded sweeping is only correct because the listing LEFT JOINs the aggregation (see
    * [JooqCatalogReadRepository.seriesFrom]): a series whose row has not been built yet still
-   * appears, so draining across successive reads costs freshness rather than visibility. A caller
-   * whose answer actually depends on the aggregation - sorting on it - still has to sweep it all.
+   * appears, so draining in the background costs freshness rather than visibility. A caller whose
+   * answer actually depends on the aggregation - sorting on it - still has to sweep it all.
    */
   fun refreshSomeDirty(): Boolean {
     val refreshed = sweepOrNull { it.claimOldestDirty() } ?: return true
@@ -68,7 +72,6 @@ class JooqBookMetadataAggregationRepository(
   fun findAllBySeriesIds(ids: Collection<SeriesId>): Map<SeriesId, BookMetadataAggregation> {
     val requested = ids.distinct()
     if (requested.isEmpty()) return emptyMap()
-    refreshDirty(requested)
     return requested.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
       val rows =
         database.dsl.fetch(
@@ -101,27 +104,20 @@ class JooqBookMetadataAggregationRepository(
     }.toMap()
   }
 
-  fun refreshDirty(requested: Collection<SeriesId>) {
-    requested.chunked(QUERY_BATCH_SIZE).forEach { batch ->
-      sweepOrNull { it.claimDirty(batch) } ?: return
-    }
-  }
-
   /**
    * Claims and rebuilds one batch, answering `null` when the write lock could not be taken.
    *
-   * Every series read path opens by sweeping (see [JooqCatalogReadRepository.findSeries],
-   * [JooqCatalogReadRepository.findSeriesByIdOrNull] and
-   * [JooqCatalogReadRepository.countSeriesByFirstCharacter]), so letting contention escape from here
-   * fails the whole library listing with a `500` for as long as a scan holds the write lock -
-   * observed against a library of 145,105 archives. A scan holds it far past any `busy_timeout`
-   * worth configuring, so this is not a wait that can be tuned away.
+   * Contention must not escape. A scan holds the write lock far past any `busy_timeout` worth
+   * configuring, and the one read path that still sweeps - a query ordering on the aggregation -
+   * would otherwise answer `500` for the scan's whole duration, observed against a library of
+   * 145,105 archives. The background sweep must not propagate it either: a scheduled task that
+   * throws is a task that stops being scheduled.
    *
    * Deferring costs nothing but freshness. The claim is the transaction's first statement, so a
-   * failure rolls back with the dirty rows still in place, and the next caller or [refreshAllDirty]
-   * rebuilds them. Answering with a moment-stale denormalized view is the right trade against
-   * failing the request; not logging is deliberate, because a polled listing during a long scan
-   * would otherwise write this line on every read.
+   * failure rolls back with the dirty rows still in place, and the next caller or the background
+   * sweep rebuilds them. Answering with a moment-stale denormalized view is the right trade against
+   * failing the request; not logging is deliberate, because a sweep ticking once a minute through a
+   * long scan would otherwise write this line on every tick.
    */
   private fun sweepOrNull(claim: (DSLContext) -> List<SeriesId>): Int? =
     try {
@@ -146,16 +142,6 @@ class JooqBookMetadataAggregationRepository(
       )
       RETURNING series_id
       """.trimIndent(),
-    ).map { SeriesId(it.requiredString("series_id")) }
-
-  private fun DSLContext.claimDirty(batch: List<SeriesId>): List<SeriesId> =
-    fetch(
-      """
-      DELETE FROM series_book_metadata_aggregation_dirty
-      WHERE series_id IN (${batch.placeholders()})
-      RETURNING series_id
-      """.trimIndent(),
-      *batch.bindings(),
     ).map { SeriesId(it.requiredString("series_id")) }
 
   private fun DSLContext.rebuild(ids: Collection<SeriesId>) {
