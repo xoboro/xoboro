@@ -103,16 +103,26 @@ class DurableTaskWorker(
     val leaseLost = AtomicBoolean(false)
     val heartbeatRegistration =
       heartbeat.start(policy.leaseDurationMillis / 3) {
-        runCatching {
-          queue.renewLease(
-            taskId = claim.task.id,
-            leaseToken = claim.leaseToken,
-            nowMillis = now(),
-            leaseDurationMillis = policy.leaseDurationMillis,
-          )
-        }.getOrDefault(false).also { renewed ->
-          if (!renewed) leaseLost.set(true)
-        }
+        val renewed =
+          try {
+            queue.renewLease(
+              taskId = claim.task.id,
+              leaseToken = claim.leaseToken,
+              nowMillis = now(),
+              leaseDurationMillis = policy.leaseDurationMillis,
+            )
+          } catch (failure: Throwable) {
+            // A busy store means this tick could not ask, not that the lease is gone. Reading it as
+            // loss made the worker abandon the task without recording anything, which left the row
+            // RUNNING until its lease really did expire - and the recovery path dead-letters an
+            // expired row whose attempts are spent. That is how contention alone killed a
+            // REFRESH_LIBRARY_METADATA task carrying "the task store was busy" as its last error.
+            // There are three renewal ticks per lease, so declining to panic on one costs nothing.
+            if (isStoreBusy(failure)) return@start true
+            false
+          }
+        if (!renewed) leaseLost.set(true)
+        renewed
       }
     var failure: Throwable? = null
     try {

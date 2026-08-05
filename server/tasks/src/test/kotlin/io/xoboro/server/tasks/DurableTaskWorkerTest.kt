@@ -1,6 +1,7 @@
 package io.xoboro.server.tasks
 
 import io.xoboro.core.application.DurableTask
+import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.TaskStoreUnavailableException
 import io.xoboro.server.persistence.DatabaseConfig
@@ -263,6 +264,84 @@ class DurableTaskWorkerTest {
   }
 
   @Test
+  fun `a busy store during lease renewal is not read as losing the lease`() {
+    withQueue("renewal-store-busy") { queue ->
+      // Reading a failed renewal as loss made the worker abandon the task without recording anything,
+      // leaving the row RUNNING until its lease really did expire - and the recovery sweep
+      // dead-letters an expired row whose attempts are spent. That is how contention alone killed a
+      // REFRESH_LIBRARY_METADATA task whose last error still read "the task store was busy".
+      queue.enqueue(task(), nowMillis = 1)
+      val busy = IllegalStateException("[SQLITE_BUSY] The database file is locked")
+      var handled = false
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { handled = true },
+          times = ArrayDeque(listOf(10L, 10L)),
+          heartbeat = immediateHeartbeat(),
+          isStoreBusy = { it === busy },
+          queueOverride = BusyRenewalQueue(queue, busy),
+        )
+
+      assertEquals(TaskRunResult.Completed("task-1"), worker.runOnce("worker-1"))
+      assertTrue(handled)
+      assertEquals(TaskCounts(0, 0, 0), queue.counts())
+    }
+  }
+
+  @Test
+  fun `a renewal that genuinely finds no lease still reports the loss`() {
+    withQueue("renewal-lease-gone") { queue ->
+      queue.enqueue(task(), nowMillis = 1)
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { },
+          times = ArrayDeque(listOf(10L, 10L, 10L, 10L)),
+          heartbeat = immediateHeartbeat(),
+          // Every failure would count as contention, so what this pins is that a renewal answering
+          // "no such lease" is not a failure at all and still has to be believed.
+          isStoreBusy = { true },
+          queueOverride = DeniedRenewalQueue(queue),
+        )
+
+      assertEquals(TaskRunResult.LeaseLost("task-1"), worker.runOnce("worker-1"))
+    }
+  }
+
+  /** Runs one renewal tick inline, so a test does not wait on a scheduler. */
+  private fun immediateHeartbeat(): LeaseHeartbeat =
+    LeaseHeartbeat { _, renew ->
+      renew()
+      AutoCloseable {}
+    }
+
+  /** Renewal cannot reach the store. Everything else is the real queue. */
+  private class BusyRenewalQueue(
+    private val delegate: DurableTaskQueue,
+    private val failure: Throwable,
+  ) : DurableTaskQueue by delegate {
+    override fun renewLease(
+      taskId: String,
+      leaseToken: String,
+      nowMillis: Long,
+      leaseDurationMillis: Long,
+    ): Boolean = throw failure
+  }
+
+  /** Renewal reaches the store and is told the lease is no longer this worker's. */
+  private class DeniedRenewalQueue(
+    private val delegate: DurableTaskQueue,
+  ) : DurableTaskQueue by delegate {
+    override fun renewLease(
+      taskId: String,
+      leaseToken: String,
+      nowMillis: Long,
+      leaseDurationMillis: Long,
+    ): Boolean = false
+  }
+
+  @Test
   fun `a worker with no contention predicate still fails an ordinary handler error`() {
     withQueue("handler-plain-failure") { queue ->
       queue.enqueue(task(maxAttempts = 1), nowMillis = 1)
@@ -284,9 +363,10 @@ class DurableTaskWorkerTest {
     times: ArrayDeque<Long>,
     heartbeat: LeaseHeartbeat = noHeartbeat(),
     isStoreBusy: (Throwable) -> Boolean = { false },
+    queueOverride: DurableTaskQueue? = null,
   ): DurableTaskWorker =
     DurableTaskWorker(
-      queue = queue,
+      queue = queueOverride ?: queue,
       handlers = listOf(handler),
       heartbeat = heartbeat,
       currentTimeMillis = times::removeFirst,
