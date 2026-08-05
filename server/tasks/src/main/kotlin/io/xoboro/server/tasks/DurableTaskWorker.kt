@@ -2,6 +2,7 @@ package io.xoboro.server.tasks
 
 import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTaskQueue
+import io.xoboro.core.application.TaskStoreUnavailableException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Level
 import java.util.logging.Logger
@@ -11,6 +12,12 @@ data class TaskWorkerPolicy(
   val initialRetryDelayMillis: Long = 1_000,
   val maximumRetryDelayMillis: Long = 300_000,
   val maximumErrorLength: Int = 4_000,
+  /**
+   * How long a task waits after the store turned out to be unwritable. Matches the `Retry-After` the
+   * request paths advertise for the same condition, so a client polling and a worker retrying agree
+   * on how long contention is worth waiting out.
+   */
+  val storeBusyRetryDelayMillis: Long = 30_000,
 ) {
   init {
     require(leaseDurationMillis >= 3) { "Task lease duration must be at least 3 ms" }
@@ -19,6 +26,7 @@ data class TaskWorkerPolicy(
       "Maximum retry delay must not be smaller than its initial value"
     }
     require(maximumErrorLength > 0) { "Maximum task error length must be positive" }
+    require(storeBusyRetryDelayMillis > 0) { "Store busy retry delay must be positive" }
   }
 }
 
@@ -32,6 +40,15 @@ sealed interface TaskRunResult {
   data class Failed(
     val taskId: String,
     val willRetry: Boolean,
+  ) : TaskRunResult
+
+  /**
+   * The task could not run because the store was unwritable, and is queued again untouched. Distinct
+   * from [Failed] with `willRetry`, which has spent one of the task's attempts to learn the same
+   * thing.
+   */
+  data class Deferred(
+    val taskId: String,
   ) : TaskRunResult
 
   data class LeaseLost(
@@ -116,6 +133,21 @@ class DurableTaskWorker(
     }
 
     val failureTimeMillis = now()
+    if (failure.isStoreUnavailable()) {
+      return if (
+        queue.release(
+          taskId = claim.task.id,
+          leaseToken = claim.leaseToken,
+          reason = failure.toTaskError(),
+          retryAtMillis = failureTimeMillis + policy.storeBusyRetryDelayMillis,
+          nowMillis = failureTimeMillis,
+        )
+      ) {
+        TaskRunResult.Deferred(claim.task.id)
+      } else {
+        TaskRunResult.LeaseLost(claim.task.id)
+      }
+    }
     val retryAtMillis =
       if (failure is UnknownTaskTypeException || claim.attempt >= claim.task.maxAttempts) {
         null
@@ -176,6 +208,20 @@ class DurableTaskWorker(
         }
     }
     return if (nowMillis > Long.MAX_VALUE - delay) Long.MAX_VALUE else nowMillis + delay
+  }
+
+  /**
+   * Walks the cause chain, because a handler is free to wrap what it caught and the distinction
+   * between "this task is broken" and "the store was busy" has to survive that wrapping.
+   */
+  private fun Throwable.isStoreUnavailable(): Boolean {
+    var current: Throwable? = this
+    val seen = mutableSetOf<Throwable>()
+    while (current != null && seen.add(current)) {
+      if (current is TaskStoreUnavailableException) return true
+      current = current.cause
+    }
+    return false
   }
 
   private fun Throwable.toTaskError(): String =

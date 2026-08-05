@@ -436,6 +436,40 @@ class JooqCatalogReconciliationStoreTest {
     }
   }
 
+  @Test
+  fun `records a moved source handle without calling the book changed`() {
+    withStore("identity-only") { fixture ->
+      fixture.scan(candidates = listOf(candidate("Series/001.cbz", "ino-1")))
+      fixture.clearTasks()
+
+      // A local identity is derived from the inode and a remote one is whatever the source hands
+      // back; either can differ while the file itself is untouched. Remounting the library's
+      // filesystem was enough to move 111,745 of 120,723 handles at once.
+      val result = fixture.scan(candidates = listOf(candidate("Series/001.cbz", "ino-2")))
+
+      assertEquals(0L, result.changedBooks)
+      assertEquals(0L, fixture.taskCount(), "an untouched file must not be re-analyzed")
+      assertEquals(
+        listOf("ino-2"),
+        fixture.books.findAllByLibraryId(LIBRARY_ID).map { it.sourceIdentity },
+        "the new handle still has to be recorded, or move detection compares against a stale one",
+      )
+    }
+  }
+
+  @Test
+  fun `discards the staging rows of a scan that never finished`() {
+    withStore("abandoned-staging") { fixture ->
+      val abandoned = fixture.store.begin(LIBRARY_ID, false, 1L)
+      fixture.store.stage(abandoned, listOf(candidate("Series/001.cbz", "ino-1")))
+
+      fixture.store.begin(LIBRARY_ID, false, 2L)
+
+      assertTrue(fixture.candidateTableIsEmpty(), "the dead session's candidates must not survive")
+      assertEquals("ABORTED", fixture.sessionStatus(abandoned))
+    }
+  }
+
   private fun withStore(
     databaseName: String,
     block: (Fixture) -> Unit,
@@ -512,6 +546,13 @@ class JooqCatalogReconciliationStoreTest {
     fun clearTasks() {
       database.dsl.execute("DELETE FROM task")
     }
+
+    fun sessionStatus(sessionId: ScanSessionId): String? =
+      database.dsl
+        .fetchOne(
+          "SELECT status FROM catalog_scan_session WHERE id = ?",
+          sessionId.value,
+        )?.get("status", String::class.java)
 
     fun candidateTableIsEmpty(): Boolean =
       database.dsl.fetchOne("SELECT count(*) FROM catalog_scan_candidate")

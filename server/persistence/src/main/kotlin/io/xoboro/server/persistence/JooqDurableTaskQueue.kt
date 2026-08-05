@@ -319,6 +319,44 @@ class JooqDurableTaskQueue(
     ) == 1
   }
 
+  override fun release(
+    taskId: String,
+    leaseToken: String,
+    reason: String,
+    retryAtMillis: Long,
+    nowMillis: Long,
+  ): Boolean {
+    require(taskId.isNotBlank()) { "Task ID must not be blank" }
+    require(leaseToken.isNotBlank()) { "Lease token must not be blank" }
+    require(reason.isNotBlank()) { "Task release reason must not be blank" }
+    require(nowMillis >= 0) { "Current timestamp must not be negative" }
+    require(retryAtMillis >= nowMillis) {
+      "Task retry timestamp must not precede the current timestamp"
+    }
+    // `claimNext` charged the attempt on the way in, so handing it back is a decrement rather than a
+    // no-op. Clamped at zero so a row that somehow arrives here uncharged cannot go negative and
+    // violate the table's non-negative check.
+    return database.dsl.execute(
+      """
+      UPDATE task SET
+        state = 'PENDING',
+        attempt_count = CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END,
+        available_at_ms = ?,
+        lease_owner = NULL,
+        lease_token = NULL,
+        lease_expires_at_ms = NULL,
+        last_error = ?,
+        updated_at_ms = ?
+      WHERE id = ? AND state = 'RUNNING' AND lease_token = ?
+      """.trimIndent(),
+      retryAtMillis,
+      reason,
+      nowMillis,
+      taskId,
+      leaseToken,
+    ) == 1
+  }
+
   override fun counts(): TaskCounts {
     val counts =
       database.dsl

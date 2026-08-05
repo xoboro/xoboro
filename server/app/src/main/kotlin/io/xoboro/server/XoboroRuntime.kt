@@ -93,6 +93,7 @@ import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqArtworkRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
+import io.xoboro.server.persistence.JooqBookMetadataAggregationRepository
 import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
@@ -170,6 +171,7 @@ import io.xoboro.server.tasks.RemoveDuplicatePagesTaskHandler
 import io.xoboro.server.tasks.ScanLibraryTaskEmitter
 import io.xoboro.server.tasks.ScanLibraryTaskHandler
 import io.xoboro.server.tasks.ScheduledLeaseHeartbeat
+import io.xoboro.server.tasks.SeriesAggregationScheduler
 import io.xoboro.server.tasks.TaskWorkerPolicy
 import io.xoboro.server.tasks.TaskWorkerPool
 import io.xoboro.server.tasks.TaskWorkerPoolPolicy
@@ -186,6 +188,7 @@ class XoboroRuntime private constructor(
   private val database: XoboroDatabase,
   private val libraryScanScheduler: LibraryScanScheduler,
   private val activityRetentionScheduler: ActivityRetentionScheduler,
+  private val seriesAggregationScheduler: SeriesAggregationScheduler,
   private val heartbeat: ScheduledLeaseHeartbeat,
   private val workerPool: TaskWorkerPool,
   private val oauthHttpClient: HttpClient,
@@ -254,6 +257,7 @@ class XoboroRuntime private constructor(
     listOf<AutoCloseable>(
       libraryScanScheduler,
       activityRetentionScheduler,
+      seriesAggregationScheduler,
       workerPool,
       heartbeat,
       oauthHttpClient,
@@ -290,6 +294,7 @@ class XoboroRuntime private constructor(
       var workerPool: TaskWorkerPool? = null
       var libraryScanScheduler: LibraryScanScheduler? = null
       var activityRetentionScheduler: ActivityRetentionScheduler? = null
+      var seriesAggregationScheduler: SeriesAggregationScheduler? = null
       var oauthHttpClient: HttpClient? = null
       var sseEventHub: KomgaSseEventHub? = null
       var nativeEventHub: XoboroNativeEventHub? = null
@@ -628,6 +633,18 @@ class XoboroRuntime private constructor(
             },
           ).also(ActivityRetentionScheduler::start)
         activityRetentionScheduler = createdActivityRetentionScheduler
+        val createdSeriesAggregationScheduler =
+          SeriesAggregationScheduler(
+            sweepOnce = JooqBookMetadataAggregationRepository(database)::refreshSomeDirty,
+            scheduler =
+              ExecutorFixedRateTaskScheduler(
+                shutdownTimeoutMillis = config.shutdownTimeoutMillis,
+                onFailure = { failure ->
+                  logger.log(Level.SEVERE, "Series aggregation sweep failed", failure)
+                },
+              ),
+          ).also(SeriesAggregationScheduler::start)
+        seriesAggregationScheduler = createdSeriesAggregationScheduler
         val libraryMaintenanceQueue =
           object : LibraryMaintenanceQueue {
             override fun scanLibrary(id: LibraryId) {
@@ -1045,6 +1062,7 @@ class XoboroRuntime private constructor(
           database = database,
           libraryScanScheduler = createdLibraryScanScheduler,
           activityRetentionScheduler = createdActivityRetentionScheduler,
+          seriesAggregationScheduler = createdSeriesAggregationScheduler,
           heartbeat = createdHeartbeat,
           workerPool = createdWorkerPool,
           oauthHttpClient = createdOAuthHttpClient,
@@ -1108,6 +1126,7 @@ class XoboroRuntime private constructor(
       } catch (failure: Throwable) {
         runCatching { libraryScanScheduler?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
         runCatching { activityRetentionScheduler?.close() }
+        runCatching { seriesAggregationScheduler?.close() }
           .exceptionOrNull()
           ?.let(failure::addSuppressed)
         runCatching { workerPool?.close() }.exceptionOrNull()?.let(failure::addSuppressed)
