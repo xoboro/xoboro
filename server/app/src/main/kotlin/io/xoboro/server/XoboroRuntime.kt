@@ -969,10 +969,14 @@ class XoboroRuntime private constructor(
                 // inline, where a busy task store failed the request half-way through. Registered
                 // here and nowhere else: an unregistered type leaves its row PENDING forever.
                 AnalyzeLibraryTaskHandler(
-                  analyzeLibrary = { analyzeBookTaskEmitter.analyzeLibrary(it) },
+                  analyzeLibrary = { id, cursor ->
+                    analyzeBookTaskEmitter.analyzeLibrary(id, from = cursor)
+                  },
                 ),
                 RefreshLibraryMetadataTaskHandler(
-                  refreshLibrary = { refreshMetadataTaskEmitter.refreshLibrary(it) },
+                  refreshLibrary = { id, cursor ->
+                    refreshMetadataTaskEmitter.refreshLibrary(id, from = cursor)
+                  },
                 ),
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),
                 RefreshBookMetadataTaskHandler(

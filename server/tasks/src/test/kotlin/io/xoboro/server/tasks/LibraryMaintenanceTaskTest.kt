@@ -94,7 +94,7 @@ class LibraryMaintenanceTaskTest {
         )
       val fanned = mutableListOf<LibraryId>()
 
-      RefreshLibraryMetadataTaskHandler(refreshLibrary = { fanned += it }).handle(
+      RefreshLibraryMetadataTaskHandler(refreshLibrary = { id, _ -> fanned += id }).handle(
         DurableTask(
           id = RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID),
           type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
@@ -162,6 +162,234 @@ class LibraryMaintenanceTaskTest {
         ),
         recorder.types,
       )
+    }
+  }
+
+  @Test
+  fun `a fan-out chunk hands the rest of the library to a successor`() {
+    // An unbounded pass cannot be relied on to reach its own end: one busy enqueue throws, the whole
+    // task is deferred, and the re-run starts over - re-queuing every book it had already finished,
+    // because a completed task deletes its row. A library large enough to meet contention partway
+    // every time never finishes at all.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out-chunked.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val queue = JooqDurableTaskQueue(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+          chunkSize = 1,
+        )
+
+      // One item of budget, spent on the series. The book is left to a successor.
+      assertEquals(1, metadata.refreshLibrary(LIBRARY_ID))
+      assertEquals(
+        mapOf(
+          RefreshSeriesMetadataTaskHandler.TASK_TYPE to 1,
+          RefreshLibraryMetadataTaskHandler.TASK_TYPE to 1,
+        ),
+        queue.countsByType(),
+      )
+
+      // The successor carries its cursor in its id as well as its payload, because an `enqueue`
+      // collision on a still-RUNNING row keeps the old payload and would silently drop it.
+      val successorId =
+        RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID) +
+          RefreshMetadataTaskEmitter.RESUME_SEPARATOR +
+          LibraryFanOutCursor.BOOKS_START.encode()
+      assertEquals(
+        listOf(successorId, "REFRESH_SERIES_METADATA_series-1"),
+        drainedIds(queue),
+      )
+
+      // The handler hands that cursor back to the emitter rather than starting over.
+      val resumed = mutableListOf<Pair<LibraryId, LibraryFanOutCursor>>()
+      RefreshLibraryMetadataTaskHandler(
+        refreshLibrary = { id, cursor -> resumed += id to cursor },
+      ).handle(
+        DurableTask(
+          id = successorId,
+          type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+          payloadJson =
+            """{"libraryId":"${LIBRARY_ID.value}",""" +
+              """"cursor":"${LibraryFanOutCursor.BOOKS_START.encode()}"}""",
+          availableAtMillis = 100,
+        ),
+      )
+      assertEquals(listOf(LIBRARY_ID to LibraryFanOutCursor.BOOKS_START), resumed)
+
+      // Resuming queues the book and, crucially, not the series again - the series task it already
+      // completed left no row behind to deduplicate against, so an unchunked restart would redo it.
+      assertEquals(1, metadata.refreshLibrary(LIBRARY_ID, from = LibraryFanOutCursor.BOOKS_START))
+      assertEquals(
+        listOf("REFRESH_BOOK_METADATA_book-active"),
+        drainedIds(queue),
+      )
+    }
+  }
+
+  @Test
+  fun `an analysis fan-out chunk hands the rest of the library to a successor`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("analysis-chunked.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      JooqBookRepository(database).insert(bookFixture("book-second", deletedAtMillis = null))
+      val queue = JooqDurableTaskQueue(database)
+      val analysis =
+        AnalyzeBookTaskEmitter(
+          books = JooqBookRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+          chunkSize = 1,
+        )
+
+      assertEquals(1, analysis.analyzeLibrary(LIBRARY_ID))
+      assertEquals(
+        mapOf(
+          AnalyzeBookTaskHandler.TASK_TYPE to 1,
+          AnalyzeLibraryTaskHandler.TASK_TYPE to 1,
+        ),
+        queue.countsByType(),
+      )
+
+      // Ordered by id, so the chunk took book-active and the cursor points past it. book-deleted is
+      // filtered out before the ordering, not counted against the budget.
+      val cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.BOOKS, "book-active")
+      val resumed = mutableListOf<LibraryFanOutCursor>()
+      AnalyzeLibraryTaskHandler(analyzeLibrary = { _, from -> resumed += from }).handle(
+        DurableTask(
+          id = AnalyzeLibraryTaskHandler.taskId(LIBRARY_ID) +
+            RefreshMetadataTaskEmitter.RESUME_SEPARATOR + cursor.encode(),
+          type = AnalyzeLibraryTaskHandler.TASK_TYPE,
+          payloadJson =
+            """{"libraryId":"${LIBRARY_ID.value}","cursor":"${cursor.encode()}"}""",
+          availableAtMillis = 100,
+        ),
+      )
+      assertEquals(listOf(cursor), resumed)
+
+      // Resuming queues book-second and nothing else, and chains no further successor because the
+      // second chunk reached the end of the library.
+      assertEquals(1, analysis.analyzeLibrary(LIBRARY_ID, from = cursor))
+      assertEquals(
+        mapOf(
+          AnalyzeBookTaskHandler.TASK_TYPE to 2,
+          AnalyzeLibraryTaskHandler.TASK_TYPE to 1,
+        ),
+        queue.countsByType(),
+      )
+      assertEquals(
+        listOf(
+          "ANALYZE_BOOK_book-active",
+          "ANALYZE_BOOK_book-second",
+          AnalyzeLibraryTaskHandler.taskId(LIBRARY_ID) +
+            RefreshMetadataTaskEmitter.RESUME_SEPARATOR + cursor.encode(),
+        ),
+        drainedIds(queue),
+      )
+    }
+  }
+
+  @Test
+  fun `a fan-out chunk that runs out mid-series resumes inside the series stage`() {
+    // Distinct from the case above, which exhausts its budget exactly as the series stage ends and so
+    // resumes at the start of the books stage. Here the budget runs out with series still to do, and
+    // the cursor has to name the series to carry on after - not the stage boundary.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out-mid-series.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      JooqSeriesRepository(database).insert(
+        Series(
+          id = SeriesId("series-2"),
+          libraryId = LIBRARY_ID,
+          name = "Second synthetic series",
+          relativePath = "series-2",
+          sourceItemId = "file:///synthetic/series-2",
+          fileModifiedAtMillis = 1,
+          bookCount = 0,
+          createdAtMillis = 1,
+        ),
+      )
+      val queue = JooqDurableTaskQueue(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          chunkSize = 1,
+          currentTimeMillis = { 100 },
+        )
+
+      assertEquals(1, metadata.refreshLibrary(LIBRARY_ID))
+      val successorId =
+        RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID) +
+          RefreshMetadataTaskEmitter.RESUME_SEPARATOR +
+          LibraryFanOutCursor(LibraryFanOutCursor.Stage.SERIES, "series-1").encode()
+      assertEquals(
+        listOf(successorId, "REFRESH_SERIES_METADATA_series-1"),
+        drainedIds(queue),
+      )
+
+      // Carrying on from there queues series-2 and then, budget spent again, the next successor.
+      assertEquals(
+        1,
+        metadata.refreshLibrary(
+          LIBRARY_ID,
+          from = LibraryFanOutCursor(LibraryFanOutCursor.Stage.SERIES, "series-1"),
+        ),
+      )
+      assertEquals(
+        listOf(
+          RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID) +
+            RefreshMetadataTaskEmitter.RESUME_SEPARATOR +
+            LibraryFanOutCursor.BOOKS_START.encode(),
+          "REFRESH_SERIES_METADATA_series-2",
+        ),
+        drainedIds(queue),
+      )
+    }
+  }
+
+  @Test
+  fun `a fan-out with no remainder chains no successor`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("fan-out-whole.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val queue = JooqDurableTaskQueue(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          currentTimeMillis = { 100 },
+        )
+
+      assertEquals(2, metadata.refreshLibrary(LIBRARY_ID))
+      assertFalse(RefreshLibraryMetadataTaskHandler.TASK_TYPE in queue.countsByType())
+    }
+  }
+
+  /**
+   * Drains the queue, answering the ids it handed out in order.
+   *
+   * Claim-and-complete rather than a direct query, because this module deliberately does not depend
+   * on persistence's jOOQ context - only on the queue interface.
+   */
+  private fun drainedIds(queue: JooqDurableTaskQueue): List<String> {
+    val ids = mutableListOf<String>()
+    while (true) {
+      val claimed =
+        queue.claimNext(
+          workerId = "worker-drain",
+          leaseToken = "lease-drain-${ids.size}",
+          nowMillis = 100,
+          leaseDurationMillis = 1_000,
+        ) ?: return ids
+      ids += claimed.task.id
+      assertTrue(queue.complete(claimed.task.id, "lease-drain-${ids.size - 1}"))
     }
   }
 
