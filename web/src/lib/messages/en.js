@@ -2,6 +2,11 @@
 export default {
   common: {
     loading: 'Loading…',
+    paging: {
+      summary: '{total} total · page {page} of {pages}',
+      previous: 'Previous page',
+      next: 'Next page',
+    },
     retry: 'Try again',
     cancel: 'Cancel',
     close: 'Close',

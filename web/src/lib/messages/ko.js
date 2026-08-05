@@ -8,6 +8,11 @@
 export default {
   common: {
     loading: '불러오는 중…',
+    paging: {
+      summary: '{total}개 · {pages}쪽 중 {page}쪽',
+      previous: '이전 쪽',
+      next: '다음 쪽',
+    },
     retry: '다시 시도',
     cancel: '취소',
     close: '닫기',

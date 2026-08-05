@@ -26,15 +26,36 @@
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Logo from '../components/Logo.svelte'
   import MediaShelf from '../components/MediaShelf.svelte'
+  import Pager from '../components/Pager.svelte'
   import StreamIndicator from '../components/StreamIndicator.svelte'
 
   const streamStore = eventHub.status
+
+  /**
+   * How many series one page of the grid carries.
+   *
+   * Unchanged from the single unpaged request this replaced, so the grid looks the same
+   * and only gains the way out of it.
+   */
+  const SERIES_PAGE_SIZE = 100
 
   let keepReading = $state([])
   let onDeck = $state([])
   let recent = $state([])
   let updated = $state([])
   let allSeries = $state(null)
+  /**
+   * Which page of the whole catalog the grid is showing.
+   *
+   * The grid asked for one page of 100 and called it "all series", so a library of 3,339
+   * showed its first 100 and offered no way to the rest - while `listSeries` has taken a
+   * `page` since it existed. Kept here rather than in the URL because the shelves above it
+   * are not paged, so a link to "the home page, page 7" would restore only half of what
+   * the reader was looking at.
+   */
+  let seriesPage = $state(0)
+  /** True while a page is in flight, so the pager cannot queue a second request. */
+  let seriesBusy = $state(false)
   let error = $state(null)
   /** How many of the four shelves failed to load. Zero renders nothing. */
   let shelvesFailed = $state(0)
@@ -80,12 +101,26 @@
     shelvesFailed = [keep, deck, added, changed].filter((r) => r.status === 'rejected').length
   }
 
-  async function loadSeries() {
+  async function loadSeries(page = seriesPage) {
+    seriesBusy = true
     try {
-      allSeries = await listSeries({ size: 100, libraryId })
+      const answer = await listSeries({ page, size: SERIES_PAGE_SIZE, libraryId })
+      // A page can fall off the end while the reader is on it: series get removed, and a
+      // library event refreshes in place. Landing on an empty grid would read as an empty
+      // library, so the request is retried against the last page that still exists.
+      const lastPage = Math.max(0, (answer.totalPages ?? 1) - 1)
+      if (page > lastPage && (answer.items?.length ?? 0) === 0) {
+        seriesPage = lastPage
+        allSeries = await listSeries({ page: lastPage, size: SERIES_PAGE_SIZE, libraryId })
+      } else {
+        seriesPage = page
+        allSeries = answer
+      }
       error = null
     } catch (caught) {
       error = caught
+    } finally {
+      seriesBusy = false
     }
   }
 
@@ -95,6 +130,9 @@
 
   function chooseLibrary(next) {
     libraryId = next
+    // A different library is a different set, so the page number the reader was on means
+    // nothing in it - page 7 of one library is often past the end of another.
+    seriesPage = 0
     writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
     refresh()
   }
@@ -205,6 +243,13 @@
       <li class="empty">{$_('reader.noSeries')}</li>
     {/if}
   </ul>
+  <Pager
+    page={allSeries}
+    busy={seriesBusy}
+    label={$_('reader.allSeries')}
+    testIdPrefix="all-series-page"
+    onpage={(next) => loadSeries(next)}
+  />
 {:else if !error}
   <p class="waiting" role="status">{$_('common.loading')}</p>
 {/if}
