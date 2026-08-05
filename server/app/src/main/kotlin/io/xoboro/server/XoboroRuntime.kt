@@ -562,17 +562,23 @@ class XoboroRuntime private constructor(
             feedProvider = HttpAnnouncementFeedProvider.komgaCompatible(),
             reads = JooqAnnouncementReadRepository(database),
           )
+        val reconciliationStore =
+          JooqCatalogReconciliationStore(
+            database = database,
+            eventPublisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
+          )
+        // Here and nowhere else. No scan is running yet, so every staging session is abandoned by
+        // definition - the only moment that inference holds. One library had accumulated eight of
+        // them holding 612,314 candidate rows, each widening the indexes the next scan searches.
+        reconciliationStore.discardAbandonedSessions(System.currentTimeMillis()).takeIf { it > 0 }
+          ?.let { logger.info("Retired $it scan session(s) left staging by an earlier run") }
         val catalogScanner =
           CatalogScanner(
             inventories = listOf(LocalSourceInventory(), WebDavSourceInventory()),
-            reconciliationStore =
-              JooqCatalogReconciliationStore(
-                database = database,
-                eventPublisher = { event ->
-                  sseBridge.publish(event)
-                  nativeEvents.publish(XoboroNativeEventBridge.map(event))
-                },
-              ),
+            reconciliationStore = reconciliationStore,
             currentTimeMillis = System::currentTimeMillis,
           )
         val libraryAvailabilityLifecycle =
