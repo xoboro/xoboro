@@ -1027,6 +1027,7 @@ class XoboroRuntime private constructor(
             heartbeat = createdHeartbeat,
             currentTimeMillis = System::currentTimeMillis,
             leaseTokenFactory = { UUID.randomUUID().toString() },
+            isStoreBusy = ::isStoreContention,
             policy = TaskWorkerPolicy(leaseDurationMillis = config.taskLeaseMillis),
           )
         val createdWorkerPool =

@@ -67,6 +67,16 @@ class DurableTaskWorker(
   private val currentTimeMillis: () -> Long,
   private val leaseTokenFactory: () -> String,
   private val policy: TaskWorkerPolicy = TaskWorkerPolicy(),
+  /**
+   * Recognises store contention that reaches the worker as a driver failure rather than as a
+   * [TaskStoreUnavailableException].
+   *
+   * A handler that writes through the store directly - a scan staging its candidates, say - reports a
+   * busy database as whatever the driver raised, and only the persistence module can read a driver
+   * result code. Without this, that failure spent one of the task's attempts: a scan competing with a
+   * metadata fan-out for the write lock dead-lettered at 3 of 3 with nothing wrong with it.
+   */
+  private val isStoreBusy: (Throwable) -> Boolean = { false },
 ) : TaskRunner {
   private val handlersByType = handlers.associateBy(TaskHandler::taskType)
 
@@ -218,7 +228,7 @@ class DurableTaskWorker(
     var current: Throwable? = this
     val seen = mutableSetOf<Throwable>()
     while (current != null && seen.add(current)) {
-      if (current is TaskStoreUnavailableException) return true
+      if (current is TaskStoreUnavailableException || isStoreBusy(current)) return true
       current = current.cause
     }
     return false
