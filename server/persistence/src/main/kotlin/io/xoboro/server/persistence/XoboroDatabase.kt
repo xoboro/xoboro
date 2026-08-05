@@ -23,6 +23,28 @@ data class DatabaseConfig(
     require(maximumPoolSize > 0) { "Maximum pool size must be positive" }
     require(busyTimeoutMillis >= 0) { "Busy timeout must not be negative" }
   }
+
+  companion object {
+    /**
+     * Connections for [workerCount] task workers and the requests served alongside them.
+     *
+     * A worker holds its connection for the length of its task, so a pool sized near the worker count
+     * leaves requests waiting on work that may take minutes. That wait ends in Hikari giving up, and
+     * a task told the pool was empty is indistinguishable from a task that failed unless something
+     * classifies it - which is how contention alone dead-lettered a metadata refresh.
+     *
+     * WAL admits any number of concurrent readers, so headroom genuinely buys read concurrency; it
+     * buys no write throughput, because SQLite still admits one writer. The cap keeps a deployment
+     * that raises its worker count from opening connections without limit.
+     */
+    fun poolSizeForWorkers(workerCount: Int): Int {
+      require(workerCount > 0) { "Worker count must be positive" }
+      return (workerCount + READ_HEADROOM_CONNECTIONS).coerceAtMost(MAXIMUM_POOL_SIZE)
+    }
+
+    private const val READ_HEADROOM_CONNECTIONS: Int = 8
+    private const val MAXIMUM_POOL_SIZE: Int = 16
+  }
 }
 
 class XoboroDatabase private constructor(

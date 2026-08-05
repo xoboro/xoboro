@@ -1,5 +1,6 @@
 package io.xoboro.server.persistence
 
+import java.sql.SQLTransientException
 import org.jooq.exception.DataAccessException
 import org.sqlite.SQLiteErrorCode
 import org.sqlite.SQLiteException
@@ -14,11 +15,22 @@ import org.sqlite.SQLiteException
  * than let it become a `500`.
  */
 internal fun Throwable.isSqliteContention(): Boolean =
-  generateSequence(this) { it.cause }
-    .filterIsInstance<SQLiteException>()
-    .any {
-      it.resultCode == SQLiteErrorCode.SQLITE_BUSY || it.resultCode == SQLiteErrorCode.SQLITE_LOCKED
-    }
+  generateSequence(this) { it.cause }.any(::isTransientStoreFailure)
+
+private fun isTransientStoreFailure(failure: Throwable): Boolean =
+  when (failure) {
+    is SQLiteException ->
+      failure.resultCode == SQLiteErrorCode.SQLITE_BUSY ||
+        failure.resultCode == SQLiteErrorCode.SQLITE_LOCKED
+    // The connection pool running dry is the same condition one layer up, and it is reached the same
+    // way: a scan holding the write lock keeps its worker's connection, and the pool is sized close
+    // to the worker count. JDBC defines this type as an operation that may succeed when retried,
+    // which is exactly the judgement callers here want. Matched on the type rather than on the
+    // message, which is neither localised nor stable. Left unrecognised, this dead-lettered a
+    // REFRESH_LIBRARY_METADATA task that had nothing wrong with it.
+    is SQLTransientException -> true
+    else -> false
+  }
 
 internal fun DataAccessException.isDatabaseLocked(): Boolean = isSqliteContention()
 
