@@ -30,55 +30,59 @@ class JooqCatalogReconciliationStore(
   ): ScanSessionId {
     require(startedAtMillis >= 0) { "Scan start timestamp must not be negative" }
     val sessionId = ScanSessionId(sessionIdFactory())
-    database.transaction { transaction ->
-      transaction.discardAbandonedSessions(libraryId, startedAtMillis)
-      transaction.execute(
-        """
-        INSERT INTO catalog_scan_session
-          (id, library_id, deep, status, started_at_ms)
-        VALUES (?, ?, ?, 'STAGING', ?)
-        """.trimIndent(),
-        sessionId.value,
-        libraryId.value,
-        deep.toSqliteInt(),
-        startedAtMillis,
-      )
-    }
+    database.dsl.execute(
+      """
+      INSERT INTO catalog_scan_session
+        (id, library_id, deep, status, started_at_ms)
+      VALUES (?, ?, ?, 'STAGING', ?)
+      """.trimIndent(),
+      sessionId.value,
+      libraryId.value,
+      deep.toSqliteInt(),
+      startedAtMillis,
+    )
     return sessionId
   }
 
   /**
-   * Retires the staging rows of a scan that never reached [complete] or [abort].
+   * Retires the staging rows of every scan that never reached [complete] or [abort].
    *
    * Both of those drop their own candidates, so the only way a session is left staging is the process
    * ending mid-scan. Nothing collected them afterwards, and one library had accumulated eight
-   * abandoned sessions holding 612,314 candidate rows — every one of them widening the indexes the
-   * next scan searches. A scan starting for this library proves any earlier staging session for it is
-   * over, because only one scan per library runs at a time.
+   * abandoned sessions holding 612,314 candidate rows - every one of them widening the indexes the
+   * next scan searches.
+   *
+   * **Call this at startup only, and never from [begin].** No scan is running yet at startup, so
+   * every staging session found there is abandoned by definition - which is the only moment that
+   * inference is sound. Doing it from [begin] instead rested on "only one scan per library runs at a
+   * time", and that was not true: scan tasks carried no exclusion group at all until they were given
+   * one, and even with it a reconciliation transaction outlasting its lease lets the task be
+   * re-claimed while the first pass is still committing (see the lease-expiry issue). In both cases
+   * two live scans of one library would delete each other's staged candidates, turning a redundant
+   * scan into a destructive one.
+   *
+   * Answers how many sessions it retired, so a caller can log a restart that interrupted work.
    */
-  private fun DSLContext.discardAbandonedSessions(
-    libraryId: LibraryId,
-    nowMillis: Long,
-  ) {
-    execute(
-      """
-      DELETE FROM catalog_scan_candidate
-      WHERE session_id IN (
-        SELECT id FROM catalog_scan_session
-        WHERE library_id = ? AND status = 'STAGING'
+  fun discardAbandonedSessions(nowMillis: Long): Int {
+    require(nowMillis >= 0) { "Sweep timestamp must not be negative" }
+    return database.transaction { transaction ->
+      transaction.execute(
+        """
+        DELETE FROM catalog_scan_candidate
+        WHERE session_id IN (
+          SELECT id FROM catalog_scan_session WHERE status = 'STAGING'
+        )
+        """.trimIndent(),
       )
-      """.trimIndent(),
-      libraryId.value,
-    )
-    execute(
-      """
-      UPDATE catalog_scan_session
-      SET status = 'ABORTED', completed_at_ms = ?
-      WHERE library_id = ? AND status = 'STAGING'
-      """.trimIndent(),
-      nowMillis,
-      libraryId.value,
-    )
+      transaction.execute(
+        """
+        UPDATE catalog_scan_session
+        SET status = 'ABORTED', completed_at_ms = ?
+        WHERE status = 'STAGING'
+        """.trimIndent(),
+        nowMillis,
+      )
+    }
   }
 
   override fun stage(

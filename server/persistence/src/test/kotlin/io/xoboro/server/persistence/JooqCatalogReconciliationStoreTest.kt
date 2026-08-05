@@ -13,6 +13,7 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -459,14 +460,41 @@ class JooqCatalogReconciliationStoreTest {
 
   @Test
   fun `discards the staging rows of a scan that never finished`() {
+    // `complete` and `abort` both drop their own candidates, so a session is only left staging by the
+    // process ending mid-scan. One library had accumulated eight of them holding 612,314 candidate
+    // rows, each widening the indexes the next scan searches.
     withStore("abandoned-staging") { fixture ->
       val abandoned = fixture.store.begin(LIBRARY_ID, false, 1L)
       fixture.store.stage(abandoned, listOf(candidate("Series/001.cbz", "ino-1")))
 
-      fixture.store.begin(LIBRARY_ID, false, 2L)
+      assertEquals(1, fixture.store.discardAbandonedSessions(2L))
 
       assertTrue(fixture.candidateTableIsEmpty(), "the dead session's candidates must not survive")
       assertEquals("ABORTED", fixture.sessionStatus(abandoned))
+    }
+  }
+
+  @Test
+  fun `starting a scan leaves another live session's staged rows alone`() {
+    // The sweep used to run from `begin`, resting on "only one scan per library runs at a time". That
+    // was not true - scan tasks carried no exclusion group at all until they were given one, and even
+    // with it a reconciliation transaction outlasting its lease lets the task be re-claimed while the
+    // first pass is still committing. Either way two live scans of one library deleted each other's
+    // staged candidates, which turns a merely redundant scan into a destructive one. Only startup can
+    // soundly conclude that a staging session is abandoned, because only then is no scan running.
+    withStore("concurrent-staging") { fixture ->
+      val first = fixture.store.begin(LIBRARY_ID, false, 1L)
+      fixture.store.stage(first, listOf(candidate("Series/001.cbz", "ino-1")))
+
+      val second = fixture.store.begin(LIBRARY_ID, false, 2L)
+
+      assertFalse(fixture.candidateTableIsEmpty(), "a live session's candidates must survive")
+      assertEquals("STAGING", fixture.sessionStatus(first))
+      assertEquals("STAGING", fixture.sessionStatus(second))
+
+      // And the first session can still finish, which is what the deletion took away.
+      fixture.store.stage(second, listOf(candidate("Series/002.cbz", "ino-2")))
+      assertEquals(1, fixture.store.complete(first, 0, 0, 3L).addedBooks)
     }
   }
 
