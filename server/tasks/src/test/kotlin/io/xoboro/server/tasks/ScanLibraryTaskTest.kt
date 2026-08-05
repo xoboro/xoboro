@@ -73,7 +73,92 @@ class ScanLibraryTaskTest {
       assertEquals(ScanLibraryTaskHandler.TASK_TYPE, claim.task.type)
       assertEquals("""{"libraryId":"library-1","deep":true}""", claim.task.payloadJson)
       assertEquals(TaskPriority.HIGHEST, claim.task.priority)
-      assertEquals(null, claim.task.groupId)
+      // A library's scans and its metadata fan-out share this group, so only one of them runs at a
+      // time. Ungrouped, two scans of one library could run at once - and `begin` retires every
+      // other STAGING session for the library, so each would discard the other's staged candidates.
+      assertEquals(LIBRARY_ID.value, claim.task.groupId)
+    }
+  }
+
+  @Test
+  fun `a scan requested while one is running queues another pass`() {
+    // A scan reads the source once, near its start, so a request arriving after that read cannot be
+    // satisfied by the run in flight - the change it is asking about has already been missed.
+    // Collapsing onto the running id answered 202 and did nothing: delete a file, press Scan, and
+    // the catalog kept serving the file. It also made XoboroLocalLibraryAcceptanceTest's
+    // delete-then-rescan case fail intermittently, which is how this surfaced.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("rescan.sqlite"))).use { database ->
+      val queue = JooqDurableTaskQueue(database)
+      val emitter = ScanLibraryTaskEmitter(queue, currentTimeMillis = { 123 })
+
+      assertTrue(emitter.scanLibrary(LIBRARY_ID))
+      val running =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-1",
+            leaseToken = "lease-1",
+            nowMillis = 123,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+      assertEquals(ScanLibraryTaskEmitter.taskId(LIBRARY_ID, deep = false), running.task.id)
+
+      // The request that lands mid-scan earns a second pass rather than being swallowed.
+      assertTrue(emitter.scanLibrary(LIBRARY_ID))
+      assertEquals(TaskCounts(pending = 1, running = 1, dead = 0), queue.counts())
+
+      // Further requests during the same scan collapse onto that one waiting pass: several people
+      // pressing Scan mean one more scan, not one each. They report `true` because they do reach the
+      // store and the pass they asked for is queued - it is the same row, which is the point.
+      assertTrue(emitter.scanLibrary(LIBRARY_ID))
+      assertTrue(emitter.scanLibrary(LIBRARY_ID))
+      assertEquals(TaskCounts(pending = 1, running = 1, dead = 0), queue.counts())
+
+      // The waiting pass cannot start until the running one is finished, because they share the
+      // library's exclusion group.
+      assertEquals(
+        null,
+        queue.claimNext(
+          workerId = "worker-2",
+          leaseToken = "lease-2",
+          nowMillis = 123,
+          leaseDurationMillis = 1_000,
+        ),
+      )
+      assertTrue(queue.complete(running.task.id, "lease-1"))
+      val followUp =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-2",
+            leaseToken = "lease-2",
+            nowMillis = 123,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+      assertEquals(
+        ScanLibraryTaskEmitter.taskId(LIBRARY_ID, deep = false) +
+          ScanLibraryTaskEmitter.FOLLOW_UP_SUFFIX,
+        followUp.task.id,
+      )
+      // Same payload, so the pass it performs is a full scan and not a variant of one.
+      assertEquals("""{"libraryId":"library-1","deep":false}""", followUp.task.payloadJson)
+
+      // And a request during *that* pass goes back to the plain id, so the two alternate instead of
+      // one of them becoming permanently unqueueable.
+      assertTrue(emitter.scanLibrary(LIBRARY_ID))
+      assertEquals(TaskCounts(pending = 1, running = 1, dead = 0), queue.counts())
+      assertTrue(queue.complete(followUp.task.id, "lease-2"))
+      assertEquals(
+        ScanLibraryTaskEmitter.taskId(LIBRARY_ID, deep = false),
+        requireNotNull(
+          queue.claimNext(
+            workerId = "worker-3",
+            leaseToken = "lease-3",
+            nowMillis = 123,
+            leaseDurationMillis = 1_000,
+          ),
+        ).task.id,
+      )
     }
   }
 
