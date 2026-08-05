@@ -5,6 +5,7 @@ import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.SeriesId
 import org.jooq.DSLContext
 import org.jooq.Record
+import org.jooq.exception.DataAccessException
 
 /**
  * Maintains the denormalized per-series view of book metadata.
@@ -16,7 +17,13 @@ import org.jooq.Record
  * connection has committed against the read snapshot it already took, and `busy_timeout` does not
  * wait for a mid-transaction lock upgrade the way it waits for a fresh transaction's first write.
  * Because the delete is the first statement, this is a fresh transaction's first write, so the busy
- * handler applies normally and there is nothing to retry around.
+ * handler applies normally.
+ *
+ * The busy handler applying is not the same as the write always succeeding, which this doc used to
+ * claim. `busy_timeout` still expires, and a library scan holds the write lock for minutes - far
+ * past any timeout worth configuring. [sweepOrNull] is where that outcome is absorbed, because
+ * every series read path sweeps before it reads and none of them may fail over a stale
+ * denormalized view.
  *
  * Claiming by deleting also means concurrent refreshers do not duplicate work: the write lock
  * serializes them, and whoever loses the race finds the rows already claimed and skips the rebuild
@@ -34,25 +41,7 @@ internal class JooqBookMetadataAggregationRepository(
 ) {
   fun refreshAllDirty() {
     while (true) {
-      val refreshed =
-        database.transaction { transaction ->
-          val ids =
-            transaction
-              .fetch(
-                """
-                DELETE FROM series_book_metadata_aggregation_dirty
-                WHERE series_id IN (
-                  SELECT series_id
-                  FROM series_book_metadata_aggregation_dirty
-                  ORDER BY series_id
-                  LIMIT $QUERY_BATCH_SIZE
-                )
-                RETURNING series_id
-                """.trimIndent(),
-              ).map { SeriesId(it.requiredString("series_id")) }
-          if (ids.isNotEmpty()) transaction.rebuild(ids.sortedBy { it.value })
-          ids.size
-        }
+      val refreshed = sweepOrNull { it.claimOldestDirty() } ?: return
       if (refreshed < QUERY_BATCH_SIZE) return
     }
   }
@@ -95,21 +84,60 @@ internal class JooqBookMetadataAggregationRepository(
 
   fun refreshDirty(requested: Collection<SeriesId>) {
     requested.chunked(QUERY_BATCH_SIZE).forEach { batch ->
-      database.transaction { transaction ->
-        val dirty =
-          transaction
-            .fetch(
-              """
-              DELETE FROM series_book_metadata_aggregation_dirty
-              WHERE series_id IN (${batch.placeholders()})
-              RETURNING series_id
-              """.trimIndent(),
-              *batch.bindings(),
-            ).map { SeriesId(it.requiredString("series_id")) }
-        if (dirty.isNotEmpty()) transaction.rebuild(dirty.sortedBy { it.value })
-      }
+      sweepOrNull { it.claimDirty(batch) } ?: return
     }
   }
+
+  /**
+   * Claims and rebuilds one batch, answering `null` when the write lock could not be taken.
+   *
+   * Every series read path opens by sweeping (see [JooqCatalogReadRepository.findSeries],
+   * [JooqCatalogReadRepository.findSeriesByIdOrNull] and
+   * [JooqCatalogReadRepository.countSeriesByFirstCharacter]), so letting contention escape from here
+   * fails the whole library listing with a `500` for as long as a scan holds the write lock -
+   * observed against a library of 145,105 archives. A scan holds it far past any `busy_timeout`
+   * worth configuring, so this is not a wait that can be tuned away.
+   *
+   * Deferring costs nothing but freshness. The claim is the transaction's first statement, so a
+   * failure rolls back with the dirty rows still in place, and the next caller or [refreshAllDirty]
+   * rebuilds them. Answering with a moment-stale denormalized view is the right trade against
+   * failing the request; not logging is deliberate, because a polled listing during a long scan
+   * would otherwise write this line on every read.
+   */
+  private fun sweepOrNull(claim: (DSLContext) -> List<SeriesId>): Int? =
+    try {
+      database.transaction { transaction ->
+        val ids = claim(transaction)
+        if (ids.isNotEmpty()) transaction.rebuild(ids.sortedBy { it.value })
+        ids.size
+      }
+    } catch (failure: DataAccessException) {
+      if (failure.isDatabaseLocked()) null else throw failure
+    }
+
+  private fun DSLContext.claimOldestDirty(): List<SeriesId> =
+    fetch(
+      """
+      DELETE FROM series_book_metadata_aggregation_dirty
+      WHERE series_id IN (
+        SELECT series_id
+        FROM series_book_metadata_aggregation_dirty
+        ORDER BY series_id
+        LIMIT $QUERY_BATCH_SIZE
+      )
+      RETURNING series_id
+      """.trimIndent(),
+    ).map { SeriesId(it.requiredString("series_id")) }
+
+  private fun DSLContext.claimDirty(batch: List<SeriesId>): List<SeriesId> =
+    fetch(
+      """
+      DELETE FROM series_book_metadata_aggregation_dirty
+      WHERE series_id IN (${batch.placeholders()})
+      RETURNING series_id
+      """.trimIndent(),
+      *batch.bindings(),
+    ).map { SeriesId(it.requiredString("series_id")) }
 
   private fun DSLContext.rebuild(ids: Collection<SeriesId>) {
     val batch = ids.toList()

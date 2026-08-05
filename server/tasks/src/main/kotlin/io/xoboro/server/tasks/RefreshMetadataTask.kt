@@ -3,7 +3,9 @@ package io.xoboro.server.tasks
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.MetadataRefreshLifecycle
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookRepository
@@ -23,6 +25,45 @@ class RefreshMetadataTaskEmitter(
   private val queue: DurableTaskQueue,
   private val currentTimeMillis: () -> Long,
 ) {
+  /**
+   * Queues one task that will fan [refreshLibrary] out from a worker.
+   *
+   * A library's fan-out is one enqueue per book plus one per series - 24,696 inserts for a library
+   * of 314 webtoon series, and 145,105 across the whole install. Doing that inline left a request
+   * holding the write lock for the duration and, worse, gave it nowhere to go when the lock was
+   * already held: the loop died mid-way with a `500` and a partially queued library, which is what
+   * left one library with no series metadata at all.
+   *
+   * One row is the whole request's work. Everything after it belongs to the worker, which already
+   * has the lease, backoff and dead-letter machinery a fan-out of that size needs.
+   */
+  fun refreshLibraryDeferred(
+    libraryId: LibraryId,
+    priority: Int = TaskPriority.HIGH,
+  ): TaskEnqueue {
+    val nowMillis = now()
+    return queue.enqueue(
+      task =
+        DurableTask(
+          id = libraryTaskId(libraryId),
+          type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+          payloadJson =
+            buildJsonObject {
+              put(RefreshLibraryMetadataTaskHandler.LIBRARY_ID_FIELD, libraryId.value)
+            }.toString(),
+          priority = priority,
+          groupId = libraryId.value,
+          availableAtMillis = nowMillis,
+          // A fan-out this long runs *while* a scan holds the write lock, so it expects to be
+          // deferred repeatedly before it gets through. The default budget of 3 would dead-letter
+          // it during an ordinary first scan; each retry re-enqueues idempotently and picks up
+          // where contention stopped it.
+          maxAttempts = FAN_OUT_MAX_ATTEMPTS,
+        ),
+      nowMillis = nowMillis,
+    )
+  }
+
   fun refreshLibrary(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
@@ -80,7 +121,7 @@ class RefreshMetadataTaskEmitter(
     priority: Int,
     nowMillis: Long,
   ): Boolean =
-    queue.enqueue(
+    queue.enqueueOrRetry(
       task =
         DurableTask(
           id = bookTaskId(book.id),
@@ -101,7 +142,7 @@ class RefreshMetadataTaskEmitter(
     priority: Int,
     nowMillis: Long,
   ): Boolean =
-    queue.enqueue(
+    queue.enqueueOrRetry(
       task =
         DurableTask(
           id = seriesTaskId(seriesId),
@@ -123,9 +164,39 @@ class RefreshMetadataTaskEmitter(
     }
 
   companion object {
+    internal const val FAN_OUT_MAX_ATTEMPTS: Int = 10
+
     fun bookTaskId(bookId: BookId): String = "REFRESH_BOOK_METADATA_${bookId.value}"
 
     fun seriesTaskId(seriesId: SeriesId): String = "REFRESH_SERIES_METADATA_${seriesId.value}"
+
+    fun libraryTaskId(libraryId: LibraryId): String =
+      "REFRESH_LIBRARY_METADATA_${libraryId.value}"
+  }
+}
+
+/**
+ * Fans a library's metadata refresh out into one task per book and per series.
+ *
+ * Runs the fan-out from a worker rather than from the request that asked for it, so contention on
+ * the task store defers the work instead of failing a request half-done. [refreshLibrary] is passed
+ * in rather than the emitter itself, matching [AnalyzeBookTaskHandler]'s shape and keeping this
+ * handler free of the repositories the fan-out reads.
+ */
+class RefreshLibraryMetadataTaskHandler(
+  private val refreshLibrary: (LibraryId) -> Unit,
+  private val json: Json = Json,
+) : TaskHandler {
+  override val taskType: String = TASK_TYPE
+
+  override fun handle(task: DurableTask) {
+    require(task.type == taskType) { "Unexpected task type: ${task.type}" }
+    refreshLibrary(LibraryId(task.requiredStringPayload(json, LIBRARY_ID_FIELD, TASK_TYPE)))
+  }
+
+  companion object {
+    const val TASK_TYPE: String = "REFRESH_LIBRARY_METADATA"
+    internal const val LIBRARY_ID_FIELD: String = "libraryId"
   }
 }
 

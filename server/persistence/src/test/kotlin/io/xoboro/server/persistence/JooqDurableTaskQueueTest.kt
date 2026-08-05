@@ -3,8 +3,10 @@ package io.xoboro.server.persistence
 import io.xoboro.core.application.ClaimedTask
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.TaskCounts
+import io.xoboro.core.application.TaskEnqueue
 import io.xoboro.core.application.TaskPriority
 import java.nio.file.Path
+import java.sql.DriverManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -121,8 +123,8 @@ class JooqDurableTaskQueueTest {
   @Test
   fun `deduplicates pending and running task IDs without mutating a running lease`() {
     withQueue("deduplicate") { queue, _ ->
-      assertTrue(queue.enqueue(taskFixture(payload = """{"version":1}"""), nowMillis = 1L))
-      assertTrue(
+      assertQueued(queue.enqueue(taskFixture(payload = """{"version":1}"""), nowMillis = 1L))
+      assertQueued(
         queue.enqueue(
           taskFixture(payload = """{"version":2}""", priority = TaskPriority.HIGHEST),
           nowMillis = 2L,
@@ -132,7 +134,7 @@ class JooqDurableTaskQueueTest {
       assertEquals("""{"version":2}""", claim?.task?.payloadJson)
       assertEquals(TaskPriority.HIGHEST, claim?.task?.priority)
 
-      assertFalse(
+      assertLeftAlone(
         queue.enqueue(
           taskFixture(payload = """{"version":3}"""),
           nowMillis = 11L,
@@ -400,7 +402,7 @@ class JooqDurableTaskQueueTest {
   @Test
   fun `revives a dead task on re-enqueue without resetting its attempts`() {
     withQueue("dead-revival") { queue, _ ->
-      assertTrue(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
+      assertQueued(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
       assertEquals(1, queue.claim("worker-1", "lease-1", nowMillis = 10L)?.attempt)
       assertTrue(
         queue.fail(
@@ -415,7 +417,7 @@ class JooqDurableTaskQueueTest {
 
       // Task ids are deterministic, so before the revival this enqueue was silently discarded
       // and the id could never be queued again.
-      assertTrue(
+      assertQueued(
         queue.enqueue(taskFixture(maxAttempts = 1, availableAtMillis = 30L), nowMillis = 30L),
       )
       assertEquals(TaskCounts(pending = 1L, running = 0L, dead = 0L), queue.counts())
@@ -429,7 +431,7 @@ class JooqDurableTaskQueueTest {
   @Test
   fun `charges a repeatedly dying task one attempt per re-enqueue`() {
     withQueue("dead-poison-pill") { queue, _ ->
-      assertTrue(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
+      assertQueued(queue.enqueue(taskFixture(maxAttempts = 1), nowMillis = 1L))
       var availableAt = 1L
       // A task that fails deterministically must cost one claim per external re-enqueue, and its
       // attempt count must keep climbing so "this has died repeatedly" stays visible.
@@ -447,7 +449,7 @@ class JooqDurableTaskQueueTest {
         )
         assertEquals(TaskCounts(pending = 0L, running = 0L, dead = 1L), queue.counts())
         availableAt += 10L
-        assertTrue(
+        assertQueued(
           queue.enqueue(
             taskFixture(maxAttempts = 1, availableAtMillis = availableAt),
             nowMillis = availableAt,
@@ -494,6 +496,41 @@ class JooqDurableTaskQueueTest {
         releaseWriteLock.countDown()
         executor.shutdownNow()
       }
+    }
+  }
+
+  @Test
+  fun `reports a locked store as unavailable rather than as a running collision`() {
+    // Found against a real library of 145,105 archives: a scan held the write lock while
+    // POST /api/v1/libraries/{id}/metadata/refresh fanned out one enqueue per book, and the
+    // escaping exception failed the request mid-way with a 500 and a partially queued library.
+    //
+    // UNAVAILABLE has to be distinct from ALREADY_RUNNING, because a caller reads them in opposite
+    // directions: a live lease means the work is in flight and can be forgotten about, while a busy
+    // store means nothing was written and the caller still owes it. Collapsing both into `false` is
+    // what let a fan-out count a dropped task as a skip.
+    //
+    // The lock is taken for real from a second connection rather than simulated, because what is
+    // under test is the driver's result code surviving jOOQ's wrapping.
+    val path = tempDirectory.resolve("locked-enqueue.sqlite")
+    XoboroDatabase.open(DatabaseConfig(path, busyTimeoutMillis = 50)).use { database ->
+      val queue = JooqDurableTaskQueue(database)
+
+      DriverManager.getConnection("jdbc:sqlite:${path.toAbsolutePath()}").use { holder ->
+        holder.autoCommit = false
+        holder.createStatement().use { it.executeUpdate("UPDATE task SET updated_at_ms = updated_at_ms") }
+        try {
+          assertEquals(TaskEnqueue.UNAVAILABLE, queue.enqueue(taskFixture(), nowMillis = 1L))
+        } finally {
+          holder.rollback()
+        }
+      }
+
+      // Nothing was queued while the lock was held, and the same task queues once it is gone - so
+      // UNAVAILABLE really was "not yet" rather than "already there".
+      assertEquals(TaskCounts(pending = 0L, running = 0L, dead = 0L), queue.counts())
+      assertQueued(queue.enqueue(taskFixture(), nowMillis = 2L))
+      assertEquals(TaskCounts(pending = 1L, running = 0L, dead = 0L), queue.counts())
     }
   }
 
@@ -571,4 +608,17 @@ class JooqDurableTaskQueueTest {
      */
     const val LOCK_HANDOFF_TIMEOUT_SECONDS = 30L
   }
+}
+
+/**
+ * The enqueue outcomes this suite asserts on, named so the paren structure of the original
+ * `assertTrue`/`assertFalse` calls survives the move to a three-state result.
+ */
+private fun assertQueued(outcome: TaskEnqueue) {
+  assertEquals(TaskEnqueue.QUEUED, outcome)
+}
+
+/** A collision with a live lease. Distinct from a busy store, which is [TaskEnqueue.UNAVAILABLE]. */
+private fun assertLeftAlone(outcome: TaskEnqueue) {
+  assertEquals(TaskEnqueue.ALREADY_RUNNING, outcome)
 }

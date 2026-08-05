@@ -5,6 +5,7 @@ import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.SourceMutationAccess
 import io.xoboro.core.application.SourceMutationResult
 import io.xoboro.core.application.TaskPriority
+import io.xoboro.core.application.enqueueOrRetry
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.BookMediaRepository
@@ -45,7 +46,7 @@ class ArchiveMaintenanceTaskEmitter(
       .asSequence()
       .filter { it.deletedAtMillis == null && it.isMaintainable(repairExtensions) }
       .count { book ->
-        queue.enqueue(
+        queue.enqueueOrRetry(
           DurableTask(
             id = taskId(book.id),
             type = ArchiveMaintenanceTaskHandler.TASK_TYPE,

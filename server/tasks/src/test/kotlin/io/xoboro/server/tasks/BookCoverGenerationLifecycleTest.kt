@@ -38,6 +38,7 @@ import java.util.zip.ZipOutputStream
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -159,8 +160,50 @@ class BookCoverGenerationLifecycleTest {
 
   private fun mediaItemOwner(bookId: BookId) = ArtworkOwner(ArtworkOwnerKind.MEDIA_ITEM, bookId.value)
 
+  @Test
+  fun `a busy store fails the caller instead of leaving an item without a cover for good`() {
+    // "This item has no cover" and "ask again in a moment" are not the same answer, and only the
+    // first one is permanent. Swallowing both left media items with no artwork for good and a lone
+    // WARNING to explain it - observed during a scan of 145,105 archives, whose write lock made
+    // `DELETE FROM artwork_thumbnail` fail for a run of items.
+    //
+    // The seam under test is the swallow-or-propagate decision, so the failure is injected here.
+    // That the real predicate recognises SQLITE_BUSY is established where it is used against a
+    // genuinely held lock, in JooqDurableTaskQueueTest and JooqUserSessionRepositoryTest.
+    withEnvironment(
+      "busy-store",
+      maximumCoverDimension = { throw IllegalStateException("synthetic store contention") },
+      isStoreBusy = { it.message == "synthetic store contention" },
+    ) { env ->
+      env.insertBook(BOOK_ID, env.comicArchive("book.cbz"), MediaKind.COMIC_ARCHIVE)
+      env.analyze(BOOK_ID)
+
+      assertFailsWith<IllegalStateException> { env.lifecycle.generateForBook(BOOK_ID) }
+    }
+  }
+
+  @Test
+  fun `a cover that cannot be produced is still a normal outcome`() {
+    // The counterpart, and the reason the decision is a predicate rather than a blanket rethrow: a
+    // corrupt page or an EPUB with no declared cover really does mean this item has no cover, and
+    // failing the analysis task over it would fail work that already succeeded and was persisted.
+    withEnvironment(
+      "unproducible-cover",
+      maximumCoverDimension = { throw IllegalStateException("synthetic page fault") },
+    ) { env ->
+      env.insertBook(BOOK_ID, env.comicArchive("book.cbz"), MediaKind.COMIC_ARCHIVE)
+      env.analyze(BOOK_ID)
+
+      env.lifecycle.generateForBook(BOOK_ID)
+
+      assertNull(env.artwork.selectedContentOrNull(mediaItemOwner(BOOK_ID)))
+    }
+  }
+
   private fun withEnvironment(
     name: String,
+    maximumCoverDimension: () -> Int = { ThumbnailSize.DEFAULT.maximumDimension },
+    isStoreBusy: (Throwable) -> Boolean = { false },
     block: (Environment) -> Unit,
   ) {
     XoboroDatabase.open(DatabaseConfig(temporaryDirectory.resolve("$name.sqlite"))).use { database ->
@@ -201,7 +244,8 @@ class BookCoverGenerationLifecycleTest {
           series = series,
           content = content,
           artwork = artwork,
-          maximumCoverDimension = { ThumbnailSize.DEFAULT.maximumDimension },
+          maximumCoverDimension = maximumCoverDimension,
+          isStoreBusy = isStoreBusy,
         )
       libraries.insert(
         Library(
