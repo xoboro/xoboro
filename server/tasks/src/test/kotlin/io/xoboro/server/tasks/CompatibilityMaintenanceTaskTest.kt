@@ -636,6 +636,14 @@ class CompatibilityMaintenanceTaskTest {
       nowMillis: Long,
     ): Boolean = false
 
+    override fun release(
+      taskId: String,
+      leaseToken: String,
+      reason: String,
+      retryAtMillis: Long,
+      nowMillis: Long,
+    ): Boolean = false
+
     override fun counts(): TaskCounts = TaskCounts(pending = 0, running = 0, dead = 0)
   }
 

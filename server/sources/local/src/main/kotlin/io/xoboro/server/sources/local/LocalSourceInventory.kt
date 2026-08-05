@@ -83,7 +83,7 @@ class LocalSourceInventory(
               SourceFile(
                 itemId = file.toAbsolutePath().normalize().toUri().toString(),
                 parentItemId = file.parent.toAbsolutePath().normalize().toUri().toString(),
-                identity = attrs.fileKey()?.toString(),
+                identity = attrs.durableIdentity(),
                 relativePath = relativePath,
                 name = name,
                 extension = name.substringAfterLast('.', missingDelimiterValue = "").lowercase(),

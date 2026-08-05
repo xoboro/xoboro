@@ -141,7 +141,7 @@ class JooqCatalogReadRepository(
     id: SeriesId,
     access: CatalogAccess,
   ): CatalogSeries? {
-    bookMetadataAggregations.refreshDirty(listOf(id))
+    // No sweep here: this ends in hydrateSeries, which rebuilds exactly what it is about to read.
     val from = seriesFrom(access)
     val filter =
       seriesFilter(
@@ -169,8 +169,8 @@ class JooqCatalogReadRepository(
     query: SeriesCatalogQuery,
     access: CatalogAccess,
   ): List<CatalogGroupCount> {
-    // Groups on `sm.title_sort`, so nothing in the answer comes from the aggregation.
-    bookMetadataAggregations.refreshSomeDirty()
+    // Groups on `sm.title_sort`, so nothing in the answer comes from the aggregation and there is
+    // nothing here worth rebuilding one for. Sweeping anyway cost this route 8.4s per call.
     val from = seriesFrom(access)
     val filter = seriesFilter(query, access)
     return database.dsl
@@ -323,6 +323,10 @@ class JooqCatalogReadRepository(
     if (ids.isEmpty()) return emptyList()
     val items = series.findAllByIds(ids).associateBy { it.id }
     val metadata = seriesMetadata.findAllBySeriesIds(ids).associateBy { it.seriesId }
+    // Exactly the series this response carries, so a page pays for its own freshness and nothing
+    // else's. Sweeping an arbitrary batch instead meant every read took the write lock for 500
+    // series, which on a database that admits one writer is a cost the whole process shares.
+    bookMetadataAggregations.refreshDirty(ids)
     val aggregations = bookMetadataAggregations.findAllBySeriesIds(ids)
     val progresses =
       userId
@@ -749,8 +753,6 @@ class JooqCatalogReadRepository(
   private fun sweepFor(sorts: List<CatalogSort>) {
     if (sorts.any { it.property == AGGREGATED_SORT }) {
       bookMetadataAggregations.refreshAllDirty()
-    } else {
-      bookMetadataAggregations.refreshSomeDirty()
     }
   }
 

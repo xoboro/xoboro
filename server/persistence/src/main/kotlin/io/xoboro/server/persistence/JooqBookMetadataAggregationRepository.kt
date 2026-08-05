@@ -36,7 +36,7 @@ import org.jooq.exception.DataAccessException
  * an aggregation table, a rebuild would re-dirty what it just claimed and [refreshAllDirty] would
  * not terminate.
  */
-internal class JooqBookMetadataAggregationRepository(
+class JooqBookMetadataAggregationRepository(
   private val database: XoboroDatabase,
 ) {
   fun refreshAllDirty() {

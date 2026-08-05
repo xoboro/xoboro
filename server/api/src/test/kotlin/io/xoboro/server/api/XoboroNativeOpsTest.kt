@@ -1098,6 +1098,14 @@ class XoboroNativeOpsTest {
       retryAtMillis: Long?,
       nowMillis: Long,
     ): Boolean = error("fail is not used by the operations API")
+
+    override fun release(
+      taskId: String,
+      leaseToken: String,
+      reason: String,
+      retryAtMillis: Long,
+      nowMillis: Long,
+    ): Boolean = error("release is not used by the operations API")
   }
 
   /** Only findSeriesByIdOrNull() is exercised; the rest of the catalog is not this API's concern. */

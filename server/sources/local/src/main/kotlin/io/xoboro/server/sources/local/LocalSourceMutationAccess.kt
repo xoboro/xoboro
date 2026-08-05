@@ -401,7 +401,7 @@ class LocalSourceMutationAccess(
       relativePath =
         root.relativize(this).iterator().asSequence().joinToString("/") { it.toString() },
       name = fileName.toString(),
-      identity = attributes.fileKey()?.toString(),
+      identity = attributes.durableIdentity(),
       size = attributes.size(),
       modifiedAtMillis = attributes.lastModifiedTime().toMillis(),
     )

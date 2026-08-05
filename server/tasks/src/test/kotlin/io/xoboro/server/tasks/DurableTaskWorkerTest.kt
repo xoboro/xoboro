@@ -2,6 +2,7 @@ package io.xoboro.server.tasks
 
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.TaskCounts
+import io.xoboro.core.application.TaskStoreUnavailableException
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.XoboroDatabase
@@ -198,6 +199,44 @@ class DurableTaskWorkerTest {
       }.use {
         assertTrue(invoked.await(2, TimeUnit.SECONDS))
       }
+    }
+  }
+
+  @Test
+  fun `a busy store defers the task instead of spending one of its attempts`() {
+    withQueue("store-busy") { queue ->
+      // One attempt, so anything charged as a failure dead-letters. Contention alone did exactly
+      // that to a REFRESH_LIBRARY_METADATA fan-out at 10/10 attempts, and its library's metadata
+      // was never filled in.
+      queue.enqueue(task(maxAttempts = 1), nowMillis = 1)
+      val worker =
+        worker(
+          queue = queue,
+          handler = handler { throw TaskStoreUnavailableException("task-2") },
+          times = ArrayDeque(listOf(100L, 100L)),
+        )
+
+      assertEquals(TaskRunResult.Deferred("task-1"), worker.runOnce("worker-1"))
+      assertEquals(TaskCounts(pending = 1, running = 0, dead = 0), queue.counts())
+    }
+  }
+
+  @Test
+  fun `a busy store reported through a wrapping failure still defers`() {
+    withQueue("store-busy-wrapped") { queue ->
+      queue.enqueue(task(maxAttempts = 1), nowMillis = 1)
+      val worker =
+        worker(
+          queue = queue,
+          handler =
+            handler {
+              throw IllegalStateException("fan-out failed", TaskStoreUnavailableException("task-2"))
+            },
+          times = ArrayDeque(listOf(100L, 100L)),
+        )
+
+      assertEquals(TaskRunResult.Deferred("task-1"), worker.runOnce("worker-1"))
+      assertEquals(TaskCounts(pending = 1, running = 0, dead = 0), queue.counts())
     }
   }
 

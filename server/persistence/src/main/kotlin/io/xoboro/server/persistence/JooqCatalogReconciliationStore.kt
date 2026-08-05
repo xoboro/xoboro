@@ -30,18 +30,55 @@ class JooqCatalogReconciliationStore(
   ): ScanSessionId {
     require(startedAtMillis >= 0) { "Scan start timestamp must not be negative" }
     val sessionId = ScanSessionId(sessionIdFactory())
-    database.dsl.execute(
-      """
-      INSERT INTO catalog_scan_session
-        (id, library_id, deep, status, started_at_ms)
-      VALUES (?, ?, ?, 'STAGING', ?)
-      """.trimIndent(),
-      sessionId.value,
-      libraryId.value,
-      deep.toSqliteInt(),
-      startedAtMillis,
-    )
+    database.transaction { transaction ->
+      transaction.discardAbandonedSessions(libraryId, startedAtMillis)
+      transaction.execute(
+        """
+        INSERT INTO catalog_scan_session
+          (id, library_id, deep, status, started_at_ms)
+        VALUES (?, ?, ?, 'STAGING', ?)
+        """.trimIndent(),
+        sessionId.value,
+        libraryId.value,
+        deep.toSqliteInt(),
+        startedAtMillis,
+      )
+    }
     return sessionId
+  }
+
+  /**
+   * Retires the staging rows of a scan that never reached [complete] or [abort].
+   *
+   * Both of those drop their own candidates, so the only way a session is left staging is the process
+   * ending mid-scan. Nothing collected them afterwards, and one library had accumulated eight
+   * abandoned sessions holding 612,314 candidate rows — every one of them widening the indexes the
+   * next scan searches. A scan starting for this library proves any earlier staging session for it is
+   * over, because only one scan per library runs at a time.
+   */
+  private fun DSLContext.discardAbandonedSessions(
+    libraryId: LibraryId,
+    nowMillis: Long,
+  ) {
+    execute(
+      """
+      DELETE FROM catalog_scan_candidate
+      WHERE session_id IN (
+        SELECT id FROM catalog_scan_session
+        WHERE library_id = ? AND status = 'STAGING'
+      )
+      """.trimIndent(),
+      libraryId.value,
+    )
+    execute(
+      """
+      UPDATE catalog_scan_session
+      SET status = 'ABORTED', completed_at_ms = ?
+      WHERE library_id = ? AND status = 'STAGING'
+      """.trimIndent(),
+      nowMillis,
+      libraryId.value,
+    )
   }
 
   override fun stage(
@@ -165,6 +202,7 @@ class JooqCatalogReconciliationStore(
 
       transaction.insertMissingSeries(sessionId, libraryId, completedAtMillis)
       transaction.updateMatchedBooks(sessionId, libraryId, completedAtMillis)
+      transaction.refreshMatchedIdentities(sessionId, libraryId)
       transaction.insertNewBooks(sessionId, libraryId, completedAtMillis)
       transaction.bindNewBooks(sessionId, libraryId)
       if (failedEntries == 0L) {
@@ -284,12 +322,17 @@ class JooqCatalogReconciliationStore(
       UPDATE catalog_scan_candidate AS candidate SET
         matched_book_id = book.id,
         was_deleted = book.deleted_at_ms IS NOT NULL,
+        -- `source_identity` is deliberately absent. It is the filesystem's handle on the file, not a
+        -- fact about the file's content, and it moves on its own: a local identity is derived from the
+        -- inode, and a source that reports an opaque token can rotate it whenever it likes. Treating a
+        -- moved handle as a content change made a re-scan rewrite every matched book, which is a write
+        -- storm large enough to hold the single SQLite write lock for tens of minutes. The new handle
+        -- is still recorded — see refreshMatchedIdentities — just not called a change.
         change_type = CASE
           WHEN book.file_size <> candidate.file_size
             OR book.file_modified_ms <> candidate.file_modified_ms
             OR book.media_kind <> candidate.media_kind
             OR book.source_item_id <> candidate.source_item_id
-            OR coalesce(book.source_identity, '') <> coalesce(candidate.source_identity, '')
             OR book.name <> candidate.name
             OR book.oneshot <> candidate.oneshot
           THEN 'CHANGED'
@@ -703,6 +746,34 @@ class JooqCatalogReconciliationStore(
       """.trimIndent(),
       nowMillis,
       libraryId,
+      libraryId,
+      sessionId.value,
+    )
+  }
+
+  /**
+   * Records the handle a source currently reports for a book whose content did not change.
+   *
+   * Move detection needs the stored handle to match what the next scan will see, so a handle that
+   * moved on its own still has to be written down. It cannot ride along in [updateMatchedBooks],
+   * because that statement writes `name` and `series_id` and so rebuilds the book's full-text row;
+   * across a whole library that is the difference between a scan costing seconds and costing tens of
+   * minutes of held write lock. Writing the one column instead keeps the search index untouched.
+   */
+  private fun DSLContext.refreshMatchedIdentities(
+    sessionId: ScanSessionId,
+    libraryId: String,
+  ) {
+    execute(
+      """
+      UPDATE book AS target SET
+        source_identity = candidate.source_identity
+      FROM catalog_scan_candidate candidate
+      WHERE target.library_id = ?
+        AND candidate.session_id = ?
+        AND candidate.matched_book_id = target.id
+        AND coalesce(candidate.source_identity, '') <> coalesce(target.source_identity, '')
+      """.trimIndent(),
       libraryId,
       sessionId.value,
     )
