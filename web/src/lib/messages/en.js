@@ -412,6 +412,11 @@ export default {
       progressHint:
         'These two cannot both hold: an item you have started is not one you have never opened. Choosing both finds nothing.',
       noChoices: 'This library records nothing to filter by yet',
+      selectedCount: '{count} selected',
+      findInGroup: 'Find in {group}',
+      showMore: 'Show {count} more',
+      showLess: 'Show fewer',
+      noMatch: 'Nothing matches',
       choicesFailed:
         'Filter choices could not be read, so some filters are missing rather than empty.',
       clear: 'Clear the filters',

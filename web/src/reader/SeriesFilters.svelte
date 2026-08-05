@@ -19,6 +19,7 @@
    */
   import { _ } from '../lib/i18n.js'
   import { ONE_SHOT_CHOICES, SERIES_FACET_FILTERS } from '../lib/api/catalogSearch.js'
+  import FacetGroup from './FacetGroup.svelte'
   import LibraryFilter from './LibraryFilter.svelte'
 
   let {
@@ -48,21 +49,13 @@
 <LibraryFilter {libraries} selected={criteria.libraryId} onchange={(libraryId) => onchange({ libraryId })} />
 
 {#each populated as filter (filter.parameter)}
-  <fieldset>
-    <legend>{$_(`search.filters.${filter.parameter}`)}</legend>
-    {#each choices[filter.parameter] as value (value)}
-      <label>
-        <input
-          type="checkbox"
-          {value}
-          data-testid={`filter-${filter.parameter}-${value}`}
-          checked={(criteria[filter.parameter] ?? []).includes(value)}
-          onchange={(event) => toggle(filter.parameter, value, event.currentTarget.checked)}
-        />
-        <span>{value}</span>
-      </label>
-    {/each}
-  </fieldset>
+  <FacetGroup
+    parameter={filter.parameter}
+    label={$_(`search.filters.${filter.parameter}`)}
+    values={choices[filter.parameter]}
+    selected={criteria[filter.parameter] ?? []}
+    ontoggle={(value, checked) => toggle(filter.parameter, value, checked)}
+  />
 {/each}
 
 {#if populated.length === 0}
@@ -84,25 +77,6 @@
 </p>
 
 <style>
-  fieldset {
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
-  legend {
-    padding: 0;
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  label {
-    display: flex;
-    min-height: var(--touch-target);
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--font-sm);
-  }
   .hint {
     margin: 0;
     color: var(--text-muted);
