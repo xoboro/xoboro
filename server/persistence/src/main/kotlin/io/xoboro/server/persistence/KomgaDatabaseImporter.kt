@@ -34,13 +34,34 @@ data class KomgaImportReport(
   val skippedExternalArtwork: Int,
 ) {
   fun render(heading: String = "Komga import complete"): String =
-    """
-    $heading
-    sourceVersion=$sourceVersion
-    libraries=$libraries users=$users series=$series books=$books
-    readProgresses=$readProgresses collections=$collections readLists=$readLists
-    artwork=$artwork skippedExternalArtwork=$skippedExternalArtwork
-    """.trimIndent()
+    listOfNotNull(
+      heading,
+      "sourceVersion=$sourceVersion",
+      "libraries=$libraries users=$users series=$series books=$books",
+      "readProgresses=$readProgresses collections=$collections readLists=$readLists",
+      "artwork=$artwork skippedExternalArtwork=$skippedExternalArtwork",
+      recoveryAdvice(),
+    ).joinToString("\n")
+
+  /**
+   * What to do about the artwork this import could not carry over.
+   *
+   * Komga stores a generated thumbnail as a blob and a sidecar as a `URL` with a null blob, so those
+   * rows hold a pointer to a file rather than an image. They are counted and skipped rather than
+   * imported: taking them would mean an artwork row with no bytes, which would cost `content NOT NULL`
+   * and `file_size > 0` for every row in the table to accommodate an import that has a better answer
+   * available.
+   *
+   * The better answer is that the files those rows point at are still on disk, and a local-artwork
+   * refresh reads them directly - producing a display-sized cover and recording its name, which is
+   * more than the imported pointer would have given. So the count is not a loss to accept but a step
+   * to run, and saying which step is the difference between the two.
+   */
+  private fun recoveryAdvice(): String? {
+    if (skippedExternalArtwork == 0) return null
+    return "note: $skippedExternalArtwork sidecar pointer(s) were not imported; " +
+      "run a metadata refresh per library once the server is up to read those files from disk"
+  }
 }
 
 class KomgaDatabaseImporter(

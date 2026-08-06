@@ -26,6 +26,15 @@
     label,
     /** Distinguishes this pager's buttons when a screen carries more than one. */
     testIdPrefix = 'pager',
+    /**
+     * Catalog key for the position line, given `page`, `pages` and `total`.
+     *
+     * A parameter because a screen that already states the total elsewhere would otherwise state it
+     * twice: the search screen announces the match count above its grid, so its pager says only where
+     * in the set the reader is. The buttons, their disabled rules and the envelope they read are the
+     * part worth sharing, and those do not change with the wording.
+     */
+    summaryKey = 'common.paging.summary',
   } = $props()
 
   // One-based on screen. `page` is zero-based on the wire, and "page 0 of 5" is a leaked
@@ -37,7 +46,7 @@
 {#if page}
   <nav class="paging" aria-label={label}>
     <p class="position">
-      {$_('common.paging.summary', {
+      {$_(summaryKey, {
         values: { page: humanPage, pages: totalPages, total: page.totalItems ?? 0 },
       })}
     </p>

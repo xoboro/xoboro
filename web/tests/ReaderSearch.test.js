@@ -44,7 +44,8 @@ const LIBRARIES = [
 
 const FACET_VALUES = {
   genre: ['gen-a', 'gen-b'],
-  seriesTag: ['tag-a'],
+  // Two, because a facet offering one value cannot narrow anything and is no longer rendered.
+  seriesTag: ['tag-a', 'tag-b'],
   publisher: ['pub-a'],
   language: ['la'],
 }
@@ -60,6 +61,8 @@ function server({
   listingStatus = 200,
   facetStatus = 200,
   libraryStatus = 200,
+  /** Overrides the facet answers wholesale, for tests about which groups render at all. */
+  facetValues = FACET_VALUES,
 } = {}) {
   const urls = []
   const fetch = vi.fn(async (url) => {
@@ -67,7 +70,7 @@ function server({
     if (url.includes('/facets')) {
       if (facetStatus !== 200) return reply({ code: 'internal_error', message: 'no' }, facetStatus)
       const facet = new URL(url, 'http://localhost').searchParams.get('facet')
-      return reply(FACET_VALUES[facet] ?? [])
+      return reply(facetValues[facet] ?? [])
     }
     if (url.includes('/libraries')) {
       if (libraryStatus !== 200) {
@@ -173,6 +176,48 @@ describe('reader search', () => {
       expect(screen.getByTestId('applied-count').textContent).toContain('1'),
     )
     expect(screen.getByTestId('active-filter-genre-gen-a')).toBeInTheDocument()
+  })
+
+  /**
+   * A facet offering one value selects every series that has the facet at all, which on a real
+   * library is every series. Measured against one, `seriesTag` had exactly **one** distinct value
+   * across all 3,338 series: the group could be read, reasoned about and ticked, and ticking it
+   * changed nothing. That is worse than the group being absent, because a control that looks like it
+   * narrows is evidence about the catalogue and it is wrong.
+   *
+   * The empty case was already handled; one was not, and one is the case that looks fine.
+   */
+  it('offers no filter group for a facet whose single value cannot narrow anything', async () => {
+    globalThis.fetch = server({ facetValues: { genre: ['gen-a', 'gen-b'], language: ['la'] } }).fetch
+    render(Search)
+
+    await waitFor(() => expect(screen.getByTestId('filter-genre-gen-a')).toBeInTheDocument())
+    expect(screen.queryByTestId('facet-language')).toBeNull()
+    expect(screen.queryByTestId('filter-language-la')).toBeNull()
+    // And the two-value facet is still there, so this is a rule about narrowing rather than a
+    // wholesale removal of filters.
+    expect(screen.getByTestId('facet-genre')).toBeInTheDocument()
+  })
+
+  /**
+   * The paging nav is now the shared `Pager`, whose default position line carries the total. This
+   * screen already announces the match count above the grid, so taking that default would state the
+   * same number twice in adjacent lines - which reads as two different facts and invites the reader to
+   * work out how they differ. That is the whole reason `summaryKey` is a parameter, so it is pinned
+   * here rather than left to the wording.
+   */
+  it('states the match count once, not once per paging line', async () => {
+    const total = 137
+    globalThis.fetch = server({
+      listing: envelope([seriesRow('s1')], { page: 0, totalPages: 6, totalItems: total }),
+    }).fetch
+    render(Search)
+
+    await waitFor(() => expect(screen.getByTestId('result-summary')).toBeInTheDocument())
+    const shown = screen.getByTestId('result-summary').parentElement.textContent
+    expect(shown.split(String(total)).length - 1).toBe(1)
+    // And the pager still says where in the set the reader is, so nothing was dropped to get there.
+    expect(screen.getByTestId('search-page-next')).toBeInTheDocument()
   })
 
   it('renders no raw key path, in either scope, for any key it computes', async () => {

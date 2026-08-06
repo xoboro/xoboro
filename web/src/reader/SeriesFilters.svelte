@@ -33,9 +33,22 @@
     onchange,
   } = $props()
 
+  /**
+   * How many values a facet needs before it can narrow anything.
+   *
+   * Two, not one. A facet offering a single value selects every series that has the facet at all,
+   * which on a real library is every series: measured against one, the `seriesTag` facet had exactly
+   * **one** distinct value across all 3,338 series, so the control was a group the reader could read,
+   * reason about and tick, and ticking it changed nothing. That is worse than the group being absent,
+   * because a filter that appears to work is evidence about the catalogue and it is wrong.
+   */
+  const NARROWING_MINIMUM = 2
+
   /** The facet-backed filters that actually have something to offer. */
   const populated = $derived(
-    SERIES_FACET_FILTERS.filter(({ parameter }) => (choices[parameter] ?? []).length > 0),
+    SERIES_FACET_FILTERS.filter(
+      ({ parameter }) => (choices[parameter] ?? []).length >= NARROWING_MINIMUM,
+    ),
   )
 
   function toggle(parameter, value, checked) {
