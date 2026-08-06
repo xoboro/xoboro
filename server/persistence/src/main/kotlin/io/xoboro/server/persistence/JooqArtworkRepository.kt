@@ -193,8 +193,8 @@ class JooqArtworkRepository(
           """
           INSERT INTO artwork_thumbnail (
             id, owner_kind, owner_id, artwork_type, selected, media_type,
-            file_size, width, height, content, created_at_ms, updated_at_ms
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            file_size, width, height, content, created_at_ms, updated_at_ms, source_name
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """.trimIndent(),
           item.id.value,
           owner.kind.name,
@@ -208,6 +208,9 @@ class JooqArtworkRepository(
           content.bytes,
           item.createdAtMillis,
           item.updatedAtMillis,
+          // Only this path writes a name: the stored bytes are a display-sized derivative, and this
+          // says which file on disk still holds the full-size original they came from.
+          item.sourceName,
         )
       }
       val selectedExists =
@@ -313,6 +316,9 @@ class JooqArtworkRepository(
       height = requiredInt("height"),
       createdAtMillis = requiredLongText("created_at_ms_64"),
       updatedAtMillis = requiredLongText("updated_at_ms_64"),
+      // Null for every row written before V33, and for every kind but a sidecar. Blank is read as
+      // absent so a row that somehow holds one cannot fail the domain's own check on the way out.
+      sourceName = get("source_name", String::class.java)?.takeIf(String::isNotBlank),
     )
 
   private fun Record.requiredString(field: String): String =

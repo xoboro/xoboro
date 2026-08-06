@@ -156,6 +156,92 @@ class JooqArtworkRepositoryTest {
     }
   }
 
+  /**
+   * A sidecar was stored at the ceiling meant for untrusted input - 1600px, per ADR 0035 - and then
+   * served to a grid whose cells are 120-140px wide. On the deployed catalogue that was 3,338 of 3,339
+   * series sending 85.8 KB and a 1600x2300 decode per cell against a generated cover's 16.9 KB, because
+   * a generated cover arrives already at the configured thumbnail size and the ceiling never touches it.
+   *
+   * Reducing a sidecar is lossy, so what makes it safe is that the original survives: the file is still
+   * on disk and its name is recorded. Both halves are asserted here, because either alone is a defect -
+   * a reduced cover with no recorded source has thrown away the full-size image, and a recorded source
+   * with no reduction has not fixed the grid.
+   *
+   * An upload is deliberately excluded: its stored copy is the only one there is.
+   */
+  @Test
+  fun `reduces a sidecar to display size and records the file it came from`() {
+    val root = Files.createDirectories(tempDirectory.resolve("display-library"))
+    val seriesPath = Files.createDirectories(root.resolve("Synthetic series"))
+    // Larger than the display limit in both directions, so a reduction is observable rather than a
+    // no-op the way an already-small fixture would make it.
+    Files.write(seriesPath.resolve("cover.png"), image("png", 900, 1200))
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("display.sqlite"))).use { database ->
+      val libraries = JooqLibraryRepository(database)
+      val series = JooqSeriesRepository(database)
+      val books = JooqBookRepository(database)
+      libraries.insert(
+        Library(
+          id = LIBRARY_ID,
+          name = "Synthetic library",
+          root = SourceLocation("local", root.toUri().toString()),
+          createdAtMillis = 1,
+        ),
+      )
+      series.insert(
+        Series(
+          id = SERIES_ID,
+          libraryId = LIBRARY_ID,
+          name = "Synthetic series",
+          relativePath = "Synthetic series",
+          sourceItemId = seriesPath.toUri().toString(),
+          fileModifiedAtMillis = 1,
+          createdAtMillis = 1,
+        ),
+      )
+      var sequence = 0
+      val lifecycle =
+        ArtworkLifecycle(
+          artwork = JooqArtworkRepository(database),
+          processor = SafeJpegArtworkProcessor(),
+          idFactory = { "artwork-${++sequence}" },
+          currentTimeMillis = { sequence.toLong() },
+          sidecarProcessor = SafeJpegArtworkProcessor(maximumDimension = DISPLAY_DIMENSION),
+        )
+      val refresh =
+        LocalArtworkRefreshLifecycle(
+          libraries = libraries,
+          books = books,
+          series = series,
+          artwork = lifecycle,
+          accesses = listOf(LocalSourceArtworkAccess()),
+        )
+      val seriesOwner = ArtworkOwner(ArtworkOwnerKind.SERIES, SERIES_ID.value)
+
+      assertEquals(1, refresh.refreshSeries(SERIES_ID))
+
+      val sidecar = lifecycle.findAll(seriesOwner).single()
+      assertEquals(ArtworkType.SIDECAR, sidecar.type)
+      assertEquals(DISPLAY_DIMENSION, maxOf(sidecar.width, sidecar.height))
+      // The name, not a path: a sidecar is found again through the source access that is already given
+      // the library root and the owner's source item id, so nothing here needs to store a filesystem
+      // location that a database row could carry off somewhere else.
+      assertEquals("cover.png", sidecar.sourceName)
+
+      val uploaded =
+        lifecycle.addUploaded(seriesOwner, image("png", 900, 1200), selected = false)
+      assertEquals(
+        1_200,
+        maxOf(uploaded.width, uploaded.height),
+        "an upload keeps its size below the safety ceiling: reducing it would destroy the only copy",
+      )
+      assertNull(
+        uploaded.sourceName,
+        "an upload has no source file, so naming one would name a file that does not exist",
+      )
+    }
+  }
+
   private fun image(
     format: String,
     width: Int,
@@ -195,5 +281,12 @@ class JooqArtworkRepositoryTest {
     val LIBRARY_ID = LibraryId("library-1")
     val SERIES_ID = SeriesId("series-1")
     val BOOK_ID = BookId("book-1")
+
+    /**
+     * Stands in for the configured thumbnail size, which is what the running server supplies. Any value
+     * well below the 1600px safety ceiling works: the point is that the two limits are different, so a
+     * sidecar reduced to this one cannot have gone through the ceiling instead.
+     */
+    const val DISPLAY_DIMENSION = 300
   }
 }

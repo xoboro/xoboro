@@ -41,9 +41,29 @@ data class Artwork(
   val height: Int,
   val createdAtMillis: Long,
   val updatedAtMillis: Long = createdAtMillis,
+  /**
+   * The name of the file this was read from, for a [ArtworkType.SIDECAR]; null otherwise.
+   *
+   * A name rather than a path. A sidecar is found again through the same source access that found it
+   * first, which is given the owning library's root and the owner's source item id - so the name is
+   * the only part not already known, and storing it keeps every filesystem path inside the access that
+   * validates against the library root. A row that carried an absolute path would move that decision
+   * into the database.
+   *
+   * It is what makes reducing a sidecar to display size safe: the stored bytes are a grid-sized
+   * derivative, and this says where the full-size original still is. Generated artwork has no source
+   * file and an upload's only copy is the stored one, so neither carries a name.
+   */
+  val sourceName: String? = null,
 ) {
   init {
     require(mediaType.isNotBlank()) { "Artwork media type must not be blank" }
+    require(sourceName == null || sourceName.isNotBlank()) {
+      "Artwork source name must not be blank when present"
+    }
+    require(sourceName == null || type == ArtworkType.SIDECAR) {
+      "Only sidecar artwork is read from a source file"
+    }
     require(fileSize > 0) { "Artwork file size must be positive" }
     require(width > 0 && height > 0) { "Artwork dimensions must be positive" }
     require(createdAtMillis >= 0) { "Artwork creation timestamp must not be negative" }
