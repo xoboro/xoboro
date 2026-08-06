@@ -84,6 +84,22 @@ class ArtworkLifecycle(
   private val currentTimeMillis: () -> Long,
   private val eventPublisher: ArtworkEventPublisher = ArtworkEventPublisher {},
   private val groupingMembers: ArtworkGroupingMembers = ArtworkGroupingMembers.NONE,
+  /**
+   * Processes sidecar artwork, which is the only kind that may be reduced to display size.
+   *
+   * [processor]'s limit is a safety ceiling for untrusted input - 1600px, per ADR 0035 - and not a
+   * statement about how large a cover should be. Sidecars were stored at that ceiling and then served
+   * to a grid whose cells are 120-140px wide, so a catalogue of 3,338 sidecar-covered series sent
+   * 85.8 KB and a 1600x2300 decode per cell where 300px was drawn. Generated covers never had the
+   * problem: they arrive already at the configured thumbnail size, so the ceiling is a no-op on them.
+   *
+   * Only sidecars are reduced, because reducing is lossy and only a sidecar's original survives it:
+   * the file is still on disk and its name is recorded, so the full-size image stays reachable. An
+   * upload has no such original, so squashing one to grid size would destroy the only copy.
+   *
+   * Defaults to [processor], which is the previous behaviour for any caller that has not chosen.
+   */
+  private val sidecarProcessor: ArtworkProcessor = processor,
 ) {
   fun findAll(owner: ArtworkOwner): List<Artwork> = artwork.findAll(owner)
 
@@ -159,13 +175,26 @@ class ArtworkLifecycle(
       .also { eventPublisher.publish(ArtworkEvent.Added(it, members)) }
   }
 
+  /**
+   * Replaces this owner's sidecar artwork from the files found beside it.
+   *
+   * Takes [SourceArtwork] rather than bare bytes so the file's name survives into storage. The name is
+   * the whole locator this needs: a sidecar is read back through [SourceArtworkAccess] with the
+   * owner's library root and source item id, both of which are already known from the owner, so
+   * recording the name is enough to find the file again and no absolute path is stored. That keeps the
+   * path-traversal surface exactly where it already was - inside the source access that validates
+   * against the library root - rather than putting a filesystem path in a database row that a reader
+   * can influence.
+   */
   fun replaceSidecars(
     owner: ArtworkOwner,
-    inputs: List<ByteArray>,
+    inputs: List<SourceArtwork>,
   ): List<Artwork> {
     inputs.forEach { input ->
-      require(input.isNotEmpty()) { "Sidecar artwork must not be empty" }
-      require(input.size <= MAXIMUM_UPLOAD_BYTES) { "Sidecar artwork exceeds the size limit" }
+      require(input.bytes.isNotEmpty()) { "Sidecar artwork must not be empty" }
+      require(input.bytes.size <= MAXIMUM_UPLOAD_BYTES) {
+        "Sidecar artwork exceeds the size limit"
+      }
     }
     val selected = artwork.findSelectedOrNull(owner)
     val replaced = artwork.findAll(owner).filter { it.type == ArtworkType.SIDECAR }
@@ -173,10 +202,12 @@ class ArtworkLifecycle(
     val now = now()
     val processedInputs =
       inputs.mapNotNull { input ->
-        runCatching { processor.process(input) }.getOrNull()
+        runCatching { sidecarProcessor.process(input.bytes) }
+          .getOrNull()
+          ?.let { input.name to it }
       }
     val contents =
-      processedInputs.mapIndexed { index, processed ->
+      processedInputs.mapIndexed { index, (name, processed) ->
         val item =
           Artwork(
             id = ArtworkId(idFactory()),
@@ -188,6 +219,7 @@ class ArtworkLifecycle(
             width = processed.width,
             height = processed.height,
             createdAtMillis = now,
+            sourceName = name,
           )
         ArtworkContent(item, processed.bytes)
       }
@@ -291,7 +323,7 @@ class LocalArtworkRefreshLifecycle(
             library.root.itemId,
             book.sourceItemId,
             ArtworkLifecycle.MAXIMUM_UPLOAD_BYTES,
-          ).map(SourceArtwork::bytes),
+          ),
     ).size
   }
 
@@ -311,7 +343,7 @@ class LocalArtworkRefreshLifecycle(
             library.root.itemId,
             item.sourceItemId,
             ArtworkLifecycle.MAXIMUM_UPLOAD_BYTES,
-          ).map(SourceArtwork::bytes),
+          ),
     ).size
   }
 }

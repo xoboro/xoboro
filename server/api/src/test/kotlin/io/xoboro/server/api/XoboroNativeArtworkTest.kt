@@ -89,8 +89,13 @@ class XoboroNativeArtworkTest {
       val entityTag = assertNotNull(initial.headers[HttpHeaders.ETag])
       assertTrue(entityTag.matches(Regex("\"[0-9a-f]{32}\"")))
       assertNotNull(initial.headers[HttpHeaders.LastModified])
+      // A short reuse window rather than `max-age=0`. At zero every cover on a grid was a conditional
+      // request, so returning to a screen of a hundred cost a hundred round trips to be told nothing
+      // had changed. It cannot be indefinite either: `/artwork` answers whatever is selected now, so a
+      // re-scan, an upload or a selection would go unseen. `must-revalidate` keeps a copy from being
+      // served once stale, and the revalidation below still has to work.
       assertEquals(
-        "max-age=0, must-revalidate, private",
+        "max-age=300, must-revalidate, private",
         initial.headers[HttpHeaders.CacheControl],
       )
       assertNull(initial.headers[HttpHeaders.ContentDisposition])

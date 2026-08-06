@@ -85,7 +85,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(32, database.migrationResult.migrationsExecuted)
+      assertEquals(33, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -206,7 +206,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(31, database.migrationResult.migrationsExecuted)
+      assertEquals(32, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -344,7 +344,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(3, database.migrationResult.migrationsExecuted)
+      assertEquals(4, database.migrationResult.migrationsExecuted)
 
       fun storedProgressions(bookId: String): List<Double> =
         database.dsl
