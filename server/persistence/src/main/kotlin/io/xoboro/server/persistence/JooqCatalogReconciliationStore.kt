@@ -243,6 +243,11 @@ class JooqCatalogReconciliationStore(
           libraryId = libraryId,
           snapshot = eventSnapshot,
         )
+      // Written here, inside the transaction, and published below it. ADR 0056 is right that SSE must
+      // not announce what might roll back, and equally a durable feed must not miss what did commit -
+      // a client holding a local copy cannot recover a lost deletion by re-reading, because a deleted
+      // item is absent from current state either way. Same list, two destinations, one commit.
+      transaction.appendCatalogChanges(events, completedAtMillis)
       transaction.execute(
         "DELETE FROM catalog_scan_candidate WHERE session_id = ?",
         sessionId.value,

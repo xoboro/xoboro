@@ -921,6 +921,48 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/changes:
+    get:
+      tags: [Changes]
+      operationId: get_changes
+      summary: Catalogue mutations after a cursor, for a client holding a local copy.
+      description: >-
+        The durable counterpart to the SSE stream. SSE says invalidate something now; this says what a
+        client that was away missed, including deletions, which current state cannot report because a
+        deleted item is absent exactly like one never seen. Rows are scoped to the reader's libraries.
+        When resyncRequired is true the cursor is older than what retention swept, the accompanying
+        change list is empty, and the client must discard its copy and read the catalogue again.
+      parameters:
+        - name: after
+          in: query
+          required: false
+          description: Cursor from a previous nextCursor; 0 starts at the beginning of the feed.
+          schema: { type: integer, format: int64, minimum: 0 }
+        - name: size
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 2000, default: 500 }
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/libraries:
     get:
       tags: [Libraries]
