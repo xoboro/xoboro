@@ -74,7 +74,11 @@ private fun Route.nativeArtworkOwnerRoutes(
           mediaType = content.artwork.mediaType,
         )
       try {
-        call.respondNativeCachedContent(stream, content.artwork.updatedAtMillis)
+        call.respondNativeCachedContent(
+          stream,
+          content.artwork.updatedAtMillis,
+          NATIVE_ARTWORK_CACHE_CONTROL,
+        )
       } finally {
         stream.close()
       }
@@ -97,7 +101,11 @@ private fun Route.nativeArtworkOwnerRoutes(
           mediaType = content.artwork.mediaType,
         )
       try {
-        call.respondNativeCachedContent(stream, content.artwork.updatedAtMillis)
+        call.respondNativeCachedContent(
+          stream,
+          content.artwork.updatedAtMillis,
+          NATIVE_ARTWORK_CACHE_CONTROL,
+        )
       } finally {
         stream.close()
       }

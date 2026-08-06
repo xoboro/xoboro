@@ -17,9 +17,10 @@ import java.security.MessageDigest
 internal suspend fun ApplicationCall.respondNativeCachedContent(
   stream: MediaContentStream,
   lastModifiedMillis: Long,
+  cacheControl: String = NATIVE_PRIVATE_REVALIDATE,
 ) {
   val body = stream.readNativeCachedBody()
-  response.header(HttpHeaders.CacheControl, NATIVE_PRIVATE_REVALIDATE)
+  response.header(HttpHeaders.CacheControl, cacheControl)
   response.header(HttpHeaders.ETag, body.entityTag)
   response.header(
     HttpHeaders.LastModified,
@@ -87,3 +88,18 @@ private const val ENTITY_TAG_HEX_LENGTH = 32
 private const val CONTENT_BUFFER_SIZE = 8 * 1_024
 private const val MAXIMUM_EAGER_ALLOCATION = 1_024 * 1_024
 private const val NATIVE_PRIVATE_REVALIDATE = "max-age=0, must-revalidate, private"
+
+/**
+ * What a cover may be reused for without asking again.
+ *
+ * `max-age=0` made every cover on a grid a conditional request, so returning to a screen of a hundred
+ * of them cost a hundred round trips to be told nothing had changed. A cover's URL is not
+ * content-addressed - `/series/{id}/artwork` answers whatever is selected now - so it cannot be cached
+ * indefinitely either; a re-scan or an upload would go unseen.
+ *
+ * Five minutes is picked against how a cover actually changes. Nothing changes one except a scan, an
+ * upload or a selection, all of which publish an artwork event the reader is already subscribed to, so
+ * the screen learns immediately and this window only bounds how long a client that missed the event
+ * stays wrong. `must-revalidate` keeps a stale copy from being served past it.
+ */
+internal const val NATIVE_ARTWORK_CACHE_CONTROL = "max-age=300, must-revalidate, private"

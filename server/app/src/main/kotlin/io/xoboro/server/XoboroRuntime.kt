@@ -16,6 +16,7 @@ import io.xoboro.core.application.ActivityRetentionLifecycle
 import io.xoboro.core.application.AnnouncementLifecycle
 import io.xoboro.core.application.ApiKeyLifecycle
 import io.xoboro.core.application.ArtworkLifecycle
+import io.xoboro.core.application.ArtworkProcessor
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogFileLifecycleRequester
@@ -330,10 +331,23 @@ class XoboroRuntime private constructor(
           )
         val nativeEvents = XoboroNativeEventHub(catalog = catalogReads).also { nativeEventHub = it }
         val artworkRepository = JooqArtworkRepository(database)
+        // Bound where `maximumCoverDimension` is defined, which is further down this function than the
+        // artwork lifecycle has to exist. Unset is a wiring mistake rather than a size to guess at, so
+        // reading it throws: quietly falling back to the untrusted-input ceiling is the exact defect
+        // this indirection exists to remove, and it would show up only as a slow grid.
+        var coverDimension: (() -> Int)? = null
         val artworkLifecycle =
           ArtworkLifecycle(
             artwork = artworkRepository,
             processor = SafeJpegArtworkProcessor(),
+            sidecarProcessor =
+              ArtworkProcessor { input ->
+                val dimension =
+                  requireNotNull(coverDimension) {
+                    "The cover dimension supplier was not wired before artwork was processed"
+                  }.invoke()
+                SafeJpegArtworkProcessor(maximumDimension = dimension).process(input)
+              },
             idFactory = { TsidCreator.getTsid256().toString() },
             currentTimeMillis = System::currentTimeMillis,
             eventPublisher = { event ->
@@ -460,6 +474,10 @@ class XoboroRuntime private constructor(
         // One supplier for every cover producer, so the analysis-time generator and the operator's
         // regeneration sweep can never disagree about how large a cover should be.
         val maximumCoverDimension = { serverSettingsLifecycle.snapshot().thumbnailSize.maximumDimension }
+        // Sidecar artwork is a third cover producer, and it disagreed: it stored the untrusted-input
+        // ceiling of 1600px while the other two used this, so a sidecar-covered series sent 85.8 KB to
+        // a 140px grid cell against a generated cover's 16.9 KB.
+        coverDimension = maximumCoverDimension
         val userLifecycle =
           UserLifecycle(
             users = userRepository,
