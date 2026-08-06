@@ -45,6 +45,7 @@
   } from '../lib/api/catalogSearch.js'
   import { eventHub } from '../lib/eventHub.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import ActiveFilters from './ActiveFilters.svelte'
   import MediaItemFilters from './MediaItemFilters.svelte'
   import SearchResults from './SearchResults.svelte'
   import SearchSort from './SearchSort.svelte'
@@ -70,6 +71,16 @@
   /** A filter group is missing because a choice list could not be read, not empty. */
   let filtersIncomplete = $state(false)
 
+  /**
+   * Whether the filter column is showing, on a viewport too narrow to hold both.
+   *
+   * Closed to begin with, because the facets enumerate whatever the library contains and
+   * open they push the results off the screen entirely - which is the state that made the
+   * search screen show its controls and none of its answers. A wide viewport ignores this
+   * and shows the column outright; see the media query.
+   */
+  let filtersOpen = $state(false)
+
   const criteria = $derived({
     ...filters,
     query: submitted,
@@ -79,6 +90,21 @@
   })
 
   /** The filters that exist for a scope, at their neutral values. */
+  /**
+   * How many filters are on, for the collapsed summary.
+   *
+   * Counted from `filters` rather than tracked alongside it, so it cannot drift from what the
+   * request was built with. `oneShot` counts only when it is not `any`, because `any` is the
+   * absence of that filter rather than a third choice.
+   */
+  const appliedCount = $derived(
+    Object.entries(filters).reduce((total, [parameter, value]) => {
+      if (Array.isArray(value)) return total + value.length
+      if (parameter === 'oneShot') return total + (value !== 'any' ? 1 : 0)
+      return total + (value ? 1 : 0)
+    }, 0),
+  )
+
   function freshFilters(next) {
     return next === 'series'
       ? { libraryId: [], genre: [], tag: [], publisher: [], language: [], oneShot: 'any' }
@@ -281,9 +307,31 @@
   {/each}
 </fieldset>
 
-<section class="controls">
-  <h2>{$_('search.filters.legend')}</h2>
+<div class="workspace">
+<!-- A disclosure rather than a plain section, because the facets enumerate whatever the
+     library contains and so this column's height is the catalog's business. Collapsed, the
+     controls cost one row and the results start at the top of the screen; on a wide viewport
+     the summary is hidden and the body forced open, so the filters are simply the left
+     column. Document order stays filters-then-results, which keeps tab order matching the
+     desktop reading order instead of trading one against the other. -->
+<section class="controls" data-testid="search-controls">
+  <button
+    class="disclosure"
+    type="button"
+    data-testid="toggle-filters"
+    aria-expanded={filtersOpen}
+    aria-controls="search-filters"
+    onclick={() => (filtersOpen = !filtersOpen)}
+  >
+    <span>{$_('search.filters.show')}</span>
+    {#if appliedCount > 0}
+      <span class="count" data-testid="applied-count">
+        {$_('search.filters.appliedCount', { values: { count: appliedCount } })}
+      </span>
+    {/if}
+  </button>
 
+  <div id="search-filters" data-testid="search-filters" class="panel" hidden={!filtersOpen}>
   {#if filtersIncomplete}
     <!-- Its own notice rather than the shared error one: the search itself may have
          answered perfectly, and reporting the whole screen as broken would be as
@@ -305,9 +353,12 @@
   <button class="clear" type="button" data-testid="clear-filters" onclick={clearFilters}>
     {$_('search.filters.clear')}
   </button>
+  </div>
 </section>
 
 <section class="results">
+  <ActiveFilters criteria={filters} {libraries} onremove={applyFilters} />
+
   <ErrorNotice {error} onretry={() => run(scope, criteria)} />
 
   {#if loading}
@@ -321,6 +372,7 @@
     onpage={(next) => (pageIndex = next)}
   />
 </section>
+</div>
 
 <style>
   header {
@@ -414,13 +466,70 @@
     gap: var(--space-2);
     font-size: var(--font-sm);
   }
+  .workspace {
+    display: grid;
+    gap: var(--space-4);
+  }
   .controls {
+    margin-bottom: 0;
+  }
+  .panel {
     display: grid;
     gap: var(--space-3);
+    margin-top: var(--space-3);
   }
-  .controls h2 {
-    margin: 0;
+  .disclosure {
+    display: flex;
+    width: 100%;
+    min-height: var(--touch-target);
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
     font-size: var(--font-md);
+    cursor: pointer;
+  }
+  .count {
+    color: var(--accent-text);
+    font-size: var(--font-xs);
+  }
+  /*
+   * Wide enough for both columns, so the disclosure stops being a control at all: the filters
+   * are simply the left column and the results the right. `[hidden]` is a UA `display: none`
+   * that author styles override in the normal cascade, which is why the panel can be forced
+   * open here without the script knowing the viewport - no `matchMedia`, and nothing to keep
+   * in sync with the breakpoint.
+   *
+   * Document order stays filters-then-results, so tab order matches this reading order rather
+   * than being traded against it.
+   */
+  @media (min-width: 60rem) {
+    .workspace {
+      grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
+      align-items: start;
+      padding-right: var(--gutter-right);
+    }
+    .disclosure {
+      display: none;
+    }
+    .panel[hidden] {
+      display: grid;
+    }
+    .panel {
+      margin-top: 0;
+    }
+    .controls {
+      position: sticky;
+      top: var(--space-3);
+      margin-right: 0;
+    }
+    .results {
+      padding-right: 0;
+      padding-left: 0;
+    }
   }
   .incomplete {
     display: flex;
