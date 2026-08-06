@@ -1324,6 +1324,123 @@ class JooqCatalogReadRepositoryTest {
     }
   }
 
+  /**
+   * `unicode61` splits text on non-alphanumeric boundaries and every term the query builder emits
+   * carries FTS5's prefix operator, so a name written without word breaks is a single token that only
+   * its own opening can match. A reader who remembers the middle of a title and not its start got
+   * nothing back. Korean and Japanese titles are routinely written that way, and so is any run-together
+   * Latin name - which is what these use, because the property is the tokeniser's and not the script's
+   * and test sources here stay ASCII.
+   */
+  @Test
+  fun `finds an interior fragment of a title written without word breaks`() {
+    withCatalog("substring") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "longsynthetic"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+      )
+      assertEquals(
+        3,
+        catalog
+          .findBooks(
+            BookCatalogQuery(fullTextSearch = "longsynthetic"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+        "a book's indexed title carries its series', so the fragment has to reach books too",
+      )
+    }
+  }
+
+  /**
+   * The trigram index holds three-character windows, so two characters have no trigram and interior
+   * matching cannot serve them at all. What has to survive that is the prefix search those terms
+   * already had - the union must not become a replacement - and the second assertion states the
+   * remaining limit out loud so it reads as the tokeniser's floor rather than as a bug.
+   *
+   * This does not pin the length filter in `toSubstringQuery`: lowering that floor leaves every test
+   * here passing, because FTS5 answers a short trigram term with no rows instead of an error. The
+   * filter skips a pointless index probe; only this test's first assertion is load-bearing.
+   */
+  @Test
+  fun `keeps prefix search for terms too short to have a trigram`() {
+    withCatalog("substring-short") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "ve"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+        "two characters still match the title's opening, as they did before this index existed",
+      )
+      assertEquals(
+        0,
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "ng"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+        "and two characters cannot match the title's interior: the floor is the tokeniser's",
+      )
+    }
+  }
+
+  /** Interior matching widens the word index rather than replacing it, so both keep answering. */
+  @Test
+  fun `still finds a word that only the prefix index holds`() {
+    withCatalog("substring-union") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val metadata = JooqSeriesMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findBySeriesIdOrNull(SeriesId("series-a"))).copy(
+          title = RUN_TOGETHER_TITLE,
+          summary = "A navigational archive",
+          updatedAtMillis = 3,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "navigational"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+        "summary is not in the title index, so only the union can still find this",
+      )
+    }
+  }
+
+  private fun XoboroDatabase.retitleSeriesA(title: String) {
+    val metadata = JooqSeriesMetadataRepository(this)
+    val seriesId = SeriesId("series-a")
+    metadata.upsert(
+      requireNotNull(metadata.findBySeriesIdOrNull(seriesId)).copy(
+        title = title,
+        updatedAtMillis = 2,
+      ),
+    )
+  }
+
   @Test
   fun `evaluates recursive structured conditions before stable paging`() {
     withCatalog("structured") { database ->
@@ -1514,5 +1631,14 @@ class JooqCatalogReadRepositoryTest {
       }
       block(database)
     }
+  }
+
+  private companion object {
+    /**
+     * One token to `unicode61`, so its interior is reachable only by the trigram index. Opens with
+     * `ve` and carries `ng` inside but never at a token's start, which is what separates the prefix
+     * search that survives a short term from the interior match that cannot.
+     */
+    private const val RUN_TOGETHER_TITLE = "verylongsyntheticname"
   }
 }

@@ -448,15 +448,10 @@ class JooqCatalogReadRepository(
       if (match == null) {
         parts += "1 = 0"
       } else {
-        parts +=
-          """
-          b.id IN (
-            SELECT entity_id
-            FROM catalog_search_fts
-            WHERE entity_type = 'BOOK' AND catalog_search_fts MATCH ?
-          )
-          """.trimIndent()
+        val substring = it.toSubstringQuery()
+        parts += fullTextClause("b.id", "BOOK", substring != null)
         bindings += match
+        substring?.let(bindings::add)
       }
     }
     query.condition?.let {
@@ -493,15 +488,10 @@ class JooqCatalogReadRepository(
       if (match == null) {
         parts += "1 = 0"
       } else {
-        parts +=
-          """
-          s.id IN (
-            SELECT entity_id
-            FROM catalog_search_fts
-            WHERE entity_type = 'SERIES' AND catalog_search_fts MATCH ?
-          )
-          """.trimIndent()
+        val substring = it.toSubstringQuery()
+        parts += fullTextClause("s.id", "SERIES", substring != null)
         bindings += match
+        substring?.let(bindings::add)
       }
     }
     query.regexSearch?.let {
@@ -900,6 +890,62 @@ class JooqCatalogReadRepository(
       .takeIf(List<String>::isNotEmpty)
       ?.joinToString(" AND ")
 
+  /**
+   * The same terms as interior matches, for those long enough to have one.
+   *
+   * FTS5's trigram index holds three-character windows, so a shorter term has no trigram to look up.
+   * Sending one anyway is not wrong - the index returns nothing rather than erroring, which was
+   * verified by lowering this floor and watching every test still pass - so dropping short terms here
+   * buys a skipped index probe, not a different answer. When every term is too short the caller gets
+   * null and the clause is left off entirely, and the query is the prefix search it was before this
+   * index existed. That case is the tokeniser's floor rather than a choice: two characters have no
+   * trigram, so interior matching cannot serve them however the query is phrased.
+   */
+  private fun String.toSubstringQuery(): String? =
+    SEARCH_TOKEN
+      .findAll(this)
+      .map(MatchResult::value)
+      .filter { token -> token.codePointCount(0, token.length) >= TRIGRAM_MINIMUM_TERM }
+      .map { token -> "\"${token.replace("\"", "\"\"")}\"" }
+      .toList()
+      .takeIf(List<String>::isNotEmpty)
+      ?.joinToString(" AND ")
+
+  /**
+   * Word search, widened by interior match when the terms allow one.
+   *
+   * The two indexes are ORed because neither contains the other's answers. `catalog_search_fts` matches
+   * whole words from their start and reaches `summary`, `contributors`, `labels` and `identifiers`;
+   * `catalog_title_substring` matches any interior fragment but only of titles. Intersecting them would
+   * lose a word found in a summary, and replacing the first with the second would lose every query
+   * shorter than three characters, so the union is the only composition that takes nothing away.
+   */
+  private fun fullTextClause(
+    idColumn: String,
+    entityType: String,
+    withSubstring: Boolean,
+  ): String {
+    val words =
+      """
+      $idColumn IN (
+        SELECT entity_id
+        FROM catalog_search_fts
+        WHERE entity_type = '$entityType' AND catalog_search_fts MATCH ?
+      )
+      """.trimIndent()
+    if (!withSubstring) return words
+    return """
+      (
+        $words
+        OR $idColumn IN (
+          SELECT entity_id
+          FROM catalog_title_substring
+          WHERE entity_type = '$entityType' AND catalog_title_substring MATCH ?
+        )
+      )
+      """.trimIndent()
+  }
+
   private fun Set<String>.normalized(): Set<String> =
     asSequence().map(String::trim).filter(String::isNotEmpty).map(String::lowercase).toSet()
 
@@ -1013,5 +1059,8 @@ class JooqCatalogReadRepository(
         "random" to "random()",
       )
     private val SEARCH_TOKEN = Regex("[\\p{L}\\p{N}]+")
+
+    /** FTS5's trigram tokeniser indexes three-character windows and so cannot match anything shorter. */
+    private const val TRIGRAM_MINIMUM_TERM = 3
   }
 }
