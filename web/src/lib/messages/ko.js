@@ -420,6 +420,10 @@ export default {
       noMatch: '해당하는 값이 없습니다',
       choicesFailed: '좁히기 값을 읽지 못했습니다. 비어 있는 것이 아니라 일부 항목이 빠져 있습니다.',
       clear: '좁히기 지우기',
+      active: '지금 좁힌 것',
+      remove: '{value} 좁히기 풀기',
+      appliedCount: '{count}개 적용됨',
+      show: '좁히기',
     },
     results: {
       summary: '{total, plural, =0 {찾은 것이 없습니다} other {#개를 찾았습니다}}',
