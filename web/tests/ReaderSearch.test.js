@@ -126,6 +126,55 @@ describe('reader search', () => {
     expect(input.labels[0].textContent).not.toContain('search.')
   })
 
+  /**
+   * The facets enumerate whatever the library contains, so the filter column's height is the
+   * catalog's business rather than the form's. One real library's genres and tags came to
+   * roughly a hundred rows, and the results sat below all of it: the search screen showed its
+   * controls and none of its answers. Capping each group shortened the column; leaving it
+   * expanded by default still puts several groups, a sort control and a clear button ahead of
+   * the first result.
+   *
+   * So the column starts closed and the results start at the top. Closed is `hidden`, which is
+   * a UA `display: none` the desktop media query overrides in the ordinary cascade - the script
+   * never learns the viewport, so there is no breakpoint duplicated between CSS and JS.
+   */
+  it('starts with the filter column closed, so the results are what is on screen', async () => {
+    globalThis.fetch = server().fetch
+    render(Search)
+
+    expect(screen.getByTestId('search-filters')).toHaveAttribute('hidden')
+    expect(screen.getByTestId('toggle-filters')).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('opens the filter column when asked', async () => {
+    globalThis.fetch = server().fetch
+    render(Search)
+
+    await fireEvent.click(screen.getByTestId('toggle-filters'))
+
+    expect(screen.getByTestId('search-filters')).not.toHaveAttribute('hidden')
+    expect(screen.getByTestId('toggle-filters')).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  /**
+   * A closed column would otherwise hide that anything is applied at all, which is the failure
+   * the chips beside the results exist to prevent - but the count is what makes the closed
+   * control itself honest, before any chip is read.
+   */
+  it('says how many filters are on while the column is closed', async () => {
+    const backend = server()
+    globalThis.fetch = backend.fetch
+    render(Search)
+
+    await waitFor(() => expect(screen.getByTestId('filter-genre-gen-a')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('filter-genre-gen-a'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('applied-count').textContent).toContain('1'),
+    )
+    expect(screen.getByTestId('active-filter-genre-gen-a')).toBeInTheDocument()
+  })
+
   it('renders no raw key path, in either scope, for any key it computes', async () => {
     // The i18n suite reads literal `$_('…')` calls out of the source and cannot see a
     // computed one. This screen builds four: `search.scope.${name}`,

@@ -420,6 +420,10 @@ export default {
       choicesFailed:
         'Filter choices could not be read, so some filters are missing rather than empty.',
       clear: 'Clear the filters',
+      active: 'Currently narrowed by',
+      remove: 'Stop narrowing by {value}',
+      appliedCount: '{count} applied',
+      show: 'Narrow',
     },
     results: {
       summary:
