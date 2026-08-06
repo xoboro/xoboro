@@ -22,6 +22,7 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogFileLifecycleRequester
 import io.xoboro.core.application.CatalogMaintenanceRequester
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.domain.CatalogChangeRepository
 import io.xoboro.core.application.CatalogScanner
 import io.xoboro.core.application.ClientSettingsLifecycle
 import io.xoboro.core.application.CompatibilityMaintenanceRequester
@@ -92,6 +93,7 @@ import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqAnnouncementReadRepository
 import io.xoboro.server.persistence.JooqApiKeyRepository
 import io.xoboro.server.persistence.JooqArtworkRepository
+import io.xoboro.server.persistence.JooqCatalogChangeRepository
 import io.xoboro.server.persistence.JooqAuthenticationActivityRepository
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookMetadataAggregationRepository
@@ -208,6 +210,7 @@ class XoboroRuntime private constructor(
   val libraryMaintenanceRequester: LibraryMaintenanceRequester,
   val libraryScanRequester: LibraryScanRequester,
   val catalogReadRepository: CatalogReadRepository,
+  val catalogChangeRepository: CatalogChangeRepository,
   val catalogMaintenanceRequester: CatalogMaintenanceRequester,
   val catalogFileLifecycleRequester: CatalogFileLifecycleRequester,
   val transientBookLifecycle: TransientBookLifecycle,
@@ -1110,6 +1113,7 @@ class XoboroRuntime private constructor(
           libraryMaintenanceRequester = libraryMaintenanceRequester,
           libraryScanRequester = libraryScanRequester,
           catalogReadRepository = catalogReads,
+          catalogChangeRepository = JooqCatalogChangeRepository(database),
           catalogMaintenanceRequester = catalogMaintenanceRequester,
           catalogFileLifecycleRequester = catalogFileLifecycleRequester,
           transientBookLifecycle = transientBookLifecycle,
