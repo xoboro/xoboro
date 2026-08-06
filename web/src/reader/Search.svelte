@@ -292,19 +292,21 @@
 
 <fieldset class="scope">
   <legend>{$_('search.scope.legend')}</legend>
-  {#each SCOPE_NAMES as name (name)}
-    <label>
-      <input
-        type="radio"
-        name="search-scope"
-        data-testid={`scope-${name}`}
-        value={name}
-        checked={scope === name}
-        onchange={() => changeScope(name)}
-      />
-      <span>{$_(`search.scope.${name}`)}</span>
-    </label>
-  {/each}
+  <div class="segments">
+    {#each SCOPE_NAMES as name (name)}
+      <label>
+        <input
+          type="radio"
+          name="search-scope"
+          data-testid={`scope-${name}`}
+          value={name}
+          checked={scope === name}
+          onchange={() => changeScope(name)}
+        />
+        <span>{$_(`search.scope.${name}`)}</span>
+      </label>
+    {/each}
+  </div>
 </fieldset>
 
 <div class="workspace">
@@ -439,7 +441,6 @@
     font-weight: 700;
     cursor: pointer;
   }
-  .scope,
   .controls {
     margin: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
     padding: var(--space-3);
@@ -447,24 +448,70 @@
     border-radius: var(--radius);
     background: var(--surface-inset);
   }
+  /*
+   * A segmented control rather than a bordered card holding two radios. Two mutually exclusive
+   * choices with three-character labels filled a full-width panel and a touch-target-height row each,
+   * which is a lot of screen for the smallest decision here - and it sat between the query and the
+   * results, so it pushed the answers down for its whole height.
+   *
+   * Still two `<input type="radio">` in a `<fieldset>`, visually hidden. Arrow-key navigation, the
+   * one-of-many announcement and the group's name all come from that, and `:checked` styles the
+   * segment without any state mirrored in script.
+   */
   .scope {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-4);
+    margin: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
+    padding: 0;
+    border: 0;
   }
   .scope legend {
+    /* Named for a screen reader, not drawn: the two segments say what the choice is. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
     padding: 0;
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
-  .scope label {
-    display: flex;
-    min-height: var(--touch-target);
+  .segments {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: var(--surface-inset);
+  }
+  .segments label {
+    display: inline-flex;
+    min-height: 2rem;
     align-items: center;
-    gap: var(--space-2);
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
     font-size: var(--font-sm);
+    line-height: 1;
+    cursor: pointer;
+  }
+  .segments input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .segments label:has(input:checked) {
+    background: var(--surface-raised);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .segments label:has(input:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .workspace {
     display: grid;
