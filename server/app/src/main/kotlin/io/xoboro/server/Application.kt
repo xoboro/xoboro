@@ -100,6 +100,7 @@ import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.TransientBookLifecycle
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
+import io.xoboro.core.domain.CatalogChangeRepository
 import io.xoboro.core.domain.HistoricalEventRepository
 import io.xoboro.core.domain.LibraryRepository
 import io.xoboro.core.domain.ReadListRepository
@@ -117,6 +118,7 @@ import io.xoboro.server.api.xoboroNativeArchiveRoutes
 import io.xoboro.server.api.xoboroNativeArtworkRoutes
 import io.xoboro.server.api.xoboroNativeAuthenticationRoutes
 import io.xoboro.server.api.xoboroNativeCatalogRoutes
+import io.xoboro.server.api.xoboroNativeChangeRoutes
 import io.xoboro.server.api.xoboroNativeCollectionsRoutes
 import io.xoboro.server.api.xoboroNativeDeliveryRoutes
 import io.xoboro.server.api.xoboroNativeDuplicatePageRoutes
@@ -233,6 +235,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryMaintenanceRequester = runtime.libraryMaintenanceRequester,
     libraryScanRequester = runtime.libraryScanRequester,
     catalogReadRepository = runtime.catalogReadRepository,
+    catalogChangeRepository = runtime.catalogChangeRepository,
     catalogMaintenanceRequester = runtime.catalogMaintenanceRequester,
     catalogFileLifecycleRequester = runtime.catalogFileLifecycleRequester,
     transientBookLifecycle = runtime.transientBookLifecycle,
@@ -289,6 +292,7 @@ fun Application.xoboroModule(
   libraryMaintenanceRequester: LibraryMaintenanceRequester? = null,
   libraryScanRequester: LibraryScanRequester? = null,
   catalogReadRepository: CatalogReadRepository? = null,
+  catalogChangeRepository: CatalogChangeRepository? = null,
   catalogMaintenanceRequester: CatalogMaintenanceRequester? = null,
   catalogFileLifecycleRequester: CatalogFileLifecycleRequester? = null,
   transientBookLifecycle: TransientBookLifecycle? = null,
@@ -584,6 +588,7 @@ fun Application.xoboroModule(
               content = bookContentAccess,
             )
           }
+          catalogChangeRepository?.let { xoboroNativeChangeRoutes(it) }
           if (libraryAdministrationLifecycle != null && catalogReadRepository != null) {
             xoboroNativeCatalogRoutes(
               libraries = libraryAdministrationLifecycle,
