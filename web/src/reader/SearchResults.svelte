@@ -12,10 +12,10 @@
    * about 3.8 ms and a media-item listing roughly 25 ms — so "fetch it all and page in
    * the browser" is most expensive exactly where a reader would notice.
    */
-  import { ChevronLeft, ChevronRight } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import { artworkUrl } from '../lib/api/catalog.js'
   import Cover from '../components/Cover.svelte'
+  import Pager from '../components/Pager.svelte'
 
   let {
     /** `'series'` or `'mediaItems'`; decides the artwork route and the link target. */
@@ -29,10 +29,6 @@
   } = $props()
 
   const items = $derived(page?.items ?? [])
-  // One-based on screen. `page` is zero-based on the wire, and "page 0 of 5" is a
-  // leaked implementation detail.
-  const humanPage = $derived((page?.page ?? 0) + 1)
-  const totalPages = $derived(Math.max(1, page?.totalPages ?? 1))
   const kind = $derived(scope === 'series' ? 'series' : 'mediaItem')
 
   const href = (item) => (scope === 'series' ? `#/series/${item.id}` : `#/read/${item.id}`)
@@ -66,31 +62,14 @@
       {/each}
     </ul>
 
-    <nav class="paging" aria-label={$_('search.title')}>
-      <p class="position">
-        {$_('search.paging.summary', { values: { page: humanPage, pages: totalPages } })}
-      </p>
-      <div class="buttons">
-        <button
-          type="button"
-          data-testid="search-page-previous"
-          disabled={!page.hasPrevious || busy}
-          aria-label={$_('search.paging.previous')}
-          onclick={() => onpage(page.page - 1)}
-        >
-          <ChevronLeft size={18} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          data-testid="search-page-next"
-          disabled={!page.hasNext || busy}
-          aria-label={$_('search.paging.next')}
-          onclick={() => onpage(page.page + 1)}
-        >
-          <ChevronRight size={18} aria-hidden="true" />
-        </button>
-      </div>
-    </nav>
+    <Pager
+      {page}
+      {busy}
+      {onpage}
+      label={$_('search.title')}
+      testIdPrefix="search-page"
+      summaryKey="search.paging.summary"
+    />
   {/if}
 {/if}
 
@@ -129,37 +108,5 @@
     font-size: var(--font-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .paging {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    margin-top: var(--space-4);
-  }
-  .position {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-sm);
-    font-variant-numeric: tabular-nums;
-  }
-  .buttons {
-    display: flex;
-    gap: var(--space-2);
-  }
-  .buttons button {
-    display: grid;
-    width: var(--touch-target);
-    height: var(--touch-target);
-    place-items: center;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    background: var(--surface-control);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .buttons button:disabled {
-    opacity: 0.4;
-    cursor: default;
   }
 </style>
