@@ -90,6 +90,43 @@ class CatalogSearchIndexTriggerTest {
   }
 
   /**
+   * The interior-match index is a second FTS table with a second set of triggers, so it needs the same
+   * two facts established independently: that a real rename reaches it, and that a no-op write does
+   * not. Its triggers carry V31's guard for the same reason the first index's do - a library re-scan
+   * writes every matched book - and a guard that is present but wrong is indistinguishable from one
+   * that is absent until something reads the index.
+   */
+  @Test
+  fun `renaming a series rebuilds the interior-match index for itself and its books`() {
+    withCatalog("series-substring-renamed") { database ->
+      database.staleTheIndex()
+
+      database.dsl.execute("UPDATE series SET name = ? WHERE id = ?", "Renamed", SERIES_ID.value)
+
+      assertTrue(database.substringTitleOf("SERIES", SERIES_ID.value).contains(MARKER))
+      assertTrue(
+        database.substringTitleOf("BOOK", BOOK_ID.value).contains(MARKER),
+        "a book's interior-match row carries its series' title",
+      )
+    }
+  }
+
+  @Test
+  fun `rewriting a series' name to the value it already holds leaves the interior-match index alone`() {
+    withCatalog("series-substring-noop") { database ->
+      database.staleTheIndex()
+
+      database.dsl.execute("UPDATE series SET name = name WHERE id = ?", SERIES_ID.value)
+
+      assertFalse(database.substringTitleOf("SERIES", SERIES_ID.value).contains(MARKER))
+      assertFalse(
+        database.substringTitleOf("BOOK", BOOK_ID.value).contains(MARKER),
+        "a no-op series write must not cascade into its books here either",
+      )
+    }
+  }
+
+  /**
    * Puts a marker into text the index derives from but is not reindexed on, so the index is now known
    * to be stale and the marker's later presence means a rebuild happened.
    */
@@ -101,19 +138,36 @@ class CatalogSearchIndexTriggerTest {
     require(!indexedTitleOf("BOOK", BOOK_ID.value).contains(MARKER)) {
       "series_metadata writes are expected to leave the index stale; this test's premise is gone"
     }
+    require(!substringTitleOf("SERIES", SERIES_ID.value).contains(MARKER)) {
+      "series_metadata writes are expected to leave the index stale; this test's premise is gone"
+    }
+    require(!substringTitleOf("BOOK", BOOK_ID.value).contains(MARKER)) {
+      "series_metadata writes are expected to leave the index stale; this test's premise is gone"
+    }
   }
 
   private fun XoboroDatabase.indexedTitleOf(
     entityType: String,
     entityId: String,
+  ): String = titleFrom("catalog_search_fts", entityType, entityId)
+
+  private fun XoboroDatabase.substringTitleOf(
+    entityType: String,
+    entityId: String,
+  ): String = titleFrom("catalog_title_substring", entityType, entityId)
+
+  private fun XoboroDatabase.titleFrom(
+    table: String,
+    entityType: String,
+    entityId: String,
   ): String =
     dsl
       .fetchOne(
-        "SELECT title FROM catalog_search_fts WHERE entity_type = ? AND entity_id = ?",
+        "SELECT title FROM $table WHERE entity_type = ? AND entity_id = ?",
         entityType,
         entityId,
       )?.get("title", String::class.java)
-      ?: error("$entityType $entityId is not indexed")
+      ?: error("$entityType $entityId is not indexed in $table")
 
   private fun withCatalog(
     databaseName: String,
