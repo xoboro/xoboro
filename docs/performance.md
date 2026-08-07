@@ -152,22 +152,59 @@ the count-query hypothesis was **rejected**. That comparison was made on undrain
 numbers. Drained, the narrow filter is 1.6 ms against 3.8 ms — 2.4× *faster*. The
 rejection does not stand: the hypothesis is open again, on better evidence.
 
-## Also open: superlinear cold scan
+## Open, and now localised: the cold scan is near-quadratic
 
-`cold_full_scan` measured 11.4 s at 3,050 items and 149.5 s at 15,050 — a 5×
-increase in items for a 13.1× increase in time. An earlier run measured 167.6 s at
-the same size, so the shape is consistent across two observations but the magnitude
-varies by 12%.
+This section used to say the two-point ratio on `cold_full_scan` was suggestive but could
+not distinguish superlinear growth from a fixed cost landing between the sizes. That was
+the right caution, and it is now answered — not by a third size, but by splitting the
+metric.
+
+`scripts/cold-scan-repetitions.sh 3 300 10 50` and `... 3 1500 10 50`, three repetitions
+each in separate JVMs, about 5% spread at both sizes:
+
+| metric | 3,050 items | 15,050 items | ratio |
+|---|---|---|---|
+| items | — | — | **4.93×** |
+| `cold_scan.wall` | 4,290 ms | **97,933 ms** | **22.8×** |
+| `cold_analyze.wall` | 6,204 ms | 31,417 ms | **5.06×** |
+| `cold_full_scan.wall` | 10,495 ms | 129,350 ms | 12.3× |
+| `unchanged_rescan.wall.p50` | 100 ms | 595 ms | 5.95× |
+
+Per item, analysis costs 2.034 ms then 2.088 ms — **1.03×, flat**. Scan costs 1.406 ms then
+6.508 ms — **4.63×**. Scan throughput falls from 710 items/s to 154 items/s, and the
+composition inverts: scan is 41% of `cold_full_scan` at 3,050 items and **76%** at 15,050.
+
+**Why this excludes the fixed-cost explanation.** Both metrics come from the same JVM, the
+same fixture and the same setup in each repetition. A fixed cost that happened to land
+between the two sizes would inflate *both* ratios. Analysis came out flat. A fixed cost
+cannot produce that asymmetry, so the growth is in the scan itself.
+
+`ln(22.8) / ln(4.93) = 1.96`. Two sizes still cannot *prove* a curve, but an exponent that
+close to 2 alongside a flat sibling metric points at O(n²) — something evaluating over the
+whole candidate set once per item. `ADR 0052: set-based scan reconciliation` is the place to
+look; `EXPLAIN QUERY PLAN` on the reconciliation queries will show whether a candidate
+lookup is an index seek or a table scan.
+
+Projected at the deployed catalogue of 145,105 items — `145105 / 15050 = 9.64×` items, so
+roughly 84× time at exponent 1.96 — the scan step alone would be about **2.3 hours**. That
+is an extrapolation from two points; treat it as an order of magnitude.
+
+**Repeat scans are not affected.** `unchanged_rescan.wall.p50` grew 5.95× for 4.93× items,
+near linear, and costs 0.6 s at 15,050 items. That is V31's `WHEN NEW.x IS NOT OLD.x` guard
+on the search-index triggers doing its job: a write that changes nothing is free. The cost
+is in the *first* scan.
 
 Cold metrics need repetition in **separate JVMs**, which
-`scripts/cold-scan-repetitions.sh` now does: one `gradlew` invocation per
-repetition, because looping inside one JVM makes every iteration after the first
-systematically faster and stops measuring a cold start at all. At 105 items five
-repetitions vary by about 4%.
+`scripts/cold-scan-repetitions.sh` does: one `gradlew` invocation per repetition, because
+looping inside one JVM makes every iteration after the first systematically faster and stops
+measuring a cold start at all. At 105 items five repetitions vary by about 4%.
 
-Running it at 3,050 and 15,050 items is the outstanding work. The two-point ratio
-above is suggestive but two points cannot distinguish superlinear growth from a
-fixed cost that happens to land between them.
+### One earlier conclusion in this file does not generalise
+
+The WebDAV comparison below reports listing at 95 s against analysis at 5.5 items/s and
+concludes "listing is not the difference". That is true for *that* comparison, where
+whole-file `materialize()` made analysis the bottleneck across a remote link. It does **not**
+hold for local sources as the catalogue grows: the dominant term switches to scan.
 
 ## Settled: a WebDAV scan was bounded by how much it chose to transfer
 
