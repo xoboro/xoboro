@@ -71,11 +71,12 @@ scripts/cold-scan-repetitions.sh 3 1500 10 50   # 15,050 items, ~2 min/rep
 
 Synthetic fixtures, runs locally, **zero load on the deployed host**.
 
-### B. Record the measurement in `docs/performance.md`
+### B. ~~Record the measurement in `docs/performance.md`~~ — done
 
-That file says *"Running it at 3,050 and 15,050 items is the outstanding work."* It has been run — the
-numbers above. The "Also open: superlinear cold scan" section should be rewritten to state the
-decomposition and that the fixed-cost hypothesis is now excluded. Not yet committed.
+`docs/performance.md`, section **"Open, and now localised: the cold scan is near-quadratic"**, carries
+the full table, the reasoning that excludes the fixed-cost hypothesis, and the note that this file's own
+"listing is not the difference" conclusion does not generalise to local sources. **Read it there** — it
+is the tracked copy.
 
 ### C. A sidecar-only cover regeneration task
 
@@ -207,9 +208,16 @@ index probe, not correctness — FTS5 answers a short term with no rows rather t
 
 ---
 
-## Wiki
+## Wiki — local only, does NOT travel with the repo
 
-`.omc/wiki/` — start with these:
+`.omc/` is gitignored (`.gitignore:32`), so all 36 wiki pages live on the machine that wrote them and a
+fresh clone will not have them. **This document plus `docs/performance.md` are the parts that transfer.**
+Everything load-bearing has been repeated here deliberately for that reason.
+
+If the wiki should travel, that is a `.gitignore` decision for the owner to make — un-ignoring
+`.omc/wiki/` would put 36 pages under version control, which is a policy change rather than a fix.
+
+The pages, if you do have the working copy:
 
 | page | what |
 |---|---|
