@@ -229,13 +229,54 @@ The pages, if you do have the working copy:
 | `xoboro-working-agreement` | constraints, restated for handoff |
 | `xoboro-measurement-traps-2026-08` | every trap that produced a wrong statement |
 
-## One unanswered product question
+## Client scope: books first, Jellyfin deliberately deferred
 
-**Does the mobile app talk to arbitrary Jellyfin servers, or only to Xoboro?**
+**Decided 2026-08-07 by the owner: books and comics first. Video/audio is not in scope now, and how it
+arrives is not being decided yet. Build so the decision stays cheap — do not build for it.**
 
-ADRs 0023/0057 already decided Xoboro-the-server absorbs Jellyfin-class video and audio
-(`Library -> MediaItem -> {Comic, Novel, Book, Video, Audio}`). Server-absorbs is the path already paid
-for, and cross-server search cannot be merged correctly on a client — different totals, different sort
-keys, no correct page. But it means the app cannot point at someone else's Jellyfin.
+The three shapes that were on the table, kept here so nobody re-derives them:
 
-**This gates the adapter count in the client. Get an answer before building the sync layer.**
+| | shape | adapters in the client |
+|---|---|---|
+| A | app -> Xoboro server **and** app -> someone else's Jellyfin | 2 |
+| B | app -> Xoboro server, which scans video files itself | 1 |
+| C | app -> Xoboro server -> **Jellyfin as a source adapter** (`server/sources/jellyfin`, beside `local` and `webdav`) | 1 |
+
+B and C are identical from the client's side. C is how an existing Jellyfin install gets reused without
+re-scanning, and `server/sources/{local,webdav}` already establishes that plug point keyed on `sourceId`.
+A is the only shape that costs the client anything, and it buys exactly one thing: the app working for
+someone who runs Jellyfin and no Xoboro. That is a distribution question, not a technical one.
+
+Why A is expensive, in case it is ever reconsidered: two servers each return their own page 1 under their
+own sort, so a correct combined page 3 cannot be constructed — different totals, different sort keys. That
+one is not fixable with effort. Progress models also differ (page locator vs playback ticks with
+`PlaybackStart/Progress/Stopped` reporting), and the change feed would need two cursors, two floors and
+two `resyncRequired` signals, duplicated per device.
+
+### What "stay flexible" means concretely — and what it does not
+
+**Make the schema wide. Keep the code narrow.** A local-store schema change on a device already in the
+field costs a migration; adding an adapter later is just new code. So spend the flexibility on the data
+model and nowhere else.
+
+Do:
+
+- shape the client's local store on **`MediaItem`**, not on comics — ADR 0023 already made that the root
+  server-side (`Library -> MediaItem -> {Comic, Novel, Book, Video, Audio}`), so mirroring it means a
+  video row fits later without a device migration
+- keep **progress as two kinds from the start**: a page/locator position and a timeline position. ADR 0023
+  already refuses to force both into one nullable record; the client should not undo that
+- let the sync layer carry the **server identity** it is talking to, even with exactly one, so a second
+  upstream is a row rather than a rewrite
+- keep capability checks (`page sequence`, `timeline`, ...) rather than switching on file extension —
+  again, the server's existing model
+
+Do not:
+
+- build an adapter interface with one implementation. `RULES.md` and `PRINCIPLES.md` in this repo both say
+  avoid unnecessary abstractions and no speculative features; a one-implementation port is exactly that
+- write a Jellyfin client, DTOs or auth flow
+- add `Video`/`Audio` UI
+
+**In short: the local schema should be able to hold a video someday; nothing in the code should mention
+one.**
