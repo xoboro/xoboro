@@ -481,6 +481,19 @@ class XoboroNativeLibraryAdminTest {
       assertEquals(1, fixture.maintenance.analyzeCalls)
       assertEquals(listOf(id), fixture.maintenance.metadataRefreshes)
       assertEquals(0, fixture.maintenance.emptyTrashCalls)
+      // The series-only route is separate because the two differ by two orders of magnitude in what
+      // they queue. Asserting the whole-library one was not also called is the point: reaching it by
+      // accident is what took the host to 758% CPU.
+      assertEquals(0, fixture.maintenance.seriesMetadataRefreshCalls)
+
+      assertEquals(
+        HttpStatusCode.Accepted,
+        client.post("$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/series-metadata-refresh") {
+          bearerAuth(fixture.adminToken)
+        }.status,
+      )
+      assertEquals(listOf(id), fixture.maintenance.seriesMetadataRefreshes)
+      assertEquals(1, fixture.maintenance.metadataRefreshCalls)
 
       assertEquals(
         HttpStatusCode.Accepted,
@@ -505,7 +518,7 @@ class XoboroNativeLibraryAdminTest {
       installLibraryAdministration(fixture)
       fixture.maintenance.outcome = TaskEnqueue.UNAVAILABLE
 
-      for (suffix in listOf("analyze", "metadata-refresh")) {
+      for (suffix in listOf("analyze", "metadata-refresh", "series-metadata-refresh")) {
         val response =
           client.post("$LIBRARIES_PATH/$AVAILABLE_LIBRARY_ID/$suffix") {
             bearerAuth(fixture.adminToken)
@@ -852,6 +865,7 @@ class XoboroNativeLibraryAdminTest {
   private class RecordingLibraryMaintenanceRequester : LibraryMaintenanceRequester {
     val analyses = mutableListOf<LibraryId>()
     val metadataRefreshes = mutableListOf<LibraryId>()
+    val seriesMetadataRefreshes = mutableListOf<LibraryId>()
     val trashRequests = mutableListOf<LibraryId>()
     val analyzeCalls: Int
       get() = analyses.size
@@ -859,8 +873,10 @@ class XoboroNativeLibraryAdminTest {
       get() = metadataRefreshes.size
     val emptyTrashCalls: Int
       get() = trashRequests.size
+    val seriesMetadataRefreshCalls: Int
+      get() = seriesMetadataRefreshes.size
     val totalCalls: Int
-      get() = analyzeCalls + metadataRefreshCalls + emptyTrashCalls
+      get() = analyzeCalls + metadataRefreshCalls + seriesMetadataRefreshCalls + emptyTrashCalls
 
     /**
      * Set per test to drive the route's contention branch. Defaults to [TaskEnqueue.QUEUED], which
@@ -875,6 +891,11 @@ class XoboroNativeLibraryAdminTest {
 
     override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue {
       metadataRefreshes += libraryId
+      return outcome
+    }
+
+    override fun refreshSeriesMetadata(libraryId: LibraryId): TaskEnqueue {
+      seriesMetadataRefreshes += libraryId
       return outcome
     }
 
