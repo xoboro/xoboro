@@ -47,6 +47,13 @@ CREATE TABLE catalog_search_key (
 -- the views produce today. There was none to repair - a full rebuild on the snapshot returned both
 -- digests unchanged to the byte-length - and a fifty-second stall to fix nothing is the worse trade.
 -- Anything that does drift is already reachable by the metadata rebuild path per entity.
+--
+-- That leaves the two indexes asymmetric on one point, worth knowing before debugging a search:
+-- **an entity already missing from the word index stays missing**, because it has no rowid to adopt
+-- and nothing rebuilds it, while the interior-match index below is rebuilt from the views and comes
+-- out complete. The symptom is an entity findable by fragment but not by word. This migration does
+-- not create that state - the deployed catalogue has 148,444 rows for 148,444 entities, one each -
+-- and `rebuildBookSearchDocument` repairs one entity when it does happen.
 INSERT INTO catalog_search_key (index_rowid, entity_type, entity_id)
 SELECT rowid, entity_type, entity_id FROM catalog_search_fts;
 
