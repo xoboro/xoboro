@@ -120,6 +120,56 @@ class CatalogSearchIndexUpgradeTest {
     }
   }
 
+  /**
+   * A duplicated word-index row is the one pre-existing fault that could stop the upgrade dead: two
+   * rows for one entity would claim the key twice and fail its `UNIQUE` constraint, aborting the
+   * migration and leaving the server unable to start.
+   *
+   * Resolving it rather than tolerating it also matters. Deleting by entity took every row an entity
+   * had, so a duplicate healed itself on the next write; deleting by rowid takes one, so a duplicate
+   * that survived the upgrade would survive every write after it - hence the assertion that a rename
+   * afterwards still leaves one row.
+   */
+  @Test
+  fun `a duplicated word-index row does not stop the upgrade and does not survive it`() {
+    val path = tempDirectory.resolve("duplicate.sqlite").toAbsolutePath()
+    seedCatalogueAtVersion35(path)
+    dataSource(path).connection.use { connection ->
+      connection.createStatement().use { statement ->
+        statement.executeUpdate(
+          """
+          INSERT INTO catalog_search_fts (
+            entity_type, entity_id, title, summary, contributors, labels, identifiers
+          )
+          SELECT 'BOOK', entity_id, title, summary, contributors, labels, identifiers
+          FROM catalog_book_search_source WHERE entity_id = '$BOOK_ID'
+          """.trimIndent(),
+        )
+      }
+    }
+
+    XoboroDatabase.open(DatabaseConfig(path)).use { database ->
+      assertEquals(
+        1,
+        database.countOf("catalog_search_fts", "BOOK", BOOK_ID),
+        "the upgrade has to leave one row, not adopt both and not fail",
+      )
+      assertEquals(
+        database.keyOf("BOOK", BOOK_ID),
+        database.rowidOf("catalog_search_fts", "BOOK", BOOK_ID),
+        "and the survivor has to be the one the key names",
+      )
+
+      database.dsl.execute("UPDATE book SET name = ? WHERE id = ?", "Renamed", BOOK_ID)
+
+      assertEquals(
+        1,
+        database.countOf("catalog_search_fts", "BOOK", BOOK_ID),
+        "a duplicate that outlived the upgrade would outlive every write after it",
+      )
+    }
+  }
+
   /** The upgraded database has to behave like a freshly created one from here on. */
   @Test
   fun `deleting a book after the upgrade takes both index rows and its key`() {
