@@ -75,6 +75,7 @@ class XoboroDatabaseTest {
             "media_sync_read_list_item",
             "media_sync_progress",
             "catalog_search_fts",
+            "catalog_search_key",
             "series_book_metadata_aggregation",
             "series_book_metadata_aggregation_author",
             "series_book_metadata_aggregation_tag",
@@ -85,7 +86,7 @@ class XoboroDatabaseTest {
       assertEquals("wal", database.dsl.fetchValue("PRAGMA journal_mode", String::class.java))
       assertEquals(1, database.dsl.fetchValue("PRAGMA foreign_keys", Int::class.java))
       assertEquals(10_000, database.dsl.fetchValue("PRAGMA busy_timeout", Int::class.java))
-      assertEquals(34, database.migrationResult.migrationsExecuted)
+      assertEquals(36, database.migrationResult.migrationsExecuted)
     }
   }
 
@@ -206,7 +207,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(33, database.migrationResult.migrationsExecuted)
+      assertEquals(35, database.migrationResult.migrationsExecuted)
       assertEquals(
         "Legacy synthetic library",
         database.dsl
@@ -344,7 +345,7 @@ class XoboroDatabaseTest {
     }
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(5, database.migrationResult.migrationsExecuted)
+      assertEquals(7, database.migrationResult.migrationsExecuted)
 
       fun storedProgressions(bookId: String): List<Double> =
         database.dsl
