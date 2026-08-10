@@ -182,8 +182,31 @@ reachable from an index on `book` — i.e. denormalised onto the book row and ma
 a series' title changes, which is the same cascade the search index already runs on rename.
 That is a migration plus triggers. The alternative, changing what the listing is sorted by,
 is a product decision about what users see and not a performance fix. Neither belongs in a
-change whose subject is something else, and the count would still scan afterwards: an
-indexed order fixes the second 14 ms, not the first.
+change whose subject is something else.
+
+### The other half has a cheaper fix, measured
+
+The count runs through the same `FROM` the page query needs, and none of those joins can change
+what it counts. Every one is at most one row per book: `series` and `series_metadata` and
+`book_metadata` are mandatory 1:1 (`initialize_book_metadata` and `initialize_series_metadata`
+guarantee the metadata rows, and V14 backfilled the rest), `media.book_id` is a primary key, and
+`read_progress` and `read_progress_series` are keyed on `(…, user_id)` against one user. So the
+count is exactly the number of books matching the filter, whether or not the joins are there.
+
+Counting the same 15,000 books both ways, ten repetitions:
+
+| | per count |
+|---|---|
+| through the listing's joins | 8.90 ms |
+| over `book` alone | **2.00 ms** |
+
+Same answer both ways, 4.5× apart. It needs no schema change and changes no behaviour — what it
+needs is for the filter builder to report which aliases it referenced, so the count can be given
+only those joins. That is a refactor of the query builder rather than a one-line change, which is
+why it is written down here rather than done.
+
+Dropping a join the filter does reference would fail to compile the statement rather than return a
+wrong number, which is the right failure mode for this.
 
 ⚠️ **A correction.** This document previously recorded that narrowing the filtered
 set ~31× "did not make the request faster" (41.3 ms against 25.6 ms) and concluded
