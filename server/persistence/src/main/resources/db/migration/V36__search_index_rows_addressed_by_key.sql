@@ -32,31 +32,40 @@ CREATE TABLE catalog_search_key (
   CONSTRAINT catalog_search_key_entity_unique UNIQUE (entity_type, entity_id)
 ) STRICT;
 
-INSERT INTO catalog_search_key (entity_type, entity_id) SELECT 'BOOK', id FROM book;
-INSERT INTO catalog_search_key (entity_type, entity_id) SELECT 'SERIES', id FROM series;
+-- The word index is not rebuilt. An FTS5 row's rowid cannot be changed, but nothing says the key has
+-- to be a new number - so the key table adopts the rowids the index already uses, and the largest
+-- table in the database is never rewritten.
+--
+-- Rebuilding it instead measured **52.2 s** on a snapshot of the deployed catalogue (145,105 books,
+-- 3,339 series, 4.55 GB), and that is a stall in front of every request while the process starts.
+-- Almost none of it is FTS5: rebuilding one row evaluates `catalog_book_search_source`, three joins
+-- and five correlated `group_concat` subqueries, once per book. The interior-match index is rebuilt
+-- below because its rowids are its own and cannot both be adopted, but its source view carries one
+-- subquery instead of five, which is why V32 built it in 1.08 s over the same 148,444 rows.
+--
+-- What is given up: a rebuild would also have repaired any drift between the stored index and what
+-- the views produce today. There was none to repair - a full rebuild on the snapshot returned both
+-- digests unchanged to the byte-length - and a fifty-second stall to fix nothing is the worse trade.
+-- Anything that does drift is already reachable by the metadata rebuild path per entity.
+INSERT INTO catalog_search_key (index_rowid, entity_type, entity_id)
+SELECT rowid, entity_type, entity_id FROM catalog_search_fts;
 
--- Both indexes are rebuilt rather than updated in place: an FTS5 row's rowid cannot be changed, so
--- every existing row has to be written again under its entity's key. This is a bulk pass over the
--- catalogue, which is the shape V22 and V32 already used to build these indexes in the first place.
-DELETE FROM catalog_search_fts;
-INSERT INTO catalog_search_fts (
-  rowid, entity_type, entity_id, title, summary, contributors, labels, identifiers
-)
-SELECT
-  search_key.index_rowid, 'BOOK', source.entity_id, source.title, source.summary,
-  source.contributors, source.labels, source.identifiers
-FROM catalog_book_search_source source
-JOIN catalog_search_key search_key
-  ON search_key.entity_type = 'BOOK' AND search_key.entity_id = source.entity_id;
-INSERT INTO catalog_search_fts (
-  rowid, entity_type, entity_id, title, summary, contributors, labels, identifiers
-)
-SELECT
-  search_key.index_rowid, 'SERIES', source.entity_id, source.title, source.summary,
-  source.contributors, source.labels, source.identifiers
-FROM catalog_series_search_source source
-JOIN catalog_search_key search_key
-  ON search_key.entity_type = 'SERIES' AND search_key.entity_id = source.entity_id;
+-- An entity the word index never held still needs a key, or the triggers below would join against
+-- nothing and leave it silently unindexed. These take numbers above every adopted one, because
+-- `INTEGER PRIMARY KEY` allocates `max + 1`, so no new key can collide with an index row already
+-- sitting on that rowid.
+INSERT INTO catalog_search_key (entity_type, entity_id)
+SELECT 'BOOK', book.id FROM book
+WHERE NOT EXISTS (
+  SELECT 1 FROM catalog_search_key existing
+  WHERE existing.entity_type = 'BOOK' AND existing.entity_id = book.id
+);
+INSERT INTO catalog_search_key (entity_type, entity_id)
+SELECT 'SERIES', series.id FROM series
+WHERE NOT EXISTS (
+  SELECT 1 FROM catalog_search_key existing
+  WHERE existing.entity_type = 'SERIES' AND existing.entity_id = series.id
+);
 
 DELETE FROM catalog_title_substring;
 INSERT INTO catalog_title_substring (rowid, entity_type, entity_id, title)
