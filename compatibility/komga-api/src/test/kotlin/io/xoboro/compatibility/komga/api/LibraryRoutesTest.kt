@@ -390,6 +390,7 @@ class LibraryRoutesTest {
       val scans = mutableListOf<Pair<LibraryId, Boolean>>()
       val analyses = mutableListOf<LibraryId>()
       val metadataRefreshes = mutableListOf<LibraryId>()
+      val seriesMetadataRefreshes = mutableListOf<LibraryId>()
       val trash = mutableListOf<LibraryId>()
       testApplication {
         application {
@@ -415,6 +416,14 @@ class LibraryRoutesTest {
 
                   override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue {
                     metadataRefreshes += libraryId
+                    return TaskEnqueue.QUEUED
+                  }
+
+                  // Recorded separately from the whole-library refresh above. The Komga-compat
+                  // routes reach only that one, and folding both into one list would hide a route
+                  // that started asking for the cheaper scope - or the more expensive one.
+                  override fun refreshSeriesMetadata(libraryId: LibraryId): TaskEnqueue {
+                    seriesMetadataRefreshes += libraryId
                     return TaskEnqueue.QUEUED
                   }
 
