@@ -147,8 +147,15 @@ Shipped in 0.3.0 but partial. Wiki: `xoboro-catalog-change-feed`.
 
 ### E. Smaller, independent
 
-- **`-Xmx` is unset in the distribution.** A host install takes 25% of RAM for max heap — 12 GB observed
-  on a 48 GB box against a ~664 MB live set. Not a leak; just an unhelpful default.
+- **`-Xmx` is unset in the distribution, and that is not worth changing in code.** Investigated
+  2026-08-10 and closed without a change. The deployed container does not have the problem: it sees
+  **7.818 GiB**, not the host's 48 GB, so the JVM's 25% default is about 1.95 GB of *maximum* heap
+  against 325 MiB actually resident. The 12 GB figure is a host install reading the whole box. Max
+  heap is a ceiling, not a reservation, and a fixed `-Xmx` in the image would be wrong in the other
+  direction on a small machine — too high to fail cleanly, so it swaps instead of throwing. The start
+  script already honours `JAVA_OPTS` and `APP_OPTS` (`/opt/xoboro/bin/app` line 244), so a host
+  install that wants a ceiling sets one without a release. **Reopen this only with a measured live
+  set that a 25% ceiling actually constrains.**
 - **CI cannot publish to Docker Hub.** Needs a `DOCKERHUB_REPOSITORY` variable plus
   `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, or make the GHCR package pullable from macmini.
   Today every Docker Hub push is manual from the MacBook.
