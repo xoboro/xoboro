@@ -242,11 +242,40 @@ changed nothing, which is what made a re-scan affordable, but it did not make th
 that trigger runs once per updated row, so a re-scan genuinely changing m books still paid m
 passes over the index. Keyed, each is a seek.
 
-Applying V36 rebuilds both indexes. Measured on a `.backup` snapshot of the deployed catalogue —
-145,105 books and 3,339 series, 148,444 entities, a 4.55 GB database — V35 takes **11 ms** and V36
-takes **52.2 s** of statement time, one-off at startup. The rebuild reproduced the index exactly:
-both digests came back unchanged (74,243,080 and 14,928,546), no index row sat on a rowid its key
-did not name, and `PRAGMA integrity_check` returned `ok`.
+### What V36 costs to apply
+
+Measured on `.backup` snapshots of the deployed catalogue — 145,105 books and 3,339 series, 148,444
+entities, a 4.55 GB database. V35 takes **12 ms**. V36 takes **26.6 s** of statement time, one-off
+at startup, and it got there in two steps:
+
+| | V36 |
+|---|---|
+| rebuilding both indexes under new keys | 52.2 s |
+| adopting the word index's own rowids as the keys, rebuilding only the other | **26.6 s** |
+
+An FTS5 row's rowid cannot be changed, but nothing requires the key to be a *new* number. Having
+`catalog_search_key` adopt the rowids the word index already uses means the largest table in the
+database is never rewritten. The interior-match index cannot be adopted alongside it — its rowids
+are its own, and both cannot be the key — so it is the one that is rebuilt.
+
+Where the remaining 26.6 s goes:
+
+| statement | cost |
+|---|---|
+| rebuilding the books' interior-match rows | 17.7 s |
+| scanning the word index to adopt its rowids | 5.1 s |
+| emptying the interior-match index | 1.6 s |
+| rebuilding the series' interior-match rows | 0.3 s |
+
+**Stopping here is a judgement, not an oversight.** Removing the remaining rebuild means the key
+carrying one rowid per index rather than one per entity, which needs `AUTOINCREMENT`, a sentinel row
+to lift the counter above both indexes' existing maxima so a new entity's two numbers cannot collide
+with an adopted one, and a trigger on the key table to fill the second column. That is permanent
+schema complexity bought with a one-off 20 s at upgrade, against a file that says to prefer
+simplicity once correctness is met.
+
+Verified at full size, on the snapshot: both digests unchanged (74,243,080 and 14,928,546), every
+index row on the rowid its key names, no entity without a key, `PRAGMA integrity_check` = `ok`.
 
 ⚠️ **This section briefly claimed 2.6 s, extrapolated from synthetic fixtures. It was 20× low.**
 Synthetic titles are a few characters; the real index holds 74.2 MB of text against roughly 1 MB
