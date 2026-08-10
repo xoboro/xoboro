@@ -92,7 +92,7 @@
 
   /** What a reader has done with this item, as words rather than a coloured bar alone. */
   function progressLabel(item) {
-    const progress = item.readProgress
+    const progress = item.progress
     if (!progress) return $_('reader.unread')
     if (progress.completed) return $_('reader.read')
     return $_('reader.inProgress', { values: { page: progress.page } })
