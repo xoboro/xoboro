@@ -54,8 +54,24 @@ CREATE TABLE catalog_search_key (
 -- out complete. The symptom is an entity findable by fragment but not by word. This migration does
 -- not create that state - the deployed catalogue has 148,444 rows for 148,444 entities, one each -
 -- and `rebuildBookSearchDocument` repairs one entity when it does happen.
+--
+-- `GROUP BY` rather than a plain select, and the delete below, because an entity with *two* rows
+-- would otherwise try to claim its key twice and fail the `UNIQUE` constraint - aborting the
+-- migration and leaving the server unable to start, on a database whose only fault is one duplicate
+-- row. There is no duplicate in the deployed catalogue (148,444 rows for 148,444 entities) and the
+-- triggers this replaces all deleted before inserting, so this is defence rather than repair.
+--
+-- Dropping the unclaimed copy is not tidying. Deleting by entity took every row an entity had, so a
+-- duplicate healed itself on the next write; deleting by rowid takes one, so a duplicate that
+-- survived this migration would survive every write after it and show up as a repeated search
+-- result forever. Removing it here is what keeps that from becoming permanent.
 INSERT INTO catalog_search_key (index_rowid, entity_type, entity_id)
-SELECT rowid, entity_type, entity_id FROM catalog_search_fts;
+SELECT min(rowid), entity_type, entity_id
+FROM catalog_search_fts
+GROUP BY entity_type, entity_id;
+
+DELETE FROM catalog_search_fts
+WHERE rowid NOT IN (SELECT index_rowid FROM catalog_search_key);
 
 -- An entity the word index never held still needs a key, or the triggers below would join against
 -- nothing and leave it silently unindexed. These take numbers above every adopted one, because
