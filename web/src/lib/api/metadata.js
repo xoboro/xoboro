@@ -109,6 +109,19 @@ export function buildMetadataPatch(kind, edits) {
  */
 export const LOCK_MEANING = 'refresh-protection'
 
+/**
+ * Reads the editable surface, which is not the one the series page reads.
+ *
+ * `GET /series/{id}` carries the same values flat and **no locks**, so a form seeded
+ * from it cannot show which fields a refresh is allowed to overwrite. It is also the
+ * shape the form used to reach for under a `metadata` key that route has never sent,
+ * which left every field blank — and blank fields are how an untouched save came to
+ * overwrite the stored status.
+ */
+export function readSeriesMetadata(seriesId) {
+  return request(`/series/${seriesId}/metadata`)
+}
+
 export function patchSeriesMetadata(seriesId, edits) {
   return request(`/series/${seriesId}/metadata`, {
     method: 'PATCH',
