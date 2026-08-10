@@ -189,7 +189,14 @@ indexed order fixes the second 14 ms, not the first.
 set ~31× "did not make the request faster" (41.3 ms against 25.6 ms) and concluded
 the count-query hypothesis was **rejected**. That comparison was made on undrained
 numbers. Drained, the narrow filter is 1.6 ms against 3.8 ms — 2.4× *faster*. The
-rejection does not stand: the hypothesis is open again, on better evidence.
+rejection does not stand.
+
+**And the hypothesis is now answered directly, by timing the count rather than
+inferring it from the request.** Unfiltered at 15,050 items, the media-item listing
+spends 14.7 ms counting against 28.2 ms for count-plus-page: the count query is
+roughly half the request, and it is proportional to the rows the filter matches,
+which is why narrowing it helps. It was never possible to see that from the outside,
+because the other half moves with the filter too.
 
 ## Settled: the cold scan was quadratic because every insert read the whole search index
 
