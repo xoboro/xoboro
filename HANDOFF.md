@@ -179,6 +179,12 @@ Shipped in 0.3.0 but partial. Wiki: `xoboro-catalog-change-feed`.
   onto `book` and maintaining it when a series is renamed — a migration plus triggers — or
   changing what the listing is sorted by, which is a product decision. Full numbers and the plan
   output are in `docs/performance.md`.
+- **The listing's `count(*)` runs through joins it cannot need, and that is the cheap half.**
+  Measured: counting the same 15,000 books is 8.90 ms through the listing's joins and **2.00 ms**
+  over `book` alone, same answer. Every join there is at most one row per book, so none can change
+  the count. No schema change and no behaviour change; what it needs is the filter builder
+  reporting which aliases it referenced so the count can be given only those joins. **Take this one
+  before the sort key** — it is a query-builder refactor rather than a migration.
 - **CI cannot publish to Docker Hub.** Needs a `DOCKERHUB_REPOSITORY` variable plus
   `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, or make the GHCR package pullable from macmini.
   Today every Docker Hub push is manual from the MacBook.
