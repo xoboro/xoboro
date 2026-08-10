@@ -16,8 +16,9 @@
    * Only edited fields are submitted. An untouched field is absent from the body,
    * which is what preserves it.
    */
+  import { onMount } from 'svelte'
   import { _ } from '../lib/i18n.js'
-  import { CLEAR, patchSeriesMetadata } from '../lib/api/metadata.js'
+  import { CLEAR, patchSeriesMetadata, readSeriesMetadata } from '../lib/api/metadata.js'
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
 
@@ -26,25 +27,63 @@
   const STATUSES = ['ONGOING', 'ENDED', 'HIATUS', 'ABANDONED']
   const DIRECTIONS = ['LEFT_TO_RIGHT', 'RIGHT_TO_LEFT', 'VERTICAL', 'WEBTOON']
 
-  const stored = series.metadata ?? {}
+  /**
+   * What is stored, read from the surface that has it.
+   *
+   * This was `series.metadata ?? {}`, and no route has ever sent a `metadata` object on
+   * a series: `GET /series/{id}` carries the same values flat and no locks at all. So
+   * `stored` was always `{}`, every field opened blank, and every lock read as clear.
+   *
+   * Blank fields mostly hid the problem, because "unchanged is absent" coincides with
+   * an empty input — except for `status`, which opens on a value from a fixed list. An
+   * absent `stored.status` made the first entry count as an edit, so opening this
+   * dialog on an ENDED series and pressing save with nothing else touched reset it to
+   * ONGOING. Reading what is stored is the only thing that makes "what changed" a
+   * question with an answer, so the form waits for it rather than guessing.
+   */
+  let stored = $state(null)
 
-  let title = $state(stored.title ?? '')
-  let summary = $state(stored.summary ?? '')
-  let publisher = $state(stored.publisher ?? '')
-  let language = $state(stored.language ?? '')
-  let status = $state(stored.status ?? 'ONGOING')
-  let readingDirection = $state(stored.readingDirection ?? '')
-  let ageRating = $state(stored.ageRating ?? '')
-  let genres = $state((stored.genres ?? []).join(', '))
-  let tags = $state((stored.tags ?? []).join(', '))
+  let title = $state('')
+  let summary = $state('')
+  let publisher = $state('')
+  let language = $state('')
+  let status = $state(STATUSES[0])
+  let readingDirection = $state('')
+  let ageRating = $state('')
+  let genres = $state('')
+  let tags = $state('')
 
-  let titleLock = $state(Boolean(stored.titleLock))
-  let summaryLock = $state(Boolean(stored.summaryLock))
-  let genresLock = $state(Boolean(stored.genresLock))
-  let tagsLock = $state(Boolean(stored.tagsLock))
+  let titleLock = $state(false)
+  let summaryLock = $state(false)
+  let genresLock = $state(false)
+  let tagsLock = $state(false)
 
   let busy = $state(false)
   let error = $state(null)
+
+  onMount(async () => {
+    try {
+      const found = await readSeriesMetadata(series.id)
+      title = found.title ?? ''
+      summary = found.summary ?? ''
+      publisher = found.publisher ?? ''
+      language = found.language ?? ''
+      status = found.status ?? STATUSES[0]
+      readingDirection = found.readingDirection ?? ''
+      ageRating = found.ageRating ?? ''
+      genres = (found.genres ?? []).join(', ')
+      tags = (found.tags ?? []).join(', ')
+      titleLock = Boolean(found.titleLock)
+      summaryLock = Boolean(found.summaryLock)
+      genresLock = Boolean(found.genresLock)
+      tagsLock = Boolean(found.tagsLock)
+      // Assigned last, because it is what lets the form be edited and submitted: no
+      // patch can be computed against a baseline that has not arrived.
+      stored = found
+    } catch (caught) {
+      error = caught
+    }
+  })
 
   function list(value) {
     return value
@@ -114,7 +153,9 @@
 
   async function submit(event) {
     event.preventDefault()
-    if (busy) return
+    // Without a baseline every field would read as an edit, so a save before the read
+    // lands is exactly the overwrite this form exists to avoid.
+    if (busy || !stored) return
     const changes = edits()
     if (Object.keys(changes).length === 0) {
       // Nothing to say. Sending an empty patch would answer 200 and mean nothing,
@@ -137,6 +178,13 @@
 
 <Dialog title={$_('catalog.metadata.seriesTitle')} {onclose}>
   {#snippet children()}
+    <!-- Held back until the stored values arrive. Fields shown before then would be
+         blank, and a blank field that reads as an edit is how a save came to overwrite
+         what it was meant to preserve. -->
+    {#if !stored}
+      <p class="waiting" role="status">{$_('common.loading')}</p>
+      <ErrorNotice {error} />
+    {:else}
     <form id="series-metadata" onsubmit={submit} novalidate>
       <p class="lock-note" data-testid="lock-note">{$_('catalog.metadata.lockNote')}</p>
 
@@ -155,7 +203,7 @@
       </label>
 
       <label for="md-status">{$_('catalog.metadata.status')}</label>
-      <select id="md-status" bind:value={status}>
+      <select id="md-status" data-testid="md-status" bind:value={status}>
         {#each STATUSES as value (value)}
           <option {value}>{value}</option>
         {/each}
@@ -194,6 +242,7 @@
 
       <ErrorNotice {error} />
     </form>
+    {/if}
   {/snippet}
 
   {#snippet footer()}
