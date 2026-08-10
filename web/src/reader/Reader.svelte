@@ -328,25 +328,52 @@
     if (isScroll) requestAnimationFrame(() => scrollTo(page))
   }
 
+  const TAP_SLOP = 10
+  const SWIPE_DISTANCE = 40
+
   let sx = 0
   let sy = 0
   function pointerDown(event) {
     sx = event.clientX
     sy = event.clientY
   }
+
+  /** A press that neither swiped nor dragged, so it was meant as a tap. */
+  function isTap(event) {
+    return (
+      Math.abs(event.clientX - sx) < TAP_SLOP && Math.abs(event.clientY - sy) < TAP_SLOP
+    )
+  }
+
   function pointerUp(event) {
     const dx = event.clientX - sx
     const dy = event.clientY - sy
-    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+    if (Math.abs(dx) > SWIPE_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
       go(dx < 0 ? 1 : -1)
       return
     }
-    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) {
+    if (isTap(event)) {
       const third = window.innerWidth / 3
       if (event.clientX < third) go(direction === 'rtl' ? 1 : -1)
       else if (event.clientX > third * 2) go(direction === 'rtl' ? -1 : 1)
       else toggleChrome()
     }
+  }
+
+  /**
+   * Tapping the page while scrolling.
+   *
+   * The handlers above were on the paged stage only, so in the scrolling modes — one of
+   * which is the shipped default — tapping the page did nothing and the bar could only
+   * be reached through the small button in the corner.
+   *
+   * A tap anywhere toggles, rather than the paged stage's three zones: scrolling is
+   * already the navigation here, so an edge tap is a reader reaching for the bar and not
+   * asking for the next page. The drag threshold is what keeps a flick to scroll from
+   * counting as one.
+   */
+  function scrollPointerUp(event) {
+    if (isTap(event)) toggleChrome()
   }
 
   /** Marks the visible view while scrolling, so progress follows the reader. */
@@ -449,11 +476,14 @@
 
 {#key loadedId}
   {#if isScroll}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="scroll"
       class:fit-height={fit === 'height'}
       style={`--reader-width:${width === 'full' ? '100%' : `${width}px`}`}
       bind:this={scrollNode}
+      onpointerdown={pointerDown}
+      onpointerup={scrollPointerUp}
     >
       {#each views as view, at (viewKey(view))}
         <div
