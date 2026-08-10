@@ -143,8 +143,47 @@ run at 15,050 items, all drained and all stable:
 **`/media-items` is about 7× more expensive than `/series` at this size.** That was
 invisible before, because the series listing's noise band (25–75 ms) sat directly on
 top of the media-item listing's real cost. This is a within-run comparison and
-therefore a legitimate one; it is the next thing worth investigating, and it is a
-server property rather than a harness artefact.
+therefore a legitimate one, and it is a server property rather than a harness artefact.
+
+### Localised: the media-item listing sorts the whole catalogue to return ten rows
+
+Timing the three steps of `findBooks` and `findSeries` separately, unfiltered, at 15,050 items:
+
+| step | `/media-items` (page of 10) | `/series` (page of 200) |
+|---|---|---|
+| `count(*)` | **14.7 ms** | 0.59 ms |
+| the page of ids | **13.5 ms** | 0.46 ms |
+| hydrating them | 1.1 ms | 3.3 ms |
+
+Hydration is not the cost, and the page size is not either — the smaller page is the
+expensive one. What stands out is that fetching **ten ids costs as much as counting all
+15,050 rows**, which a paged query has no business doing. `EXPLAIN QUERY PLAN` says why:
+
+```
+SCAN b
+SEARCH bm USING COVERING INDEX sqlite_autoindex_book_metadata_1 (book_id=?)
+SEARCH s USING COVERING INDEX sqlite_autoindex_series_1 (id=?)
+SEARCH sm USING INDEX sqlite_autoindex_series_metadata_1 (series_id=?)
+USE TEMP B-TREE FOR ORDER BY
+```
+
+The listing's default order is `sm.title_sort COLLATE NOCASE ASC, b.id ASC` — a column two
+joins away, on the *series'* metadata. No index on `book` can satisfy it, so SQLite scans
+every book, joins each to three tables, sorts all of them in a temporary b-tree, and
+returns ten. `/series` runs the same shape against a tenth of the rows and pays a tenth.
+
+Growth is the sort's, not the scan's: count-plus-ids goes 4.28 ms at 3,050 items to 28.2 ms
+at 15,050 — 6.59× for 4.93× items, an exponent of 1.18, which is what `n log n` looks like
+over this range. Projected at the deployed 145,105 books that is on the order of 400 ms per
+listing request. **Treat that as a projection**; the last one in this file was 20× wrong.
+
+**What a fix would take, and why it is not in this pass.** The sort key has to become
+reachable from an index on `book` — i.e. denormalised onto the book row and maintained when
+a series' title changes, which is the same cascade the search index already runs on rename.
+That is a migration plus triggers. The alternative, changing what the listing is sorted by,
+is a product decision about what users see and not a performance fix. Neither belongs in a
+change whose subject is something else, and the count would still scan afterwards: an
+indexed order fixes the second 14 ms, not the first.
 
 ⚠️ **A correction.** This document previously recorded that narrowing the filtered
 set ~31× "did not make the request faster" (41.3 ms against 25.6 ms) and concluded
