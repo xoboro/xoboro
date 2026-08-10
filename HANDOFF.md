@@ -189,6 +189,18 @@ Shipped in 0.3.0 but partial. Wiki: `xoboro-catalog-change-feed`.
   the count. No schema change and no behaviour change; what it needs is the filter builder
   reporting which aliases it referenced so the count can be given only those joins. **Take this one
   before the sort key** — it is a query-builder refactor rather than a migration.
+- **A Komga import probably leaves the interior-match index holding pre-import titles.** Found by
+  reading while working nearby, **not reproduced** — it is a correctness gap rather than a
+  performance one, and confirming it costs a test rather than an argument. The chain: the importer
+  inserts `book`/`series` rows, `initialize_book_metadata` and `initialize_series_metadata` create
+  the metadata rows with the title taken from the entity's own name, and the index triggers fire on
+  those inserts. The importer then **`UPDATE`s** `book_metadata` (`KomgaDatabaseImporter.kt:555`)
+  and `series_metadata` (`:448`) with the real Komga values — and there is no index trigger on an
+  `UPDATE` of either table. Its last step, `rebuildCatalogSearch()`, rebuilds
+  **`catalog_search_fts` only**; nothing rebuilds `catalog_title_substring`. So interior search
+  after an import would find a book by its filename-derived name and not by its Komga title. The
+  fix is two statements beside the two already there. Pre-existing: V32 added that index and the
+  importer was not extended with it.
 - **CI cannot publish to Docker Hub.** Needs a `DOCKERHUB_REPOSITORY` variable plus
   `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, or make the GHCR package pullable from macmini.
   Today every Docker Hub push is manual from the MacBook.
