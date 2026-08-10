@@ -156,6 +156,14 @@ Shipped in 0.3.0 but partial. Wiki: `xoboro-catalog-change-feed`.
   script already honours `JAVA_OPTS` and `APP_OPTS` (`/opt/xoboro/bin/app` line 244), so a host
   install that wants a ceiling sets one without a release. **Reopen this only with a measured live
   set that a 25% ceiling actually constrains.**
+- **The media-item listing sorts the whole catalogue to return one page.** Localised 2026-08-10,
+  not fixed. Its default order is `sm.title_sort` — a column two joins away on the series'
+  metadata — so `EXPLAIN QUERY PLAN` shows `SCAN b` plus `USE TEMP B-TREE FOR ORDER BY`: every
+  book scanned, joined to three tables and sorted, to return ten. Fetching ten ids costs 13.5 ms
+  at 15,050 items, as much as counting all of them. Fixing it means denormalising the sort key
+  onto `book` and maintaining it when a series is renamed — a migration plus triggers — or
+  changing what the listing is sorted by, which is a product decision. Full numbers and the plan
+  output are in `docs/performance.md`.
 - **CI cannot publish to Docker Hub.** Needs a `DOCKERHUB_REPOSITORY` variable plus
   `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, or make the GHCR package pullable from macmini.
   Today every Docker Hub push is manual from the MacBook.
