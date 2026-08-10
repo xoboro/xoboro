@@ -152,15 +152,109 @@ the count-query hypothesis was **rejected**. That comparison was made on undrain
 numbers. Drained, the narrow filter is 1.6 ms against 3.8 ms — 2.4× *faster*. The
 rejection does not stand: the hypothesis is open again, on better evidence.
 
-## Open, and now localised: the cold scan is near-quadratic
+## Settled: the cold scan was quadratic because every insert read the whole search index
 
-This section used to say the two-point ratio on `cold_full_scan` was suggestive but could
-not distinguish superlinear growth from a fixed cost landing between the sizes. That was
-the right caution, and it is now answered — not by a third size, but by splitting the
-metric.
+This section used to end at "near-quadratic, cause unknown, look at `ADR 0052`". The cause was
+not in ADR 0052 — the reconciliation SQL is fine — and it is now fixed. The measurement that
+localised it is kept below, because it is the part that transfers.
+
+At 15,050 items the first scan went from **102,738 ms to 1,969 ms**, and stopped curving.
+
+| metric | 3,050 before | 3,050 after | 15,050 before | 15,050 after |
+|---|---|---|---|---|
+| `cold_scan.wall` | 4,404 ms | **468 ms** | 102,738 ms | **1,969 ms** |
+| `cold_analyze.wall` | 7,953 ms | 6,211 ms | 34,575 ms | 33,144 ms |
+| `unchanged_rescan.wall.p50` | 104.6 ms | 97.0 ms | 625.1 ms | 605.5 ms |
+
+One run per cell on one machine, not the three-repetition averages the table further down
+carries, so only the scan's 52× is outside the ±25% a single cold metric moves by. Analysis and
+rescan are unchanged, which is what they should be: nothing touched them.
+
+The scan is now **sub-linear** across these two sizes — 4.21× the time for 4.93× the items,
+an exponent of 0.914 — because the per-item work is finally constant and what remains grows
+with the directory walk rather than with the catalogue.
+
+### Where it was
+
+Timing each statement inside `JooqCatalogReconciliationStore.complete` put effectively all of it
+in one place:
+
+| step | 3,050 items | 15,050 items | ratio |
+|---|---|---|---|
+| `insertNewBooks` | 3,937 ms | **100,160 ms** | **25.4×** |
+| every other step, summed | ~350 ms | ~2,000 ms | ~5.7× |
+
+`ln(25.4) / ln(4.93) = 2.03`. That one statement was 92% of `cold_scan` at 3,050 items and
+**97.5%** at 15,050.
+
+### Why one `INSERT ... SELECT` was quadratic
+
+`catalog_search_fts` and `catalog_title_substring` declare `entity_type` and `entity_id`
+UNINDEXED. FTS5 offers no other way to carry a column it must not tokenise, so this is not an
+oversight — but it does mean FTS5 cannot seek on either:
+
+```
+EXPLAIN QUERY PLAN DELETE FROM catalog_search_fts
+  WHERE entity_type = 'BOOK' AND entity_id = 'x';
+`--SCAN catalog_search_fts VIRTUAL TABLE INDEX 0:
+```
+
+Inserting one book ran four of those scans: the two `AFTER INSERT ON book` triggers, plus the
+two on `book_metadata` that `initialize_book_metadata` inserts into. Each read everything
+indexed so far, so n inserts cost n × n.
+
+Isolated outside the JVM, against the real migrated schema:
+
+| variant | 3,000 books | 15,000 books | ratio |
+|---|---|---|---|
+| as shipped | 3,024 ms | 74,438 ms | 24.6× (exponent **1.99**) |
+| with the deletes removed | 100 ms | 377 ms | 3.77× |
+
+The deletes could not remove anything: they searched for a primary key created a moment
+earlier. The index built without them was identical row for row — same count, same digest, same
+match hits.
+
+### The two changes
+
+**V35** drops the four provably-empty deletes. The book- and series-level insert triggers go
+with them rather than merely losing their delete: SQLite does not define the order of two
+`AFTER INSERT` triggers on one table, and the source views join the entity's metadata row, so
+keeping them would duplicate a row under one order and write nothing under the other. The
+metadata-level triggers have no such ambiguity — `initialize_book_metadata` and
+`initialize_series_metadata` put exactly one metadata row behind every entity, and both metadata
+repositories upsert with `ON CONFLICT DO UPDATE`, so an INSERT trigger fires once per entity.
+
+**V36** gives updates and deletes a key to address, since those genuinely do have a row to
+remove. `catalog_search_key` holds one rowid per entity and both indexes store that entity under
+it, so a removal is a b-tree seek. Measured directly — 200 single-row deletes against one index:
+
+| addressed by | 20,000 rows | 100,000 rows | ratio |
+|---|---|---|---|
+| the UNINDEXED entity columns | 603 ms | 2,709 ms | 4.49× |
+| the key's rowid | 89 ms | 88 ms | **1.00×, flat** |
+
+`EXPLAIN QUERY PLAN` reports `SCAN ... VIRTUAL TABLE` for *both* of those — the rowid form only
+differs by a `:=` suffix marking the constraint it pushed down. The plan text would have got this
+one wrong; the clock did not.
+
+This is where V31 left off. V31 stopped `catalog_search_book_update` firing on a write that
+changed nothing, which is what made a re-scan affordable, but it did not make the firing cheaper;
+that trigger runs once per updated row, so a re-scan genuinely changing m books still paid m
+passes over the index. Keyed, each is a seek.
+
+Applying V36 rebuilds both indexes, which is linear and cheap: **255 ms at 16,500 entities and
+949 ms at 55,000**, so roughly 2.6 s at the deployed catalogue's 148,444.
+
+### What is still a full pass
+
+Renaming a series rewrites its books' rows as one `rowid IN (...)`. A trigger cannot loop, so
+that stays one pass over the index — which is what it already was. The gain is on the
+single-entity statements around it.
+
+### The measurement that found it, kept
 
 `scripts/cold-scan-repetitions.sh 3 300 10 50` and `... 3 1500 10 50`, three repetitions
-each in separate JVMs, about 5% spread at both sizes:
+each in separate JVMs, about 5% spread at both sizes — the numbers as they stood before the fix:
 
 | metric | 3,050 items | 15,050 items | ratio |
 |---|---|---|---|
@@ -179,17 +273,17 @@ same fixture and the same setup in each repetition. A fixed cost that happened t
 between the two sizes would inflate *both* ratios. Analysis came out flat. A fixed cost
 cannot produce that asymmetry, so the growth is in the scan itself.
 
-`ln(22.8) / ln(4.93) = 1.96`. Two sizes still cannot *prove* a curve, but an exponent that
-close to 2 alongside a flat sibling metric points at O(n²) — something evaluating over the
-whole candidate set once per item. `ADR 0052: set-based scan reconciliation` is the place to
-look; `EXPLAIN QUERY PLAN` on the reconciliation queries will show whether a candidate
-lookup is an index seek or a table scan.
+`ln(22.8) / ln(4.93) = 1.96`. Two sizes cannot *prove* a curve, but an exponent that close to 2
+alongside a flat sibling metric pointed at O(n²) — something evaluating over a whole set once per
+item. That inference held; the set turned out to be the search index rather than the candidate
+table, so `ADR 0052` was the wrong place to look and per-statement timing was the right next step
+rather than more sizes.
 
-Projected at the deployed catalogue of 145,105 items — `145105 / 15050 = 9.64×` items, so
-roughly 84× time at exponent 1.96 — the scan step alone would be about **2.3 hours**. That
-is an extrapolation from two points; treat it as an order of magnitude.
+The projection this section used to carry — about **2.3 hours** for the scan step at the deployed
+145,105 items — was never run, and is now moot. At the measured post-fix rate it is on the order
+of 20 seconds.
 
-**Repeat scans are not affected.** `unchanged_rescan.wall.p50` grew 5.95× for 4.93× items,
+**Repeat scans were never affected.** `unchanged_rescan.wall.p50` grew 5.95× for 4.93× items,
 near linear, and costs 0.6 s at 15,050 items. That is V31's `WHEN NEW.x IS NOT OLD.x` guard
 on the search-index triggers doing its job: a write that changes nothing is free. The cost
 is in the *first* scan.
@@ -199,12 +293,19 @@ Cold metrics need repetition in **separate JVMs**, which
 looping inside one JVM makes every iteration after the first systematically faster and stops
 measuring a cold start at all. At 105 items five repetitions vary by about 4%.
 
-### One earlier conclusion in this file does not generalise
+### An earlier conclusion in this file, withdrawn and then restored
 
 The WebDAV comparison below reports listing at 95 s against analysis at 5.5 items/s and
-concludes "listing is not the difference". That is true for *that* comparison, where
-whole-file `materialize()` made analysis the bottleneck across a remote link. It does **not**
-hold for local sources as the catalogue grows: the dominant term switches to scan.
+concludes "listing is not the difference". This section used to add that the conclusion does
+**not** hold for local sources as the catalogue grows, because the dominant term switches to
+scan. That was true of the measurement in front of it and false as a statement about the system:
+the switch was a defect, not a property of scale. With it fixed, scan is 5.6% of
+`cold_full_scan` at 15,050 items (1,969 ms of 35,113 ms) and analysis dominates again at both
+sizes.
+
+Worth keeping as a caution rather than deleting: "the dominant term switches as n grows" and "one
+statement is quadratic" produce the same two-point evidence, and only the second one can be
+fixed. Splitting the metric distinguished them; another size would not have.
 
 ## Settled: a WebDAV scan was bounded by how much it chose to transfer
 

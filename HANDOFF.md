@@ -37,39 +37,51 @@ PUT /api/xoboro/v1/server-settings  {"taskPoolSize": 2}    # live, resizes the p
 
 ## Outstanding work, highest value first
 
-### A. Cold scan is quadratic — measure the cause, then fix it
+### A. ~~Cold scan is quadratic~~ — found and fixed
 
-**This is the biggest open problem.** Full detail: wiki `xoboro-cold-scan-is-quadratic`.
+**Cause: the search-index insert triggers, not reconciliation.** `catalog_search_fts` and
+`catalog_title_substring` declare `entity_type`/`entity_id` UNINDEXED, so each trigger's
+`DELETE ... WHERE entity_id = NEW.id` planned as a full pass over the index. Inserting one book ran
+four of them, giving n × n. `ADR 0052` was the wrong suspect; the reconciliation SQL is fine.
 
-Measured this session (3 repetitions each, separate JVMs, ~5% spread):
+- **V35** drops those deletes. They could not remove anything — the key they searched for was
+  created a moment earlier — and the index built without them is identical row for row.
+- **V36** gives updates and deletes a `catalog_search_key` rowid to address, so they seek instead of
+  scanning. This is where V31 left off: V31 stopped the update trigger firing needlessly, not the
+  cost when it does fire.
 
-| metric | 3,050 items | 15,050 items | ratio (items 4.93x) |
-|---|---|---|---|
-| `cold_scan.wall` | 4,290 ms | **97,933 ms** | **22.8x** |
-| `cold_analyze.wall` | 6,204 ms | 31,417 ms | 5.06x |
-| `unchanged_rescan.p50` | 100 ms | 595 ms | 5.95x |
+`cold_scan` at 15,050 items: **102,738 ms → 1,969 ms**, and sub-linear now (4.21× the time for
+4.93× the items). Analysis and rescan unchanged. Applying V36 rebuilds both indexes in about
+2.6 s at the deployed catalogue's size.
 
-Per item: analysis **1.03x (flat)**, scan **4.63x**. Fitted exponent `ln(22.8)/ln(4.93) = 1.96` —
-near-quadratic. Because both metrics share one JVM, fixture and setup, a fixed cost landing between the
-sizes would have inflated both; only scan inflated. That is what resolves the two-point ambiguity
-`docs/performance.md` flagged.
+Full numbers and reasoning: `docs/performance.md`, section **"Settled: the cold scan was quadratic
+because every insert read the whole search index"**. Wiki `xoboro-cold-scan-is-quadratic` still
+describes only the symptom.
 
-Projected at the deployed 145,105 items: **~2.3 hours for the scan step alone** (two-point projection,
-order of magnitude only).
+Before and after, one run per cell rather than the earlier three-repetition averages, so only the
+scan's 52x is outside the ±25% a single cold metric moves by:
 
-Repeat scans are fine — 0.6 s at 15,050 items, thanks to V31's `WHEN NEW.x IS NOT OLD.x` trigger guards.
-**The first scan is the problem.**
+| metric | 3,050 before | 3,050 after | 15,050 before | 15,050 after |
+|---|---|---|---|---|
+| `cold_scan.wall` | 4,404 ms | **468 ms** | 102,738 ms | **1,969 ms** |
+| `cold_analyze.wall` | 7,953 ms | 6,211 ms | 34,575 ms | 33,144 ms |
+| `unchanged_rescan.p50` | 104.6 ms | 97.0 ms | 625.1 ms | 605.5 ms |
 
-**Next step:** `EXPLAIN QUERY PLAN` on the reconciliation queries in `JooqCatalogReconciliationStore`.
-`ADR 0052: set-based scan reconciliation` is the prime suspect — a set comparison that should be constant
-time per item is likely scanning the whole set. Reproduce with:
+Reproduce either state with synthetic fixtures, locally, **zero load on the deployed host**:
 
 ```bash
 scripts/cold-scan-repetitions.sh 3 300 10 50    # 3,050 items, ~1 min/rep
 scripts/cold-scan-repetitions.sh 3 1500 10 50   # 15,050 items, ~2 min/rep
 ```
 
-Synthetic fixtures, runs locally, **zero load on the deployed host**.
+**What is still a full pass:** renaming a series rewrites its books' rows as one `rowid IN (...)`.
+A trigger cannot loop, so that stays one pass — unchanged from before, and the only remaining one.
+
+**A trap this left behind.** The mutation that checks the metadata rebuild path uses the key's rowid
+did not bite at first: with one book in the fixture, SQLite hands an omitted rowid `max(rowid) + 1`,
+which is the number the rebuild's own delete just freed, so the wrong code landed on the right
+number by accident. The test now indexes three books and rebuilds one that is not the last. Any
+future assertion about rowid identity needs the same care.
 
 ### B. ~~Record the measurement in `docs/performance.md`~~ — done
 

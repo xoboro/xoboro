@@ -1070,24 +1070,55 @@ class KomgaDatabaseImporter(
     }
   }
 
+  /**
+   * Rebuilds the word index after the import has written every metadata row it is going to.
+   *
+   * The rowid each row lands on is not free to choose: V36 addresses an index row by the key
+   * `catalog_search_key` holds for its entity, and everything that later updates or deletes one looks
+   * it up there. A rebuild that let SQLite allocate rowids would leave rows nothing could find again.
+   */
   private fun DSLContext.rebuildCatalogSearch() {
+    // `WHERE true` closes the select off rather than filtering it. Without a `WHERE`, SQLite reads the
+    // following `ON` as the start of a join constraint and the upsert clause fails to parse.
+    execute(
+      """
+      INSERT INTO catalog_search_key (entity_type, entity_id)
+      SELECT 'BOOK', id FROM book WHERE true
+      ON CONFLICT (entity_type, entity_id) DO NOTHING
+      """.trimIndent(),
+    )
+    execute(
+      """
+      INSERT INTO catalog_search_key (entity_type, entity_id)
+      SELECT 'SERIES', id FROM series WHERE true
+      ON CONFLICT (entity_type, entity_id) DO NOTHING
+      """.trimIndent(),
+    )
     execute("DELETE FROM catalog_search_fts")
     execute(
       """
       INSERT INTO catalog_search_fts (
-        entity_type, entity_id, title, summary, contributors, labels, identifiers
+        rowid, entity_type, entity_id, title, summary, contributors, labels, identifiers
       )
-      SELECT 'BOOK', entity_id, title, summary, contributors, labels, identifiers
-      FROM catalog_book_search_source
+      SELECT
+        search_key.index_rowid, 'BOOK', source.entity_id, source.title, source.summary,
+        source.contributors, source.labels, source.identifiers
+      FROM catalog_book_search_source source
+      JOIN catalog_search_key search_key
+        ON search_key.entity_type = 'BOOK' AND search_key.entity_id = source.entity_id
       """.trimIndent(),
     )
     execute(
       """
       INSERT INTO catalog_search_fts (
-        entity_type, entity_id, title, summary, contributors, labels, identifiers
+        rowid, entity_type, entity_id, title, summary, contributors, labels, identifiers
       )
-      SELECT 'SERIES', entity_id, title, summary, contributors, labels, identifiers
-      FROM catalog_series_search_source
+      SELECT
+        search_key.index_rowid, 'SERIES', source.entity_id, source.title, source.summary,
+        source.contributors, source.labels, source.identifiers
+      FROM catalog_series_search_source source
+      JOIN catalog_search_key search_key
+        ON search_key.entity_type = 'SERIES' AND search_key.entity_id = source.entity_id
       """.trimIndent(),
     )
   }
