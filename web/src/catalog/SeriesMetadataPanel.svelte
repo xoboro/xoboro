@@ -22,46 +22,115 @@
     series,
   } = $props()
 
-  const metadata = $derived(series?.metadata ?? null)
+  /**
+   * Read flat, off the series itself.
+   *
+   * This component used to read `series.metadata`, which the series route has never
+   * sent: the nested shape with locks and a `totalBookCount` is what
+   * `PATCH /series/{id}/metadata` *answers* with, and there is no `GET` beside it. So
+   * the sub-object was always `undefined` and the whole panel rendered nothing — the
+   * failure mode of a metadata screen that shows no metadata is indistinguishable from
+   * a catalogue that has none, which is why it survived.
+   */
+  const known = $derived(series ?? null)
+
+  /**
+   * Roles come from sidecar files the server did not author, so the set is open.
+   * An unrecognised role is printed as it arrived rather than translated away or used
+   * as grounds to hide the author, because the fact that the person worked on this is
+   * the part a reader cares about.
+   */
+  const ROLES = Object.freeze([
+    'writer',
+    'penciller',
+    'inker',
+    'colorist',
+    'letterer',
+    'cover',
+    'editor',
+    'translator',
+  ])
+  function roleLabel(role) {
+    const value = (role ?? '').toLowerCase()
+    return ROLES.includes(value) ? $_(`catalog.metadata.display.roles.${value}`) : (role ?? '')
+  }
+
+  const authors = $derived(known?.authors ?? [])
+
+  /**
+   * How many items are here, and how many the source says there should be.
+   *
+   * Reporting only the first makes a part-scanned series read as complete; reporting
+   * only the second promises chapters that cannot be opened. They are one row, and the
+   * expected count appears only when it says something the present count does not.
+   */
+  const itemCount = $derived.by(() => {
+    const present = known?.mediaItemCount
+    if (present == null) return ''
+    const expected = known?.expectedMediaItemCount
+    // "0 chapters" is not something a series page needs to say; "0 of 20" is, because
+    // it says the scan has not reached them yet.
+    if (present === 0 && !expected) return ''
+    return expected != null && expected !== present
+      ? $_('catalog.metadata.display.bookCountOfExpected', {
+          values: { count: present, expected },
+        })
+      : $_('catalog.metadata.display.bookCount', { values: { count: present } })
+  })
 
   /** Text rows, in the order a reader scans them. Blank values drop out. */
   const rows = $derived(
     [
-      ['status', metadata?.status ? $_(`catalog.metadata.statuses.${metadata.status}`) : ''],
-      ['publisher', metadata?.publisher ?? ''],
-      ['language', metadata?.language ?? ''],
+      ['status', known?.status ? $_(`catalog.metadata.statuses.${known.status}`) : ''],
+      ['publisher', known?.publisher ?? ''],
+      ['language', known?.language ?? ''],
       [
         'ageRating',
-        metadata?.ageRating == null
+        known?.ageRating == null
           ? ''
           : $_('catalog.metadata.display.ageRatingValue', {
-              values: { age: metadata.ageRating },
+              values: { age: known.ageRating },
             }),
       ],
-      [
-        'books',
-        metadata?.totalBookCount == null
-          ? ''
-          : $_('catalog.metadata.display.bookCount', {
-              values: { count: metadata.totalBookCount },
-            }),
-      ],
+      ['books', itemCount],
     ].filter(([, value]) => value !== ''),
   )
 
   const chipGroups = $derived(
     [
-      ['genres', metadata?.genres ?? []],
-      ['tags', metadata?.tags ?? []],
+      ['genres', [...(known?.genres ?? [])]],
+      ['tags', [...(known?.tags ?? [])]],
     ].filter(([, values]) => values.length > 0),
   )
 
-  const links = $derived(metadata?.links ?? [])
+  const links = $derived(known?.links ?? [])
+
+  /**
+   * Whether there is anything at all to show.
+   *
+   * A series that was indexed but never refreshed carries empty strings rather than an
+   * absent object, so "is there a metadata object" is not the question — "is any of it
+   * filled in" is. A zero item count is not content: every series has one.
+   */
+  const anything = $derived(
+    Boolean(known?.summary) || rows.length > 0 || authors.length > 0 || chipGroups.length > 0 || links.length > 0,
+  )
 </script>
 
-{#if metadata}
-  {#if metadata.summary}
-    <p class="summary" data-testid="series-summary">{metadata.summary}</p>
+{#if anything}
+  {#if known.summary}
+    <p class="summary" data-testid="series-summary">{known.summary}</p>
+  {/if}
+
+  {#if authors.length > 0}
+    <dl class="facts" data-testid="series-authors">
+      {#each authors as author, at (`${author.role}:${author.name}:${at}`)}
+        <div class="fact">
+          <dt>{roleLabel(author.role)}</dt>
+          <dd>{author.name}</dd>
+        </div>
+      {/each}
+    </dl>
   {/if}
 
   {#if rows.length > 0}
