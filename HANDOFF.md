@@ -59,20 +59,24 @@ four of them, giving n × n. `ADR 0052` was the wrong suspect; the reconciliatio
 4.93× the items). Analysis and rescan unchanged.
 
 **Upgrade cost, measured on snapshots of the deployed 4.55 GB database** (148,444 entities): V35
-takes 12 ms, V36 takes **26.6 s** of statement time, one-off at startup — down from 52.2 s once the
-key table adopted the word index's existing rowids instead of rebuilding it under new ones. Both
+takes 12 ms, V36 takes **27 s** of statement time (26.6 and 27.2 across two snapshots), one-off at
+startup — down from 52.2 s once the key table adopted the word index's existing rowids instead of
+rebuilding it under new ones. Both
 digests came back unchanged, every index row sits on the rowid its key names, no entity is without a
 key, `integrity_check` returned `ok`. Snapshots were taken with `.backup` against the live database
 and deleted afterwards; the container was never stopped.
 
-The remaining 26.6 s is 17.7 s rebuilding the interior-match index, 5.1 s adopting, 1.6 s emptying.
+The remaining 27 s is about 18-20 s rebuilding the interior-match index, 5.1 s adopting and 1.5 s
+emptying. Guarding against a duplicated index row costs nothing measurable, and removes no rows
+here - which is the direct confirmation that no entity in the deployed catalogue is indexed twice.
 Removing the rebuild too needs a rowid per index rather than per entity — `AUTOINCREMENT`, a
 sentinel row, and a trigger on the key table. Deliberately not done: permanent schema complexity for
 a one-off 20 s. `docs/performance.md` carries the full reasoning.
 
 Full numbers and reasoning: `docs/performance.md`, section **"Settled: the cold scan was quadratic
-because every insert read the whole search index"**. Wiki `xoboro-cold-scan-is-quadratic` still
-describes only the symptom.
+because every insert read the whole search index"**. The wiki page
+`xoboro-cold-scan-is-quadratic` was updated to match, but the wiki does not travel with the repo —
+`docs/performance.md` is the tracked copy.
 
 Before and after, one run per cell rather than the earlier three-repetition averages, so only the
 scan's 52x is outside the ±25% a single cold metric moves by:
@@ -109,10 +113,10 @@ coreutils.
 
 ### B. ~~Record the measurement in `docs/performance.md`~~ — done
 
-`docs/performance.md`, section **"Open, and now localised: the cold scan is near-quadratic"**, carries
-the full table, the reasoning that excludes the fixed-cost hypothesis, and the note that this file's own
-"listing is not the difference" conclusion does not generalise to local sources. **Read it there** — it
-is the tracked copy.
+`docs/performance.md` carries the full table and the reasoning that excludes the fixed-cost
+hypothesis. The section is now **"Settled: the cold scan was quadratic because every insert read the
+whole search index"**, and the measurement that found it is kept inside it. **Read it there** — it is
+the tracked copy.
 
 ### C. ~~A sidecar-only cover regeneration task~~ — done
 
