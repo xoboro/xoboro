@@ -253,6 +253,15 @@ the pipe's status, and an unpiped backgrounded run has reported exit 0 with `FAI
 grep -cE "FAILED" gate.log      # this is the answer
 ```
 
+**And that gate is still not enough after an interface changes.** Adding a method to
+`LibraryMaintenanceRequester` broke an anonymous implementation in
+`compatibility/komga-api`'s tests. A full `./gradlew build --continue` compiled that module,
+reported exit 0 and zero `FAILED`, and CI failed on the same commit: Kotlin's incremental
+compilation did not recompile the implementing class against the changed interface, and a clean
+checkout has nothing to be incremental about. `--rerun-tasks` reproduces it locally in one go.
+**Run the gate with `--rerun-tasks` whenever a change adds to an interface**, or CI is the first
+thing that will notice.
+
 `docs/testing.md`: **an assertion is not trusted until it has been seen to fail.** Every behavioural
 claim in the PRs above was mutation-verified. Restore a mutation by **editing the line back**, never
 `git checkout`. Re-run the unmutated suite between mutations — a restore that silently did not apply
