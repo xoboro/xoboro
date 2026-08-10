@@ -130,6 +130,21 @@ and a query parameter that quietly decides which you get is how the expensive on
 someone who only wanted covers. The series-only fan-out also carries its own task id, or the queue
 would deduplicate it into a whole-library refresh that was already pending.
 
+The chain that makes this a covers route was verified in code, not taken on trust:
+`RefreshSeriesMetadataTaskHandler` runs `afterRefresh = { localArtworkRefreshLifecycle.refreshSeries(it) }`
+(`XoboroRuntime.kt:1018`), which calls `artwork.replaceSidecars(...)`.
+
+**Two conditions silently return 0 covers** (`ArtworkLifecycle.refreshSeries`, lines 330-337), and
+both look identical from outside — the tasks run, succeed, and change nothing. Neither applies to
+this deployment, checked 2026-08-10:
+
+| condition | deployed state |
+|---|---|
+| `library.settings.importLocalArtwork` off | on for **2 of 2** libraries |
+| the series is a oneshot | **0 of 3,339** live series are oneshots |
+
+So all 3,339 are eligible here. Check both before concluding the route does not work somewhere else.
+
 **Not verified against production.** No series-metadata refresh has been run on the deployed host.
 Check the fan-out before you do — `SELECT count(*) FROM task WHERE state IN ('PENDING','RUNNING')`
 should be near zero first, and it should reach 3,339 and not six figures.
