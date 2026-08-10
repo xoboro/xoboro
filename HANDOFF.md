@@ -53,11 +53,17 @@ four of them, giving n × n. `ADR 0052` was the wrong suspect; the reconciliatio
 `cold_scan` at 15,050 items: **102,738 ms → 1,969 ms**, and sub-linear now (4.21× the time for
 4.93× the items). Analysis and rescan unchanged.
 
-**Upgrade cost, measured on a snapshot of the deployed 4.55 GB database** (148,444 entities): V35
-takes 11 ms, V36 takes **52.2 s** of statement time, one-off at startup. Both digests came back
-unchanged, no index row sat on a rowid its key did not name, `integrity_check` returned `ok`. The
-snapshot was taken with `.backup` against the live database and deleted afterwards; the container
-was never stopped.
+**Upgrade cost, measured on snapshots of the deployed 4.55 GB database** (148,444 entities): V35
+takes 12 ms, V36 takes **26.6 s** of statement time, one-off at startup — down from 52.2 s once the
+key table adopted the word index's existing rowids instead of rebuilding it under new ones. Both
+digests came back unchanged, every index row sits on the rowid its key names, no entity is without a
+key, `integrity_check` returned `ok`. Snapshots were taken with `.backup` against the live database
+and deleted afterwards; the container was never stopped.
+
+The remaining 26.6 s is 17.7 s rebuilding the interior-match index, 5.1 s adopting, 1.6 s emptying.
+Removing the rebuild too needs a rowid per index rather than per entity — `AUTOINCREMENT`, a
+sentinel row, and a trigger on the key table. Deliberately not done: permanent schema complexity for
+a one-off 20 s. `docs/performance.md` carries the full reasoning.
 
 Full numbers and reasoning: `docs/performance.md`, section **"Settled: the cold scan was quadratic
 because every insert read the whole search index"**. Wiki `xoboro-cold-scan-is-quadratic` still
