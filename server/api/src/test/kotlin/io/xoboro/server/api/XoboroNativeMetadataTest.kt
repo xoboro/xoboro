@@ -449,6 +449,49 @@ class XoboroNativeMetadataTest {
     }
 
   @Test
+  fun `reads a series' editable metadata, locks included`() =
+    testApplication {
+      val fixture = Fixture()
+      installMetadata(fixture)
+
+      // `PATCH` answered with this surface and nothing offered it for reading, so an editor had
+      // to guess: `GET /series/{id}` carries the same values flat and no locks at all. A form that
+      // cannot read a lock cannot show one, and a lock checkbox that is always clear is worse than
+      // none - it reports "not protected from a refresh" about a field that is.
+      val response =
+        client.get("$SERIES_PATH/${VISIBLE_SERIES_ID.value}/metadata") {
+          bearerAuth(fixture.readerToken)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val body = response.body<XoboroSeriesMetadataResponse>()
+      val stored = assertNotNull(fixture.seriesMetadata.findBySeriesIdOrNull(VISIBLE_SERIES_ID))
+      assertEquals(stored.title, body.title)
+      assertEquals(stored.status.name, body.status)
+      assertEquals(stored.titleLock, body.titleLock)
+      // Reading must not write. A read path that upserts is what made the series listing slow
+      // enough to be its own fix once already.
+      assertEquals(0, fixture.seriesMetadata.upsertCalls)
+    }
+
+  @Test
+  fun `hides a series' metadata from a caller who cannot see the series`() =
+    testApplication {
+      val fixture = Fixture()
+      installMetadata(fixture)
+
+      // 404 rather than 403, so an identifier cannot be probed for existence - the same rule the
+      // rest of this surface follows.
+      val response =
+        client.get("$SERIES_PATH/${HIDDEN_SERIES_ID.value}/metadata") {
+          bearerAuth(fixture.readerToken)
+        }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("series_not_found", response.body<XoboroApiError>().code)
+    }
+
+  @Test
   fun `distinguishes an absent series patch field from explicit null`() =
     testApplication {
       val fixture = Fixture()
