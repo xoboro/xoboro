@@ -474,6 +474,20 @@ export default {
         ageRatingValue: '{age}+',
         books: 'Chapters',
         bookCount: '{count}',
+        // Shown instead of the plain count when the source says how many there should
+        // be and fewer are here, so a part-scanned series does not read as complete.
+        bookCountOfExpected: '{count} of {expected}',
+        authors: 'Authors',
+        roles: {
+          writer: 'Writer',
+          penciller: 'Penciller',
+          inker: 'Inker',
+          colorist: 'Colorist',
+          letterer: 'Letterer',
+          cover: 'Cover',
+          editor: 'Editor',
+          translator: 'Translator',
+        },
         genres: 'Genres',
         tags: 'Tags',
         links: 'Links',

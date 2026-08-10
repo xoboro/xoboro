@@ -473,6 +473,20 @@ export default {
         ageRatingValue: '{age}세 이상',
         books: '전체 화수',
         bookCount: '{count}화',
+        // 출처가 알려 준 화수보다 적게 들어와 있을 때 대신 쓴다. 덜 스캔된 시리즈가
+        // 완결처럼 보이지 않게 하는 것이 목적이다.
+        bookCountOfExpected: '{expected}화 중 {count}화',
+        authors: '작가',
+        roles: {
+          writer: '글',
+          penciller: '그림',
+          inker: '선화',
+          colorist: '채색',
+          letterer: '식자',
+          cover: '표지',
+          editor: '편집',
+          translator: '번역',
+        },
         genres: '장르',
         tags: '태그',
         links: '링크',
