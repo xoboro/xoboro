@@ -314,20 +314,25 @@ passes over the index. Keyed, each is a seek.
 ### What V36 costs to apply
 
 Measured on `.backup` snapshots of the deployed catalogue — 145,105 books and 3,339 series, 148,444
-entities, a 4.55 GB database. V35 takes **12 ms**. V36 takes **26.6 s** of statement time, one-off
-at startup, and it got there in two steps:
+entities, a 4.55 GB database. V35 takes **12 ms**. V36 takes **27 s** of statement time (26.6 and
+27.2 across two snapshots), one-off at startup, and it got there in two steps:
 
 | | V36 |
 |---|---|
 | rebuilding both indexes under new keys | 52.2 s |
-| adopting the word index's own rowids as the keys, rebuilding only the other | **26.6 s** |
+| adopting the word index's own rowids as the keys, rebuilding only the other | **27 s** |
+
+Guarding against a duplicated index row — grouping the adoption by entity and dropping the copy
+that claimed no key — costs nothing measurable: the adoption is 5.11 s grouped against 5.13 s
+plain, and the delete does not reach 0.2 s. On the deployed catalogue it removes no rows, which is
+the direct confirmation that no entity there is indexed twice.
 
 An FTS5 row's rowid cannot be changed, but nothing requires the key to be a *new* number. Having
 `catalog_search_key` adopt the rowids the word index already uses means the largest table in the
 database is never rewritten. The interior-match index cannot be adopted alongside it — its rowids
 are its own, and both cannot be the key — so it is the one that is rebuilt.
 
-Where the remaining 26.6 s goes:
+Where the remaining 27 s goes, from one of the two runs:
 
 | statement | cost |
 |---|---|
