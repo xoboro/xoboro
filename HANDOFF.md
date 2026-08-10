@@ -24,14 +24,19 @@ Patterns that worked: aggregate in SQL and print only the aggregate (`count`, `s
 `avg_bytes`); to prove interior search worked on real titles, `substr(title, 4, 4)` was matched inside
 SQL and only the **hit count** printed (40/40 vs 23/40).
 
-### 2. `TASK_POOL_SIZE` is currently 1, and that is not the intended value
+### 2. ~~`TASK_POOL_SIZE` is currently 1~~ — now 2
 
-It was lowered to end an incident (below). The code default is `availableProcessors.coerceIn(1, 4)` = 4
-on this host. This host also runs komga, immich, kavita and filestash on 10 cores. **Recommendation: 2.**
+It had been lowered to end an incident (below) and left there. Raised to 2 on 2026-08-10, which is
+what this section recommended: the code default is `availableProcessors.coerceIn(1, 4)` = 4 on this
+host, and this host also runs komga, immich, kavita and filestash on 10 cores.
 
 ```
 PUT /api/xoboro/v1/server-settings  {"taskPoolSize": 2}    # live, resizes the pool in place
 ```
+
+The queue was empty when it was raised (`SELECT count(*) FROM task` = 0), so nothing started draining
+at the new width. Container CPU stayed at 0.5%. **Check the queue before changing this** — raising it
+against a backlog starts spending the difference immediately.
 
 ---
 
@@ -109,12 +114,25 @@ the full table, the reasoning that excludes the fixed-cost hypothesis, and the n
 "listing is not the difference" conclusion does not generalise to local sources. **Read it there** — it
 is the tracked copy.
 
-### C. A sidecar-only cover regeneration task
+### C. ~~A sidecar-only cover regeneration task~~ — done
 
-The gap that caused the incident. There is **no way to ask for "covers only"** — library metadata refresh
-is the only trigger and it drags all 145,105 books. `CompatibilityMaintenanceTask` already has
-`regenerateBookArtwork(forBiggerResultOnly)`; a sidecar counterpart makes the same job 3,339 tasks
-instead of ~148,000.
+The gap that caused the incident: there was **no way to ask for "covers only"**, so regenerating 3,339
+series covers meant a library metadata refresh, which also queued all 145,105 books.
+
+```
+POST /api/xoboro/v1/libraries/{libraryId}/series-metadata-refresh
+```
+
+A series' cover comes from its sidecar and is rewritten by a series refresh, so scoping the existing
+fan-out to its series stage is the whole fix — 3,339 tasks instead of ~148,000. A separate route
+rather than a flag on the existing one: the two differ by two orders of magnitude in what they queue,
+and a query parameter that quietly decides which you get is how the expensive one was reached by
+someone who only wanted covers. The series-only fan-out also carries its own task id, or the queue
+would deduplicate it into a whole-library refresh that was already pending.
+
+**Not verified against production.** No series-metadata refresh has been run on the deployed host.
+Check the fan-out before you do — `SELECT count(*) FROM task WHERE state IN ('PENDING','RUNNING')`
+should be near zero first, and it should reach 3,339 and not six figures.
 
 ### D. Finish wiring the change feed
 

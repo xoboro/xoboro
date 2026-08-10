@@ -995,8 +995,12 @@ class XoboroRuntime private constructor(
                   },
                 ),
                 RefreshLibraryMetadataTaskHandler(
-                  refreshLibrary = { id, cursor ->
-                    refreshMetadataTaskEmitter.refreshLibrary(id, from = cursor)
+                  refreshLibrary = { id, cursor, seriesOnly ->
+                    refreshMetadataTaskEmitter.refreshLibrary(
+                      id,
+                      from = cursor,
+                      seriesOnly = seriesOnly,
+                    )
                   },
                 ),
                 EmptyLibraryTrashTaskHandler(libraryTrashStore),

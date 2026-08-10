@@ -135,6 +135,17 @@ fun Route.xoboroNativeLibraryAdminRoutes(
           if (!call.requireExistingLibrary(libraries, id)) return@post
           call.respondQueued(maintenanceRequester.refreshMetadata(id))
         }
+        // A separate route rather than a flag on the one above. The two differ by two orders of
+        // magnitude in what they queue - 3,339 series against 145,105 books on this install - and a
+        // query parameter that quietly decides which one you get is how the expensive one was
+        // reached by someone who only wanted covers.
+        post("/{libraryId}/series-metadata-refresh") {
+          val user = call.nativeUser()
+          if (!call.requireLibraryAdministrator(user)) return@post
+          val id = LibraryId(call.requiredParameter("libraryId"))
+          if (!call.requireExistingLibrary(libraries, id)) return@post
+          call.respondQueued(maintenanceRequester.refreshSeriesMetadata(id))
+        }
         post("/{libraryId}/empty-trash") {
           val user = call.nativeUser()
           if (!call.requireLibraryAdministrator(user)) return@post

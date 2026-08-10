@@ -42,19 +42,33 @@ class RefreshMetadataTaskEmitter(
    * One row is the whole request's work. Everything after it belongs to the worker, which already
    * has the lease, backoff and dead-letter machinery a fan-out of that size needs.
    */
+  /**
+   * [seriesOnly] stops the fan-out before it reaches books, which is the difference between 3,339
+   * tasks and about 148,000 on this install.
+   *
+   * It exists because there was no way to ask for series artwork on its own. A series' cover comes
+   * from its sidecar and is rewritten by a series refresh, so regenerating 3,339 covers meant asking
+   * for a whole library refresh - and that also queued a book metadata refresh for all 145,105
+   * books, the most expensive per-item operation in the system. It re-reads the file and rebuilds
+   * the full-text row; V31 measured that path at 43 minutes of CPU across 111,745 books. The host
+   * reached 758% CPU on 10 cores and had to be recovered by dropping the task pool to 1 and deleting
+   * the unclaimed queue.
+   */
   fun refreshLibraryDeferred(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
+    seriesOnly: Boolean = false,
   ): TaskEnqueue {
     val nowMillis = now()
     return queue.enqueue(
       task =
         DurableTask(
-          id = libraryTaskId(libraryId),
+          id = libraryTaskId(libraryId, seriesOnly),
           type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
           payloadJson =
             buildJsonObject {
               put(RefreshLibraryMetadataTaskHandler.LIBRARY_ID_FIELD, libraryId.value)
+              put(RefreshLibraryMetadataTaskHandler.SERIES_ONLY_FIELD, seriesOnly)
             }.toString(),
           priority = priority,
           groupId = libraryId.value,
@@ -86,6 +100,7 @@ class RefreshMetadataTaskEmitter(
     libraryId: LibraryId,
     priority: Int = TaskPriority.HIGH,
     from: LibraryFanOutCursor = LibraryFanOutCursor.START,
+    seriesOnly: Boolean = false,
   ): Int {
     val nowMillis = now()
     var emitted = 0
@@ -94,15 +109,23 @@ class RefreshMetadataTaskEmitter(
 
     if (cursor.stage == LibraryFanOutCursor.Stage.SERIES) {
       for (id in liveSeriesIds(libraryId, cursor.afterId)) {
-        if (budget == 0) return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis) }
+        if (budget == 0) {
+          return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis, seriesOnly) }
+        }
         if (enqueueSeries(id, priority, nowMillis)) emitted += 1
         cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.SERIES, id.value)
         budget -= 1
       }
+      // The scope is checked where the stages meet rather than at the top, so a series-only fan-out
+      // that was interrupted and resumed still stops here instead of falling through to books.
+      if (seriesOnly) return emitted
       cursor = LibraryFanOutCursor.BOOKS_START
     }
+    if (seriesOnly) return emitted
     for (book in liveBooks(libraryId, cursor.afterId)) {
-      if (budget == 0) return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis) }
+      if (budget == 0) {
+        return emitted.also { resumeAt(libraryId, priority, cursor, nowMillis, seriesOnly) }
+      }
       if (enqueueBook(book, priority, nowMillis)) emitted += 1
       cursor = LibraryFanOutCursor(LibraryFanOutCursor.Stage.BOOKS, book.id.value)
       budget -= 1
@@ -144,16 +167,18 @@ class RefreshMetadataTaskEmitter(
     priority: Int,
     cursor: LibraryFanOutCursor,
     nowMillis: Long,
+    seriesOnly: Boolean,
   ) {
     queue.enqueueOrRetry(
       task =
         DurableTask(
-          id = "${libraryTaskId(libraryId)}$RESUME_SEPARATOR${cursor.encode()}",
+          id = "${libraryTaskId(libraryId, seriesOnly)}$RESUME_SEPARATOR${cursor.encode()}",
           type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
           payloadJson =
             buildJsonObject {
               put(RefreshLibraryMetadataTaskHandler.LIBRARY_ID_FIELD, libraryId.value)
               put(RefreshLibraryMetadataTaskHandler.CURSOR_FIELD, cursor.encode())
+              put(RefreshLibraryMetadataTaskHandler.SERIES_ONLY_FIELD, seriesOnly)
             }.toString(),
           priority = priority,
           groupId = libraryId.value,
@@ -270,8 +295,21 @@ class RefreshMetadataTaskEmitter(
 
     fun seriesTaskId(seriesId: SeriesId): String = "REFRESH_SERIES_METADATA_${seriesId.value}"
 
-    fun libraryTaskId(libraryId: LibraryId): String =
-      "REFRESH_LIBRARY_METADATA_${libraryId.value}"
+    /**
+     * A series-only fan-out gets an id of its own so it cannot be deduplicated into a full one.
+     * They queue the same task type against the same library, and the queue keeps the row it
+     * already has: sharing an id would silently answer "covers only" with a request for everything,
+     * or drop it entirely.
+     */
+    fun libraryTaskId(
+      libraryId: LibraryId,
+      seriesOnly: Boolean = false,
+    ): String =
+      if (seriesOnly) {
+        "REFRESH_LIBRARY_SERIES_METADATA_${libraryId.value}"
+      } else {
+        "REFRESH_LIBRARY_METADATA_${libraryId.value}"
+      }
   }
 }
 
@@ -284,7 +322,7 @@ class RefreshMetadataTaskEmitter(
  * handler free of the repositories the fan-out reads.
  */
 class RefreshLibraryMetadataTaskHandler(
-  private val refreshLibrary: (LibraryId, LibraryFanOutCursor) -> Unit,
+  private val refreshLibrary: (LibraryId, LibraryFanOutCursor, Boolean) -> Unit,
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -297,6 +335,7 @@ class RefreshLibraryMetadataTaskHandler(
         task.optionalStringPayload(json, CURSOR_FIELD),
         LibraryFanOutCursor.START,
       ),
+      task.optionalBooleanPayload(json, SERIES_ONLY_FIELD),
     )
   }
 
@@ -306,6 +345,12 @@ class RefreshLibraryMetadataTaskHandler(
 
     /** Absent on the task a request queues, present on every chunk that continues it. */
     internal const val CURSOR_FIELD: String = "cursor"
+
+    /**
+     * Absent on a payload written before this existed, which reads as `false` - the whole-library
+     * fan-out those tasks were queued for.
+     */
+    internal const val SERIES_ONLY_FIELD: String = "seriesOnly"
   }
 }
 
@@ -354,6 +399,26 @@ private fun DurableTask.requiredStringPayload(
 ): String =
   optionalStringPayload(json, field)
     ?: throw IllegalArgumentException("$taskType payload must contain a non-blank $field")
+
+/**
+ * Reads a payload flag, answering `false` for absent, malformed, or anything that is not a boolean.
+ *
+ * Not [optionalStringPayload]: that one narrows to `isString` and so returns null for the JSON
+ * boolean `true` that [buildJsonObject] writes, which reads back as `false` - a scope silently
+ * widening to the whole library. A flag whose failure mode is "does more work than asked" is worth
+ * its own function.
+ */
+internal fun DurableTask.optionalBooleanPayload(
+  json: Json,
+  field: String,
+): Boolean =
+  json
+    .parseToJsonElement(payloadJson)
+    .jsonObject[field]
+    ?.jsonPrimitive
+    ?.contentOrNull
+    ?.toBooleanStrictOrNull()
+    ?: false
 
 internal fun DurableTask.optionalStringPayload(
   json: Json,
