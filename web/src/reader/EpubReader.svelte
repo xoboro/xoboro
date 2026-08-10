@@ -127,7 +127,7 @@
       loadedId = id
       // Positions are one-based and contiguous, so a stored page maps straight onto an
       // index. resumePage also handles a finished book and a page past the end.
-      at = resumePage(detail.readProgress, order.length) - 1
+      at = resumePage(detail.progress, order.length) - 1
     } catch (caught) {
       error = caught
       // Only one of the three delivery failures is worth retrying, so the offer is made
