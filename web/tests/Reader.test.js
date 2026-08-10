@@ -328,4 +328,189 @@ describe('Reader', () => {
     await fireEvent.keyDown(screen.getByTestId('toggle-chrome'), { key: 'ArrowRight' })
     expect(screen.getByTestId('position').textContent).toBe(before)
   })
+
+  /**
+   * Resuming where the reader stopped.
+   *
+   * Two halves, and only the first was ever observable from the suite: the page number
+   * the reader resumes *at*, and the scroll that puts that page in front of them. The
+   * second is a `scrollIntoView` call, which the setup stubs to a no-op so jsdom does
+   * not crash — so it ran, nothing watched it, and a restore that scrolled to the wrong
+   * page or to no page at all would have passed.
+   */
+  /**
+   * Routes for an item carrying read progress.
+   *
+   * Written out rather than handed to `standardRoutes` as an override: that helper
+   * matches on `url.includes`, so a `/media-items/m1` entry placed first also answers
+   * `/media-items/m1/pages` — the page list comes back as the item, no slots render,
+   * and a scroll assertion then fails for a reason that has nothing to do with the
+   * restore. The specific paths have to come before the general one.
+   */
+  function withProgress(readProgress) {
+    return routes([
+      ['/media-items/m1/pages', reply(PAGES)],
+      ['/media-items/m1/previous', reply({ code: 'media_item_not_found' }, 404)],
+      ['/media-items/m1/next', reply({ id: 'm2' })],
+      [
+        '/media-items/m1/progress',
+        reply({ page: 1, completed: false, readAtMillis: 1, updatedAtMillis: 1 }),
+      ],
+      ['/media-items/m1', reply({ ...ITEM, readProgress })],
+    ])
+  }
+
+  function progressed(page) {
+    return withProgress({ page, completed: false, readAtMillis: 1, updatedAtMillis: 1 })
+  }
+
+  /** Records which element each restore scrolled to, without changing what runs. */
+  function watchScrolls() {
+    const scrolled = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function scrollIntoView(...args) {
+      scrolled.push(this)
+      return original?.apply(this, args)
+    }
+    return {
+      scrolled,
+      restore: () => {
+        Element.prototype.scrollIntoView = original
+      },
+    }
+  }
+
+  it('resumes at the stored page', async () => {
+    globalThis.fetch = progressed(2)
+    render(Reader, { params: { id: 'm1' } })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('position').textContent).toContain('2'),
+    )
+  })
+
+  it('scrolls the resumed page into view, not just the first one', async () => {
+    const watch = watchScrolls()
+    try {
+      globalThis.fetch = progressed(3)
+      render(Reader, { params: { id: 'm1' } })
+
+      await waitFor(() => expect(watch.scrolled.length).toBeGreaterThan(0))
+      const target = watch.scrolled.at(-1)
+      expect(target.getAttribute('data-page')).toBe('3')
+    } finally {
+      watch.restore()
+    }
+  })
+
+  /**
+   * A finished item starts again at the first page. Resuming at the last one would be
+   * offering to re-read the final page forever, and the scroll has to agree with the
+   * page number rather than restore the old position underneath it.
+   */
+  it('starts a completed item at the beginning', async () => {
+    const watch = watchScrolls()
+    try {
+      globalThis.fetch = withProgress({
+        page: 3,
+        completed: true,
+        readAtMillis: 1,
+        updatedAtMillis: 1,
+      })
+      render(Reader, { params: { id: 'm1' } })
+
+      await waitFor(() => expect(watch.scrolled.length).toBeGreaterThan(0))
+      expect(watch.scrolled.at(-1).getAttribute('data-page')).toBe('1')
+      expect(screen.getByTestId('position').textContent).toContain('1')
+    } finally {
+      watch.restore()
+    }
+  })
+
+  /**
+   * Tapping the page in the scrolling modes.
+   *
+   * The pointer handlers lived only on the paged stage, so in `scroll` — the shipped
+   * default, and the one a webtoon is read in — tapping the page did nothing at all.
+   * The only way to the bar was a 40px button in one corner, which is not how a reader
+   * holding a phone in one hand reaches for it.
+   *
+   * Every other test in this file opens the chrome through that button, so nothing
+   * covered the surface a reader actually taps.
+   */
+  async function tap(node, { x = 200, y = 300, moveX = 0, moveY = 0 } = {}) {
+    await fireEvent.pointerDown(node, { clientX: x, clientY: y })
+    await fireEvent.pointerUp(node, { clientX: x + moveX, clientY: y + moveY })
+  }
+
+  /**
+   * The surface as it exists once the item has arrived.
+   *
+   * `{#key loadedId}` destroys and recreates this block when the identifier settles, so
+   * a node read before then is detached by the time an event reaches it — the handler
+   * never runs and the assertion fails for a reason that has nothing to do with the
+   * behaviour under test. Waiting for the position, which is only rendered once the page
+   * count is known, is what makes the node the one a reader is looking at.
+   */
+  async function loadedScrollSurface(container) {
+    await screen.findByTestId('position')
+    return container.querySelector('.scroll')
+  }
+
+  it('opens the chrome when the page is tapped in a scrolling mode', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    const toggle = await screen.findByTestId('toggle-chrome')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await tap(await loadedScrollSurface(container))
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('open-settings')).toBeInTheDocument()
+  })
+
+  it('closes the chrome on a second tap', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    const toggle = await screen.findByTestId('toggle-chrome')
+    const surface = await loadedScrollSurface(container)
+    await tap(surface)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await tap(surface)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  /**
+   * A drag is how a reader scrolls, so it must not also be how they open the bar.
+   * Without a movement threshold the chrome would appear on every flick.
+   */
+  it('does not toggle the chrome when the pointer was dragged', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    const toggle = await screen.findByTestId('toggle-chrome')
+    await tap(await loadedScrollSurface(container), { moveY: 120 })
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  /**
+   * The left and right thirds page the paged stage. In a scrolling mode they must not:
+   * scrolling is the navigation there, and a tap near an edge is a reader reaching for
+   * the bar rather than asking for the next page.
+   */
+  it('does not page from the edges in a scrolling mode', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    const surface = await loadedScrollSurface(container)
+    const before = screen.getByTestId('position').textContent
+    await tap(surface, { x: 10 })
+
+    expect(screen.getByTestId('position').textContent).toBe(before)
+    expect(screen.getByTestId('toggle-chrome')).toHaveAttribute('aria-expanded', 'true')
+  })
 })
