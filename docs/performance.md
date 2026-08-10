@@ -227,21 +227,30 @@ This section used to end at "near-quadratic, cause unknown, look at `ADR 0052`".
 not in ADR 0052 — the reconciliation SQL is fine — and it is now fixed. The measurement that
 localised it is kept below, because it is the part that transfers.
 
-At 15,050 items the first scan went from **102,738 ms to 1,969 ms**, and stopped curving.
+At 15,050 items the first scan went from **97,933 ms to 2,078 ms**, and stopped curving. Both
+of those are three-repetition averages in separate JVMs, so they are the same measurement taken
+twice with one thing changed between them:
 
-| metric | 3,050 before | 3,050 after | 15,050 before | 15,050 after |
+| metric | 15,050 before | 15,050 after | spread after | change |
 |---|---|---|---|---|
-| `cold_scan.wall` | 4,404 ms | **468 ms** | 102,738 ms | **1,969 ms** |
-| `cold_analyze.wall` | 7,953 ms | 6,211 ms | 34,575 ms | 33,144 ms |
-| `unchanged_rescan.wall.p50` | 104.6 ms | 97.0 ms | 625.1 ms | 605.5 ms |
+| `cold_scan.wall` | 97,933 ms | **2,078 ms** | 1,996–2,186 (±4.6%) | **47.1× faster** |
+| `cold_analyze.wall` | 31,417 ms | 33,953 ms | 32,096–34,959 | +8.1% |
+| `cold_full_scan.wall` | 129,350 ms | 36,032 ms | 34,093–37,145 | 3.59× faster |
+| `unchanged_rescan.wall.p50` | 595 ms | 611 ms | 607.7–615.4 | +2.7% |
 
-One run per cell on one machine, not the three-repetition averages the table further down
-carries, so only the scan's 52× is outside the ±25% a single cold metric moves by. Analysis and
-rescan are unchanged, which is what they should be: nothing touched them.
+All three repetitions reported `queue_drain.drained = true`, so no repetition was measuring a
+scan that gave up early. Analysis and rescan move by less than the spread of the metric that did
+not change, which is what they should do: nothing touched them, and they are the control that
+says the machine did not simply get faster.
 
-The scan is now **sub-linear** across these two sizes — 4.21× the time for 4.93× the items,
-an exponent of 0.914 — because the per-item work is finally constant and what remains grows
-with the directory walk rather than with the catalogue.
+The 3,050-item pair is one run per cell rather than three, so it is quoted separately and only
+the direction should be read from it: `cold_scan` 4,404 ms → 468 ms, `cold_analyze` 7,953 ms →
+6,211 ms, `unchanged_rescan.wall.p50` 104.6 ms → 97.0 ms.
+
+The scan is now **sub-linear** across the two sizes — 4.44× the time for 4.93× the items,
+an exponent of 0.934 — because the per-item work is finally constant and what remains grows
+with the directory walk rather than with the catalogue. Scan is 5.8% of `cold_full_scan` at
+15,050 items, down from 76%.
 
 ### Where it was
 
@@ -410,8 +419,8 @@ The WebDAV comparison below reports listing at 95 s against analysis at 5.5 item
 concludes "listing is not the difference". This section used to add that the conclusion does
 **not** hold for local sources as the catalogue grows, because the dominant term switches to
 scan. That was true of the measurement in front of it and false as a statement about the system:
-the switch was a defect, not a property of scale. With it fixed, scan is 5.6% of
-`cold_full_scan` at 15,050 items (1,969 ms of 35,113 ms) and analysis dominates again at both
+the switch was a defect, not a property of scale. With it fixed, scan is 5.8% of
+`cold_full_scan` at 15,050 items (2,078 ms of 36,032 ms) and analysis dominates again at both
 sizes.
 
 Worth keeping as a caution rather than deleting: "the dominant term switches as n grows" and "one

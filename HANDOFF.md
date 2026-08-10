@@ -55,7 +55,7 @@ four of them, giving n × n. `ADR 0052` was the wrong suspect; the reconciliatio
   scanning. This is where V31 left off: V31 stopped the update trigger firing needlessly, not the
   cost when it does fire.
 
-`cold_scan` at 15,050 items: **102,738 ms → 1,969 ms**, and sub-linear now (4.21× the time for
+`cold_scan` at 15,050 items: **97,933 ms → 2,078 ms**, and sub-linear now (4.44× the time for
 4.93× the items). Analysis and rescan unchanged.
 
 **Upgrade cost, measured on snapshots of the deployed 4.55 GB database** (148,444 entities): V35
@@ -78,14 +78,20 @@ because every insert read the whole search index"**. The wiki page
 `xoboro-cold-scan-is-quadratic` was updated to match, but the wiki does not travel with the repo —
 `docs/performance.md` is the tracked copy.
 
-Before and after, one run per cell rather than the earlier three-repetition averages, so only the
-scan's 52x is outside the ±25% a single cold metric moves by:
+Both columns are three-repetition averages in separate JVMs, all six repetitions reporting
+`queue_drain.drained = true`:
 
-| metric | 3,050 before | 3,050 after | 15,050 before | 15,050 after |
+| metric | 15,050 before | 15,050 after | spread after | change |
 |---|---|---|---|---|
-| `cold_scan.wall` | 4,404 ms | **468 ms** | 102,738 ms | **1,969 ms** |
-| `cold_analyze.wall` | 7,953 ms | 6,211 ms | 34,575 ms | 33,144 ms |
-| `unchanged_rescan.p50` | 104.6 ms | 97.0 ms | 625.1 ms | 605.5 ms |
+| `cold_scan.wall` | 97,933 ms | **2,078 ms** | 1,996–2,186 (±4.6%) | **47.1× faster** |
+| `cold_analyze.wall` | 31,417 ms | 33,953 ms | 32,096–34,959 | +8.1% |
+| `cold_full_scan.wall` | 129,350 ms | 36,032 ms | 34,093–37,145 | 3.59× faster |
+| `unchanged_rescan.p50` | 595 ms | 611 ms | 607.7–615.4 | +2.7% |
+
+Analysis and rescan are the control: they move by less than their own spread, so the machine did
+not simply get faster. At 3,050 items only one run per cell was taken, so read direction and not
+magnitude from it: `cold_scan` 4,404 → 468 ms, `cold_analyze` 7,953 → 6,211 ms,
+`unchanged_rescan.p50` 104.6 → 97.0 ms.
 
 Reproduce either state with synthetic fixtures, locally, **zero load on the deployed host**:
 
