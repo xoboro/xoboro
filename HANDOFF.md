@@ -51,8 +51,13 @@ four of them, giving n × n. `ADR 0052` was the wrong suspect; the reconciliatio
   cost when it does fire.
 
 `cold_scan` at 15,050 items: **102,738 ms → 1,969 ms**, and sub-linear now (4.21× the time for
-4.93× the items). Analysis and rescan unchanged. Applying V36 rebuilds both indexes in about
-2.6 s at the deployed catalogue's size.
+4.93× the items). Analysis and rescan unchanged.
+
+**Upgrade cost, measured on a snapshot of the deployed 4.55 GB database** (148,444 entities): V35
+takes 11 ms, V36 takes **52.2 s** of statement time, one-off at startup. Both digests came back
+unchanged, no index row sat on a rowid its key did not name, `integrity_check` returned `ok`. The
+snapshot was taken with `.backup` against the live database and deleted afterwards; the container
+was never stopped.
 
 Full numbers and reasoning: `docs/performance.md`, section **"Settled: the cold scan was quadratic
 because every insert read the whole search index"**. Wiki `xoboro-cold-scan-is-quadratic` still
@@ -77,11 +82,19 @@ scripts/cold-scan-repetitions.sh 3 1500 10 50   # 15,050 items, ~2 min/rep
 **What is still a full pass:** renaming a series rewrites its books' rows as one `rowid IN (...)`.
 A trigger cannot loop, so that stays one pass — unchanged from before, and the only remaining one.
 
-**A trap this left behind.** The mutation that checks the metadata rebuild path uses the key's rowid
-did not bite at first: with one book in the fixture, SQLite hands an omitted rowid `max(rowid) + 1`,
-which is the number the rebuild's own delete just freed, so the wrong code landed on the right
-number by accident. The test now indexes three books and rebuilds one that is not the last. Any
-future assertion about rowid identity needs the same care.
+**Two traps this left behind.**
+
+The mutation that checks the metadata rebuild path uses the key's rowid did not bite at first: with
+one book in the fixture, SQLite hands an omitted rowid `max(rowid) + 1`, which is the number the
+rebuild's own delete just freed, so the wrong code landed on the right number by accident. The test
+now indexes three books and rebuilds one that is not the last. Any future assertion about rowid
+identity needs the same care.
+
+**`date +%s%3N` inside `alpine:3` silently drops the `%3N` and returns whole seconds.** It does not
+error - it prints a plausible number - so a migration measured that way reported "57 ms" for work
+that took 57 seconds, and the difference was only visible because the number was too good to be
+true. Use `sqlite3`'s own `.timer on` and sum the reported `real` values; busybox is not GNU
+coreutils.
 
 ### B. ~~Record the measurement in `docs/performance.md`~~ — done
 

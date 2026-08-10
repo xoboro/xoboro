@@ -242,8 +242,16 @@ changed nothing, which is what made a re-scan affordable, but it did not make th
 that trigger runs once per updated row, so a re-scan genuinely changing m books still paid m
 passes over the index. Keyed, each is a seek.
 
-Applying V36 rebuilds both indexes, which is linear and cheap: **255 ms at 16,500 entities and
-949 ms at 55,000**, so roughly 2.6 s at the deployed catalogue's 148,444.
+Applying V36 rebuilds both indexes. Measured on a `.backup` snapshot of the deployed catalogue —
+145,105 books and 3,339 series, 148,444 entities, a 4.55 GB database — V35 takes **11 ms** and V36
+takes **52.2 s** of statement time, one-off at startup. The rebuild reproduced the index exactly:
+both digests came back unchanged (74,243,080 and 14,928,546), no index row sat on a rowid its key
+did not name, and `PRAGMA integrity_check` returned `ok`.
+
+⚠️ **This section briefly claimed 2.6 s, extrapolated from synthetic fixtures. It was 20× low.**
+Synthetic titles are a few characters; the real index holds 74.2 MB of text against roughly 1 MB
+at the same row count. Rebuild cost tracks *bytes of text*, not rows, and no row-count
+extrapolation can see that. Migration cost is worth measuring on a snapshot rather than projecting.
 
 ### What is still a full pass
 
