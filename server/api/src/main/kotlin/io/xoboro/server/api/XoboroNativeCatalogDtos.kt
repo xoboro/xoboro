@@ -61,6 +61,15 @@ data class XoboroSeriesResponse(
   val publisher: String,
   val ageRating: Int? = null,
   val language: String,
+  /**
+   * Who made the work, aggregated across the series' items.
+   *
+   * Authors are recorded per item because that is where a sidecar puts them, and a long-running
+   * series can change hands. The aggregation is already computed for the read model, so a series
+   * response that omitted it was dropping an answer it was holding: a reader had no way to see who
+   * made a work without opening a chapter.
+   */
+  val authors: List<XoboroAuthorResponse>,
   val genres: Set<String>,
   val tags: Set<String>,
   val links: List<XoboroWebLinkResponse>,
@@ -199,6 +208,7 @@ internal fun CatalogSeries.toNativeResponse(): XoboroSeriesResponse =
     publisher = metadata.publisher,
     ageRating = metadata.ageRating,
     language = metadata.language,
+    authors = booksMetadata.authors.map(Author::toNativeResponse),
     genres = metadata.genres,
     tags = metadata.tags,
     links = metadata.links.map(WebLink::toNativeResponse),
