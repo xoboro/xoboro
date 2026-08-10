@@ -3533,6 +3533,36 @@ paths:
         description: Series identifier.
         schema:
           type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_metadata
+      description: >-
+        The editable metadata surface for a series, locks included. `GET
+        /api/xoboro/v1/series/{seriesId}` carries the same values flat and no
+        locks, so an editor reads this one.
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
     patch:
       tags: [Series]
       operationId: patch_series_seriesId_metadata
