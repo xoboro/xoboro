@@ -26,6 +26,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -94,7 +95,7 @@ class LibraryMaintenanceTaskTest {
         )
       val fanned = mutableListOf<LibraryId>()
 
-      RefreshLibraryMetadataTaskHandler(refreshLibrary = { id, _ -> fanned += id }).handle(
+      RefreshLibraryMetadataTaskHandler(refreshLibrary = { id, _, _ -> fanned += id }).handle(
         DurableTask(
           id = RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID),
           type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
@@ -166,6 +167,110 @@ class LibraryMaintenanceTaskTest {
   }
 
   @Test
+  fun `a series-only fan-out queues the series and stops before the books`() {
+    // The gap that caused the incident. A series' cover comes from its sidecar and is rewritten by a
+    // series refresh, so asking for covers meant asking for a whole library refresh - which also
+    // queued a book metadata refresh for all 145,105 books, the most expensive per-item operation
+    // there is. The host reached 758% CPU on 10 cores. Here the scope is the whole point: what must
+    // be asserted is not that series are queued but that books are *not*.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("series-only.sqlite"))).use { database ->
+      insertCatalog(database)
+      val recorder = RecordingOrderQueue(JooqDurableTaskQueue(database))
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = recorder,
+          currentTimeMillis = { 100 },
+        )
+
+      val emitted = metadata.refreshLibrary(LIBRARY_ID, seriesOnly = true)
+
+      assertEquals(1, emitted)
+      assertEquals(listOf(RefreshSeriesMetadataTaskHandler.TASK_TYPE), recorder.types)
+    }
+  }
+
+  @Test
+  fun `a series-only fan-out does not chain a books successor when its chunk fills`() {
+    // A chunk that fills hands the remainder to a successor, and the remainder of a series-only pass
+    // must never be the books stage. Getting this wrong would make the cheap request expand into the
+    // expensive one one chunk later, which is worse than not having the request at all: it would
+    // look like it worked.
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("series-only-chunk.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val queue = JooqDurableTaskQueue(database)
+      val metadata =
+        RefreshMetadataTaskEmitter(
+          books = JooqBookRepository(database),
+          series = JooqSeriesRepository(database),
+          queue = queue,
+          chunkSize = 1,
+          currentTimeMillis = { 100 },
+        )
+
+      assertEquals(1, metadata.refreshLibrary(LIBRARY_ID, seriesOnly = true))
+
+      assertFalse(
+        RefreshBookMetadataTaskHandler.TASK_TYPE in queue.countsByType(),
+        "a series-only fan-out must not reach the books stage",
+      )
+      // Asserting no book task was queued is not enough on its own: with the scope check missing,
+      // this chunk queues no books either - it fills its budget and hands a *books-stage* cursor to
+      // a successor, which queues them a chunk later. The successor is the thing to look for.
+      assertFalse(
+        RefreshLibraryMetadataTaskHandler.TASK_TYPE in queue.countsByType(),
+        "a series-only fan-out that finished its series has nothing left to continue",
+      )
+    }
+  }
+
+  @Test
+  fun `a series-only request cannot be deduplicated into a whole-library one`() {
+    // Same task type, same library: the queue keeps the row it already has. Sharing an id would
+    // answer "covers only" with a request for everything, or silently drop it.
+    assertNotEquals(
+      RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID),
+      RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID, seriesOnly = true),
+    )
+  }
+
+  @Test
+  fun `the fan-out handler carries the scope it was queued with`() {
+    val scopes = mutableListOf<Boolean>()
+    RefreshLibraryMetadataTaskHandler(
+      refreshLibrary = { _, _, seriesOnly -> scopes += seriesOnly },
+    ).handle(
+      DurableTask(
+        id = RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID, seriesOnly = true),
+        type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+        payloadJson =
+          """{"libraryId":"${LIBRARY_ID.value}","seriesOnly":true}""",
+        priority = TaskPriority.HIGH,
+        groupId = LIBRARY_ID.value,
+        availableAtMillis = 1,
+      ),
+    )
+    // A payload written before the field existed was queued for the whole library, so its absence
+    // has to read as `false` rather than as anything else.
+    RefreshLibraryMetadataTaskHandler(
+      refreshLibrary = { _, _, seriesOnly -> scopes += seriesOnly },
+    ).handle(
+      DurableTask(
+        id = RefreshMetadataTaskEmitter.libraryTaskId(LIBRARY_ID),
+        type = RefreshLibraryMetadataTaskHandler.TASK_TYPE,
+        payloadJson = """{"libraryId":"${LIBRARY_ID.value}"}""",
+        priority = TaskPriority.HIGH,
+        groupId = LIBRARY_ID.value,
+        availableAtMillis = 1,
+      ),
+    )
+
+    assertEquals(listOf(true, false), scopes)
+  }
+
+  @Test
   fun `a fan-out chunk hands the rest of the library to a successor`() {
     // An unbounded pass cannot be relied on to reach its own end: one busy enqueue throws, the whole
     // task is deferred, and the re-run starts over - re-queuing every book it had already finished,
@@ -208,7 +313,7 @@ class LibraryMaintenanceTaskTest {
       // The handler hands that cursor back to the emitter rather than starting over.
       val resumed = mutableListOf<Pair<LibraryId, LibraryFanOutCursor>>()
       RefreshLibraryMetadataTaskHandler(
-        refreshLibrary = { id, cursor -> resumed += id to cursor },
+        refreshLibrary = { id, cursor, _ -> resumed += id to cursor },
       ).handle(
         DurableTask(
           id = successorId,

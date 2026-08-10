@@ -17,6 +17,17 @@ interface LibraryMaintenanceRequester {
   /** Asks for the library's metadata to be re-read from its sidecars. See [analyze]. */
   fun refreshMetadata(libraryId: LibraryId): TaskEnqueue
 
+  /**
+   * The same, for the library's series and not its books.
+   *
+   * A series' cover comes from its sidecar and is rewritten by a series refresh, so this is how one
+   * asks for covers without also asking for every book. [refreshMetadata] queues both: on this
+   * install that is 3,339 series against 145,105 books, and book metadata refresh is the most
+   * expensive per-item operation there is - it re-reads the file and rebuilds the full-text row.
+   * Asking for 3,339 covers through [refreshMetadata] once took the host to 758% CPU on 10 cores.
+   */
+  fun refreshSeriesMetadata(libraryId: LibraryId): TaskEnqueue
+
   fun emptyTrash(libraryId: LibraryId): Boolean
 }
 
