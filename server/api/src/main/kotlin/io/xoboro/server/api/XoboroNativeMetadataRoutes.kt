@@ -99,6 +99,24 @@ fun Route.xoboroNativeMetadataRoutes(
           patched.map(BookMetadata::toNativeMetadataResponse),
         )
       }
+      /**
+       * The editable metadata surface for a series, locks included.
+       *
+       * `PATCH` beside this answered with the surface and nothing offered it for reading, so an
+       * editor had only `GET /series/{id}` — which carries the same values flat and no locks. A
+       * form that cannot read a lock shows every field unprotected, which is a claim about the
+       * refresh pipeline that is not true.
+       */
+      get("/series/{seriesId}/metadata") {
+        val user = call.nativeUser()
+        val id = SeriesId(call.requiredParameter("seriesId"))
+        val series = catalog.findSeriesByIdOrNull(id, user.catalogAccess())
+        if (series == null) {
+          call.respondNativeNotFound("series_not_found", "Series was not found")
+          return@get
+        }
+        call.respond(HttpStatusCode.OK, series.metadata.toNativeMetadataResponse())
+      }
       patch("/series/{seriesId}/metadata") {
         val user = call.nativeUser()
         val access = user.catalogAccess()
