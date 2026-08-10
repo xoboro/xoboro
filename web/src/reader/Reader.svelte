@@ -205,7 +205,12 @@
       seriesId = detail.seriesId ?? null
       restoreViewPreferences()
       pages = manifest
-      const start = resumePage(detail.readProgress, detail.media?.pageCount ?? manifest.length)
+      // `progress`, which is what the media-item route sends. This read was `readProgress` —
+      // the name the *domain* type uses on the server, not the one on the wire — so it was
+      // always undefined and `resumePage` fell through to page one. Every reader opened at the
+      // beginning no matter where they stopped, and the fixtures said `readProgress` too, so
+      // the suite agreed with the component and neither agreed with the server.
+      const start = resumePage(detail.progress, detail.media?.pageCount ?? manifest.length)
       current = start
       loadedId = id
       index = indexOfPage(buildViews(manifest, isSplit, direction), start)

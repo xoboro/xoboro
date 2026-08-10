@@ -23,7 +23,7 @@ const ITEM = {
   // server - and the component's `?? pages.length` fallback made the mistake invisible because the
   // fallback happened to be the same number.
   media: { pageCount: 3, status: 'READY' },
-  readProgress: null,
+  progress: null,
 }
 
 const PAGES = [
@@ -282,7 +282,7 @@ describe('Reader', () => {
           itemReads += 1
           return itemReads === 1
             ? reply(ITEM)
-            : reply({ ...ITEM, readProgress: { page: 3, completed: false } })
+            : reply({ ...ITEM, progress: { page: 3, completed: false } })
         },
       ],
     ])
@@ -347,7 +347,7 @@ describe('Reader', () => {
    * and a scroll assertion then fails for a reason that has nothing to do with the
    * restore. The specific paths have to come before the general one.
    */
-  function withProgress(readProgress) {
+  function withProgress(progress) {
     return routes([
       ['/media-items/m1/pages', reply(PAGES)],
       ['/media-items/m1/previous', reply({ code: 'media_item_not_found' }, 404)],
@@ -356,7 +356,7 @@ describe('Reader', () => {
         '/media-items/m1/progress',
         reply({ page: 1, completed: false, readAtMillis: 1, updatedAtMillis: 1 }),
       ],
-      ['/media-items/m1', reply({ ...ITEM, readProgress })],
+      ['/media-items/m1', reply({ ...ITEM, progress })],
     ])
   }
 
