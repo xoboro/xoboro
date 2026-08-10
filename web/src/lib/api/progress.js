@@ -78,7 +78,7 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
     // Re-read rather than guess. The refusal says only that something newer exists, so
     // the position to offer has to come from the server.
     const current = await readMediaItem(mediaItemId)
-    return new ProgressConflict(current.readProgress ?? null)
+    return new ProgressConflict(current.progress ?? null)
   }
 }
 

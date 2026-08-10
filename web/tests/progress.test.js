@@ -84,7 +84,7 @@ describe('writeProgress', () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(reply({ code: 'stale_progress', message: 'stale' }, 409))
-      .mockResolvedValueOnce(reply({ id: 'm1', readProgress: { page: 42, completed: false } }))
+      .mockResolvedValueOnce(reply({ id: 'm1', progress: { page: 42, completed: false } }))
     globalThis.fetch = fetchImpl
 
     const conflict = await writeProgress('m1', { page: 7 })

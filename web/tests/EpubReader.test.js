@@ -35,7 +35,7 @@ const NOVEL = {
   seriesId: 's1',
   mediaKind: 'NOVEL',
   media: { status: 'READY' },
-  readProgress: null,
+  progress: null,
 }
 
 /**
@@ -227,7 +227,7 @@ describe('ReaderRoute', () => {
       seriesId: 's1',
       mediaKind: 'BOOK',
       media: { pagesCount: 1, status: 'READY' },
-      readProgress: null,
+      progress: null,
     }
     globalThis.IntersectionObserver = class {
       observe() {}
