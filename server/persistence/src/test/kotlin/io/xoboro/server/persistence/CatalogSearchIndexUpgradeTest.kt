@@ -109,6 +109,14 @@ class CatalogSearchIndexUpgradeTest {
         database.rowidOf("catalog_title_substring", "BOOK", BOOK_ID),
         "the rebuilt interior-match index writes it under that key",
       )
+      // Stated rather than discovered later: the word index is adopted, not rebuilt, so a row that
+      // was already missing stays missing. The symptom is an entity findable by fragment and not by
+      // word. `rebuildBookSearchDocument` is what repairs one.
+      assertEquals(
+        0,
+        database.countOf("catalog_search_fts", "BOOK", BOOK_ID),
+        "adopting cannot restore a word-index row that was not there to adopt",
+      )
     }
   }
 
