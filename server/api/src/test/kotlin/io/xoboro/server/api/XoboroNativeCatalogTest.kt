@@ -214,6 +214,24 @@ class XoboroNativeCatalogTest {
       )
     }
 
+  @Test
+  fun `carries the authors aggregated across a series' items`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      // Authors are the first thing a reader looks for on a series page and the one field the
+      // series response did not carry. They are recorded per item, and the aggregation across a
+      // series already exists in the read model - `CatalogSeries.booksMetadata` - so this route
+      // was holding the answer and dropping it. A reader had no way to see who made the work
+      // without opening a chapter.
+      val response = client.get("$XOBORO_API_PREFIX/series/series-1") { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val authors = response.body<XoboroSeriesResponse>().authors
+      assertEquals(listOf("Synthetic Writer" to "writer"), authors.map { it.name to it.role })
+    }
+
   private fun ApplicationTestBuilder.installCatalog(fixture: Fixture) {
     application {
       install(ContentNegotiation) {
@@ -497,6 +515,7 @@ class XoboroNativeCatalogTest {
           ),
         booksMetadata =
           io.xoboro.core.application.BookMetadataAggregation(
+            authors = listOf(io.xoboro.core.domain.Author("Synthetic Writer", "writer")),
             createdAtMillis = 1,
             updatedAtMillis = 1,
           ),
