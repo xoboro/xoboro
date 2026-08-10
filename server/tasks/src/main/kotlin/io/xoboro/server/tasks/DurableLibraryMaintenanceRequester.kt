@@ -15,6 +15,9 @@ class DurableLibraryMaintenanceRequester(
   override fun refreshMetadata(libraryId: LibraryId): TaskEnqueue =
     metadata.refreshLibraryDeferred(libraryId)
 
+  override fun refreshSeriesMetadata(libraryId: LibraryId): TaskEnqueue =
+    metadata.refreshLibraryDeferred(libraryId, seriesOnly = true)
+
   override fun emptyTrash(libraryId: LibraryId): Boolean =
     trash.emptyTrash(libraryId)
 }

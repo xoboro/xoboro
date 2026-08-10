@@ -1312,6 +1312,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/libraries/{libraryId}/series-metadata-refresh:
+    parameters:
+      - name: libraryId
+        in: path
+        required: true
+        description: Library identifier.
+        schema:
+          type: string
+    post:
+      tags: [Libraries]
+      description: >-
+        Re-reads the sidecars of the library's series and not its books, which is
+        how series artwork is regenerated without also queueing a metadata refresh
+        for every book. The whole-library route queues both, and on a large
+        catalogue that is two orders of magnitude more work: book metadata refresh
+        re-reads the file and rebuilds the full-text row.
+      operationId: post_libraries_libraryId_series_metadata_refresh
+      responses:
+        "202":
+          description: >-
+            Accepted and enqueued as durable background work, deliberately not
+            completed synchronously.
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/me:
     get:
       tags: [Self service]
