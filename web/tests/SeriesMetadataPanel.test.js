@@ -58,7 +58,8 @@ describe('series metadata panel', () => {
     expect(screen.getByTestId('series-summary').textContent).toContain('A synthetic summary.')
     const facts = screen.getByTestId('series-facts').textContent
     expect(facts).toContain('Sample Publisher')
-    expect(facts).toContain('ko')
+    // The language is named, not printed as its tag: that is what a reader calls it.
+    expect(facts).toContain('Korean')
     // Status is a domain enum, so it must be translated rather than printed raw — a
     // reader should not be shown "ONGOING".
     expect(facts).toContain('Ongoing')
@@ -166,6 +167,57 @@ describe('series metadata panel', () => {
 
     expect(screen.queryByTestId('series-summary')).toBeNull()
     expect(screen.queryByTestId('series-facts')).toBeNull()
+  })
+
+  /**
+   * `alternateTitles` is on the series route and was dropped at the last step, the same
+   * way every other field on this panel was. A series known by a second name is exactly
+   * the case a reader needs the panel for.
+   */
+  it('shows alternate titles, labelled where the entry carries a label', () => {
+    render(
+      SeriesMetadataPanel,
+      series({
+        alternateTitles: [
+          { label: 'Short', title: 'Sample Short' },
+          { label: '', title: 'Sample Unlabelled' },
+        ],
+      }),
+    )
+
+    const titles = screen.getByTestId('series-alternate-titles').textContent
+    expect(titles).toContain('Short')
+    expect(titles).toContain('Sample Short')
+    expect(titles).toContain('Sample Unlabelled')
+  })
+
+  it('omits the alternate titles section when there are none', () => {
+    render(SeriesMetadataPanel, series({ alternateTitles: [] }))
+
+    expect(screen.queryByTestId('series-alternate-titles')).toBeNull()
+  })
+
+  /**
+   * A reader is shown a language, not a tag. `ko` is what the sidecar stores and what the
+   * route sends; it is not what anyone calls the language.
+   */
+  it('names the language rather than printing its code', () => {
+    render(SeriesMetadataPanel, series({ language: 'ko' }))
+
+    const facts = screen.getByTestId('series-facts').textContent
+    expect(facts).toContain('Korean')
+    expect(facts).not.toMatch(/\bko\b/)
+  })
+
+  it('prints a language code it cannot resolve rather than dropping the row', () => {
+    // Structurally invalid, so `Intl.DisplayNames` throws rather than answering. A merely
+    // unfamiliar-looking tag is not the case to test with: `zxx-Qaai` is well formed and
+    // Intl resolves it to "No linguistic content (Inherited)", so it would prove nothing.
+    // The value comes from a library file, so the set is open. Hiding the row would lose
+    // the fact that a language was recorded at all.
+    render(SeriesMetadataPanel, series({ language: '!!' }))
+
+    expect(screen.getByTestId('series-facts').textContent).toContain('!!')
   })
 
   it('marks outbound links noopener, because their URLs come from library files', () => {
