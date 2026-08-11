@@ -318,25 +318,29 @@ failure — the fragment's *shape* (its length and which scripts it mixes), neve
 Measured together they make a correct index look broken. Asked separately, over 25 sampled
 titles each:
 
-| measurement | found itself | median matches | returned nothing |
-| --- | --- | --- | --- |
-| series, interior fragment, single token | **25/25** | 1 | 0 |
-| series, interior fragment, 8 chars | **25/25** | 1 | 0 |
-| media items, interior fragment, 8 chars | **25/25** | 6 | 0 |
-| series, leading word | **25/25** | 2 | 0 |
-| media items, interior fragment, 3 chars | 18/25 | 133 | 0 |
-| media items, leading word | 14/25 | 349 | 1 |
-| six nonsense queries | — | 0 | `totalItems=0` for all |
+| measurement | found itself | median matches | answers over one page | returned nothing |
+| --- | --- | --- | --- | --- |
+| series, interior fragment, single token | **25/25** | 1 | 0 | 0 |
+| series, interior fragment, 8 chars | **25/25** | 1 | 0 | 0 |
+| series, leading word | **25/25** | 1 | 0 | 0 |
+| media items, interior fragment, 8 chars | **25/25** | 76 | 5 | 0 |
+| media items, interior fragment, 3 chars | 19/25 | 145 | 8 | 0 |
+| media items, leading word | 10/25 | 549 | 19 | 0 |
+| six nonsense queries | — | 0 | 0 | `totalItems=0` for all |
 
 **Found itself** is a membership test: the entity the fragment was cut from is in the
 answer, or it is not. That is the metric to read.
 
-The rows below 25/25 are **selectivity, not loss**, and the median column is what shows it
-rather than asserting it: every row whose median answer is small finds its entity every
-time, and only the rows answering in the hundreds push it past the first page. Three
-characters out of 145,105 items is a broad query. Cut the same window at eight characters —
-median 6 — and media items go to 25/25 as well. `returned_nothing` stays at zero
-throughout, which is what says nothing was lost.
+The rows below 25/25 are **selectivity, not loss**, and the last two columns are what show
+it rather than asserting it. Every row where no answer exceeded one page is 25/25, without
+exception; every miss is in a row where some did. An entity can only be absent from the
+first page when its query answered with more than a page, so the two columns together are
+the whole explanation rather than a plausible one.
+
+Three characters out of 145,105 items is simply a broad query. `returned_nothing` stays at
+zero throughout, which is what says nothing was lost — and the 8-character media-item row
+finds its entity 25 times out of 25 even though five of those answers ran past a page,
+which is ranking working, not just recall.
 
 The negative controls are what stop a perfect score from being reachable by answering
 "everything" to every query.
