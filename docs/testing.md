@@ -318,24 +318,25 @@ failure — the fragment's *shape* (its length and which scripts it mixes), neve
 Measured together they make a correct index look broken. Asked separately, over 25 sampled
 titles each:
 
-| measurement | found itself | returned nothing |
-| --- | --- | --- |
-| series, interior fragment, single token | **25/25** | 0 |
-| series, interior fragment, 8 chars | **25/25** | 0 |
-| media items, interior fragment, 8 chars | **25/25** | 0 |
-| series, leading word | **25/25** | 0 |
-| media items, interior fragment, 3 chars | 18/25 | 0 |
-| media items, leading word | 14/25 | 1 |
-| six nonsense queries | — | `totalItems=0` for all |
+| measurement | found itself | median matches | returned nothing |
+| --- | --- | --- | --- |
+| series, interior fragment, single token | **25/25** | 1 | 0 |
+| series, interior fragment, 8 chars | **25/25** | 1 | 0 |
+| media items, interior fragment, 8 chars | **25/25** | 6 | 0 |
+| series, leading word | **25/25** | 2 | 0 |
+| media items, interior fragment, 3 chars | 18/25 | 133 | 0 |
+| media items, leading word | 14/25 | 349 | 1 |
+| six nonsense queries | — | 0 | `totalItems=0` for all |
 
 **Found itself** is a membership test: the entity the fragment was cut from is in the
 answer, or it is not. That is the metric to read.
 
-The rows below 25/25 are **selectivity, not loss**. Three characters out of 145,105 items
-match thousands of them, so the one the fragment came from is often past the first page —
-and `returned_nothing` stays at zero throughout, which is what says nothing was lost. Cut
-the same window at eight characters, long enough to be specific, and media items go to
-25/25 as well.
+The rows below 25/25 are **selectivity, not loss**, and the median column is what shows it
+rather than asserting it: every row whose median answer is small finds its entity every
+time, and only the rows answering in the hundreds push it past the first page. Three
+characters out of 145,105 items is a broad query. Cut the same window at eight characters —
+median 6 — and media items go to 25/25 as well. `returned_nothing` stays at zero
+throughout, which is what says nothing was lost.
 
 The negative controls are what stop a perfect score from being reachable by answering
 "everything" to every query.
