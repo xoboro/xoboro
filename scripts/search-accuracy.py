@@ -52,7 +52,9 @@ import urllib.request
 BASE = os.environ.get("XOBORO_BASE", "http://127.0.0.1:25610")
 CONTAINER = os.environ.get("XOBORO_CONTAINER", "xoboro-xoboro-1")
 VOLUME = os.environ.get("XOBORO_VOLUME", "xoboro_xoboro-config")
-ADMIN = os.environ.get("XOBORO_ADMIN", "admin@hongyoungjun.com")
+# Required rather than defaulted. The deployment's address is not this repository's to
+# carry, and a stale default fails at the login step with nothing to say why.
+ADMIN = os.environ.get("XOBORO_ADMIN") or ""
 DOCKER = os.environ.get("DOCKER", "docker")
 SAMPLE = int(os.environ.get("SAMPLE", "25"))
 PAGE = int(os.environ.get("PAGE", "200"))
@@ -124,10 +126,22 @@ def samples(
     # space within eight characters - so the pool has to be much deeper or the sample comes
     # back too small to claim anything from. An n of 2 is not a measurement.
     limit = SAMPLE * 400 if single_token else SAMPLE
+    # Spread across the whole table rather than taken from its head. `ORDER BY id LIMIT n`
+    # returns the same lowest ids on every run, so any class of title that sorts late - a
+    # different importer, a later scan, another script - is never once checked, and the
+    # sample looks like 25 titles while being one corner of the catalogue.
+    #
+    # Ordered by the TAIL of the id. Identifiers here are random hex, so their last
+    # characters are uncorrelated with their first - which is what makes this a reshuffle
+    # while staying stable between runs.
+    #
+    # `hex(e.id)` was the first attempt and is a no-op: hex-encoding a text value preserves
+    # its byte order, so the sample came back character for character identical and only
+    # looked spread. Confirmed by re-running and getting the same eight rows.
     rows = sql(
         f"SELECT e.id, {cut} FROM {table} e JOIN {meta} m ON m.{id_column} = e.id "
         f"WHERE e.deleted_at_ms IS NULL AND length(trim(m.title)) >= 5 "
-        f"ORDER BY e.id LIMIT {limit};"
+        f"ORDER BY substr(e.id, -6), e.id LIMIT {limit};"
     )
     pairs = [(row[0], row[1]) for row in rows if len(row) >= 2 and row[1].strip()]
     if single_token:
@@ -213,6 +227,8 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
 
 
 def main() -> None:
+    if not ADMIN:
+        raise SystemExit("set XOBORO_ADMIN to the administrator's email address")
     bearer = token()
     print("login=ok")
 
