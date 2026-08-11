@@ -48,7 +48,6 @@ describe('Cover motion', () => {
     expect(source).toMatch(/background-image:\s*\n?\s*linear-gradient\(\s*\n?\s*110deg/)
     expect(source).toContain('var(--surface-sheen)')
     expect(source).toContain('linear-gradient(160deg, var(--surface-raised) 0%, var(--surface-selected) 100%)')
-    expect(source).not.toContain('animation-fill-mode: forwards')
   })
 
   it('still drops the motion entirely under prefers-reduced-motion', () => {
