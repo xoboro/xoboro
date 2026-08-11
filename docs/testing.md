@@ -364,6 +364,20 @@ title-only substring test and that inequality is nearly always satisfied whateve
 index does. It is still printed, as `at_least_substring`, but labelled as the lower bound
 it is rather than as recall.
 
+**A sample taken from one corner.** `ORDER BY id LIMIT 25` returns the same lowest
+identifiers on every run, so any class of title that sorts late — a different importer, a
+later scan — was never once checked while the output said 25 titles. Ordering by the *tail*
+of the identifier fixes it: these are random hex, so their last characters are uncorrelated
+with their first, and the order is still stable between runs.
+
+  The first attempt at that, `ORDER BY hex(id)`, is a no-op — hex-encoding text preserves
+  its byte order — and it was caught only because re-running produced the same eight rows
+  character for character. A reshuffle that changes nothing looks exactly like a reshuffle.
+
+  Re-measured on a genuinely different sample, the conclusion holds: series 25/25 on all
+  three paths, and media items 25/25 with the selective fragment **even though its median
+  answer grew from 6 matches to 76**. The rows that move are the broad ones.
+
   A sample of two is not a measurement either. Restricting an eight-character window to
   single tokens rejects most candidates, and the first run of that variant checked two
   media items and reported 100%. The pool had to be deepened before the number meant

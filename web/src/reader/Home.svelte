@@ -13,7 +13,7 @@
    * on a 15,000-item catalog, so "ask again in five seconds and see if the numbers
    * moved" is both expensive and unrelated to when the work actually lands.
    */
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import {
     Languages,
     Layers3,
@@ -155,6 +155,10 @@
       if (serial === searchSerial) searching = false
     }
   }
+
+  // A reader can navigate away mid-word. Without this the debounce fires into a component
+  // that is gone, and its request is one nobody will ever see the answer to.
+  onDestroy(() => clearTimeout(searchTimer))
 
   function onQuery(event) {
     query = event.target.value
