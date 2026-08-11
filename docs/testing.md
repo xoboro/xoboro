@@ -366,14 +366,18 @@ their entity outright.
 
 Measured, it splits cleanly, and not the way the earlier draft claimed:
 
-- **Every single-token row is 0.** Where fragments are one token, no miss is ever a recall
-  loss; the media-item rows at 19/25 and 10/25 miss only because their answers ran to 145
-  and 549 rows. That is ranking, now demonstrated rather than inferred.
-- **The unrestricted row is 12**, and those are real absences — the entity was not returned
-  although the whole answer fit on one page. They are the separator-straddling fragments,
-  and a trigram index tokenises on separators, so a window spanning a word boundary is not
-  a token it can match. Expected behaviour of the index, but *not* ranking, and the earlier
-  wording covered it with the wrong explanation.
+- **Every single-token row is 0.** Where a fragment is one token, no miss is ever a recall
+  loss. The media-item rows sit at 19/25 and 10/25 because the queries that missed each
+  answered with more than the 200 rows a page holds — the median column is a summary of the
+  row, not a claim about those particular queries, and `unexplained = 0` is what says every
+  one of them was over the page. Ranking, now demonstrated rather than inferred.
+- **The unrestricted rows carry all of the absences**, 12 on series and 4 on media items:
+  the entity was not returned although the whole answer fit on one page. Every one of them
+  is a fragment containing a space — `hangul+space` fifteen times, `digit+hangul+space`
+  once, with no exception — which is measured here rather than carried over from the shape
+  column of a different metric. A trigram index tokenises on separators, so a window
+  spanning a word boundary is not a token it can match. Expected of the index, but *not*
+  ranking, and the first draft covered it with the wrong explanation.
 
 So: the trigram and word paths are complete for anything that is one token, and a query
 straddling a boundary is tokenised rather than matched whole.
