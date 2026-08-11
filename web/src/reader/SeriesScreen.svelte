@@ -235,15 +235,14 @@
                  reader to work out whether that is the start or nearly the end. -->
             {#if item.progress}
               {@const read = percentRead(item.progress, item.media?.pageCount)}
+              <!-- Decorative here, and only here: `.sub` above states the same thing in
+                   words, so naming the bar as well makes a screen reader say it twice. On a
+                   shelf card there are no such words and the bar carries a label instead. -->
               <span
                 class="bar"
                 data-testid="item-progress"
                 data-percent={read}
-                role="progressbar"
-                aria-valuenow={read}
-                aria-valuemin="0"
-                aria-valuemax="100"
-                aria-label={progressLabel(item)}
+                aria-hidden="true"
               ><i style={`width:${read}%`}></i></span>
             {/if}
           </span>

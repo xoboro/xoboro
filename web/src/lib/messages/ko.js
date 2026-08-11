@@ -337,6 +337,7 @@ export default {
     items: '{count}편',
     unread: '안 읽음',
     markRead: '읽음으로 표시',
+    percentRead: '{percent}% 읽음',
     markUnread: '안 읽음으로 표시',
     markAllRead: '전체 읽음',
     markAllUnread: '전체 안 읽음',
