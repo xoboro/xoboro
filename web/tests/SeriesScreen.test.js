@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SeriesScreen from '../src/reader/SeriesScreen.svelte'
 
@@ -173,5 +173,86 @@ describe('SeriesScreen', () => {
     expect(
       container.querySelector('[data-testid="item-progress"]').getAttribute('data-percent'),
     ).toBe('100')
+  })
+
+  /**
+   * Marking a chapter read, and taking it back.
+   *
+   * The only way to move a chapter out of "unread" was to open it and reach the end, and
+   * there was no way at all to move one back: the surface offered `PUT` on progress and
+   * nothing else. A chapter opened by accident stayed started forever.
+   */
+  it('marks an unread chapter read', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('toggle-read-m2'))
+
+    await waitFor(() => {
+      const call = fetchImpl.mock.calls.find(([url, init]) =>
+        url.includes('/media-items/m2/progress') && (init?.method ?? 'GET') === 'PUT',
+      )
+      expect(call).toBeTruthy()
+    })
+  })
+
+  it('clears the progress of a chapter already read', async () => {
+    const fetchImpl = server([
+      [
+        '/series/s1/media-items',
+        reply(
+          envelope([
+            {
+              id: 'm1',
+              title: 'Chapter 1',
+              media: { pageCount: 10 },
+              progress: { page: 10, completed: true, readAtMillis: 1, updatedAtMillis: 1 },
+            },
+          ]),
+        ),
+      ],
+    ])
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(screen.getByTestId('toggle-read-m1')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('toggle-read-m1'))
+
+    await waitFor(() => {
+      const call = fetchImpl.mock.calls.find(([url, init]) =>
+        url.includes('/media-items/m1/progress') && init?.method === 'DELETE',
+      )
+      expect(call).toBeTruthy()
+    })
+  })
+
+  it('marks the whole series read, and takes that back', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(screen.getByTestId('mark-series-read')).toBeInTheDocument())
+    await fireEvent.click(screen.getByTestId('mark-series-read'))
+    await waitFor(() =>
+      expect(
+        fetchImpl.mock.calls.some(
+          ([url, init]) => url.includes('/series/s1/progress') && init?.method === 'PUT',
+        ),
+      ).toBe(true),
+    )
+
+    // Waited for rather than raced: the second request is refused while the first is in
+    // flight, which is the point of the guard - clicking twice must not queue two writes.
+    await waitFor(() => expect(screen.getByTestId('mark-series-unread')).not.toBeDisabled())
+    await fireEvent.click(screen.getByTestId('mark-series-unread'))
+    await waitFor(() =>
+      expect(
+        fetchImpl.mock.calls.some(
+          ([url, init]) => url.includes('/series/s1/progress') && init?.method === 'DELETE',
+        ),
+      ).toBe(true),
+    )
   })
 })
