@@ -58,3 +58,5 @@ web/dist/
 # of a real library is real library data, and this repository never holds that.
 .playwright-mcp/
 *.png
+__pycache__/
+*.pyc

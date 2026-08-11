@@ -103,6 +103,14 @@
    * already replaced.
    */
   let searchSerial = 0
+  /**
+   * Held apart from `error`.
+   *
+   * The shared one is rendered inside the branch that the results *replace*, so a failed
+   * search had nowhere to appear: offline, typing three characters produced a blank page
+   * with no message and no retry.
+   */
+  let searchError = $state(null)
 
   const searchActive = $derived(query.trim().length > 0)
 
@@ -112,6 +120,7 @@
       // Bumped so an in-flight request cannot deliver into an empty field.
       searchSerial += 1
       results = null
+      searchError = null
       searching = false
       return
     }
@@ -132,9 +141,12 @@
       ])
       if (serial !== searchSerial) return
       results = { series: series.items ?? [], items: items.items ?? [] }
-      error = null
+      // Deliberately not clearing `error`. It may belong to the grid or the shelves, which
+      // this request knows nothing about - clearing it would hide a failure and leave the
+      // screen it belongs to stranded on "Loading…" with no notice and no retry.
+      searchError = null
     } catch (caught) {
-      if (serial === searchSerial) error = caught
+      if (serial === searchSerial) searchError = caught
     } finally {
       if (serial === searchSerial) searching = false
     }
@@ -295,6 +307,7 @@
 </div>
 
 {#if searchActive}
+  <ErrorNotice error={searchError} onretry={() => runSearch(query)} />
   {#if results}
     {#if results.series.length === 0 && results.items.length === 0}
       <p class="waiting" data-testid="home-search-empty" role="status">

@@ -124,7 +124,16 @@
       var(--surface-raised) 60%
     );
     background-size: 220% 100%;
-    animation: cover-shimmer 1.8s ease-in-out infinite;
+    /*
+     * Bounded, not `infinite`. `loading="lazy"` means an off-screen image fires neither
+     * `load` nor `error`, so its placeholder is the one that never resolves - and a home
+     * grid holds a hundred of them. An unbounded shimmer there is a hundred compositor
+     * animations running for a page nobody has scrolled to. Six iterations is about eleven
+     * seconds, well past any cover that is actually coming, and it settles into the same
+     * still gradient afterwards.
+     */
+    animation: cover-shimmer 1.8s ease-in-out 6;
+    animation-fill-mode: forwards;
   }
   /* Nothing is on its way any more, so the movement would be saying something untrue. */
   .placeholder.permanent {
