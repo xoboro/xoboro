@@ -18,7 +18,7 @@
    * see.
    */
   import { onMount } from 'svelte'
-  import { ChevronLeft, PencilLine } from '@lucide/svelte'
+  import { Check, CheckCheck, ChevronLeft, PencilLine, RotateCcw } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import {
     SeriesOrder,
@@ -28,7 +28,12 @@
     readSeries,
   } from '../lib/api/catalog.js'
   import { eventHub } from '../lib/eventHub.js'
-  import { percentRead } from '../lib/api/progress.js'
+  import {
+    clearProgress,
+    percentRead,
+    writeProgress,
+    writeSeriesProgress,
+  } from '../lib/api/progress.js'
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
   import Cover from '../components/Cover.svelte'
@@ -91,6 +96,60 @@
     return eventHub.on(['series.changed', 'media-item.added', 'media-item.changed'], load)
   })
 
+  /**
+   * Which rows have a request in flight.
+   *
+   * Held as a set rather than a single flag: marking three chapters in a row should not
+   * make the second wait for the first, and a disabled-everything spinner would say the
+   * page is busy when only one row is.
+   */
+  let marking = $state(new Set())
+  let markingSeries = $state(false)
+
+  function busyWith(id, running) {
+    const next = new Set(marking)
+    if (running) next.add(id)
+    else next.delete(id)
+    marking = next
+  }
+
+  /**
+   * Marks one chapter read, or takes that back.
+   *
+   * The list is re-read afterwards rather than patched in place. The server decides what
+   * "read" means — `markSeriesCompleted` stores the analyzed page count, which this client
+   * does not always know — so writing a guess into the row would show a number the server
+   * never stored, and the next refresh would silently correct it.
+   */
+  async function toggleRead(item) {
+    if (marking.has(item.id)) return
+    busyWith(item.id, true)
+    error = null
+    try {
+      if (item.progress?.completed) await clearProgress(item.id)
+      else await writeProgress(item.id, { page: item.media?.pageCount ?? 1 })
+      await load()
+    } catch (caught) {
+      error = caught
+    } finally {
+      busyWith(item.id, false)
+    }
+  }
+
+  async function markSeries(read) {
+    if (markingSeries) return
+    markingSeries = true
+    error = null
+    try {
+      await writeSeriesProgress(params.id, { read })
+      await load()
+    } catch (caught) {
+      error = caught
+    } finally {
+      markingSeries = false
+    }
+  }
+
   /** What a reader has done with this item, as words rather than a coloured bar alone. */
   function progressLabel(item) {
     const progress = item.progress
@@ -136,6 +195,27 @@
 
 <SeriesActions {first} {resume} />
 
+{#if items && items.items.length > 0}
+  <div class="progress-actions">
+    <button
+      type="button"
+      data-testid="mark-series-read"
+      disabled={markingSeries}
+      onclick={() => markSeries(true)}
+    >
+      <CheckCheck size={16} aria-hidden="true" />{$_('reader.markAllRead')}
+    </button>
+    <button
+      type="button"
+      data-testid="mark-series-unread"
+      disabled={markingSeries}
+      onclick={() => markSeries(false)}
+    >
+      <RotateCcw size={15} aria-hidden="true" />{$_('reader.markAllUnread')}
+    </button>
+  </div>
+{/if}
+
 {#if items && items.items.length > 1}
   <div class="ordering">
     <SeriesOrderToggle {order} onchange={choose} />
@@ -168,6 +248,19 @@
             {/if}
           </span>
         </a>
+        <button
+          class="read-toggle"
+          class:done={item.progress?.completed}
+          type="button"
+          data-testid={`toggle-read-${item.id}`}
+          disabled={marking.has(item.id)}
+          aria-pressed={Boolean(item.progress?.completed)}
+          aria-label={item.progress?.completed ? $_('reader.markUnread') : $_('reader.markRead')}
+          title={item.progress?.completed ? $_('reader.markUnread') : $_('reader.markRead')}
+          onclick={() => toggleRead(item)}
+        >
+          <Check size={18} aria-hidden="true" />
+        </button>
       </li>
     {/each}
     {#if items.items.length === 0}
@@ -250,6 +343,62 @@
     margin: 0;
     padding: 0 var(--gutter-right) max(var(--space-5), var(--inset-bottom)) var(--gutter-left);
     list-style: none;
+  }
+  .progress-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
+  }
+  .progress-actions button {
+    display: flex;
+    min-height: var(--touch-target);
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-control);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--font-sm);
+    cursor: pointer;
+  }
+  .progress-actions button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  /* The row is a link and the toggle is a button beside it, not inside it: a control
+     nested in an anchor is not reachable by keyboard or announced as its own thing. */
+  .items li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .items li a {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .read-toggle {
+    display: grid;
+    width: var(--touch-target);
+    height: var(--touch-target);
+    flex: 0 0 auto;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .read-toggle.done {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+  .read-toggle:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .items a {
     display: flex;

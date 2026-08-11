@@ -83,13 +83,21 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
 }
 
 /**
- * Where to resume from.
+ * Clears this reader's progress for one item.
  *
- * A finished item starts again at the first page: the reader has read it, so offering
- * to resume at the last page would be offering to re-read the final page forever.
- * An unread item starts at page one rather than at zero — page numbers are one-based
- * on this surface and there is no `zero_based` parameter to be confused by.
+ * The surface offered only `PUT`, so "unread" was a state the server could hold and no
+ * client could ask for: a chapter opened by accident could only be undone by reading it
+ * to the end. Idempotent on the server, so this needs no "was it started" check first.
  */
+export async function clearProgress(mediaItemId) {
+  await request(`/media-items/${mediaItemId}/progress`, { method: 'DELETE' })
+}
+
+/** Marks every item in a series read, or clears every one of them. */
+export async function writeSeriesProgress(seriesId, { read }) {
+  await request(`/series/${seriesId}/progress`, { method: read ? 'PUT' : 'DELETE' })
+}
+
 /**
  * How far into an item a reader has got, as a whole percentage.
  *
@@ -113,6 +121,14 @@ export function percentRead(progress, pageCount) {
   return Math.min(100, Math.round((page / total) * 100))
 }
 
+/**
+ * Where to resume from.
+ *
+ * A finished item starts again at the first page: the reader has read it, so offering
+ * to resume at the last page would be offering to re-read the final page forever.
+ * An unread item starts at page one rather than at zero — page numbers are one-based
+ * on this surface and there is no `zero_based` parameter to be confused by.
+ */
 export function resumePage(readProgress, pageCount) {
   if (!readProgress || readProgress.completed) return 1
   const page = Number(readProgress.page)

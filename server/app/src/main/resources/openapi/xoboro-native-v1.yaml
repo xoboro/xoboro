@@ -2419,6 +2419,33 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+    delete:
+      tags: [Media items]
+      operationId: delete_media_items_mediaItemId_progress
+      description: >-
+        Clears this reader's progress for the item. Idempotent: an item that was
+        never started is already in the requested state, so this answers 204
+        rather than 404.
+      responses:
+        "204":
+          description: Progress cleared.
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/media-items/{mediaItemId}/read-lists:
     parameters:
       - name: mediaItemId
@@ -3577,6 +3604,62 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/progress:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    put:
+      tags: [Series]
+      operationId: put_series_seriesId_progress
+      description: Marks every item in the series read for this reader.
+      responses:
+        "204":
+          description: Progress recorded for every item.
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+    delete:
+      tags: [Series]
+      operationId: delete_series_seriesId_progress
+      description: Clears this reader's progress for every item in the series.
+      responses:
+        "204":
+          description: Progress cleared for every item.
         "401":
           description: Not authenticated.
           content:
