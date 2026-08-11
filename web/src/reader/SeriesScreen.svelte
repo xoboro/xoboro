@@ -28,6 +28,7 @@
     readSeries,
   } from '../lib/api/catalog.js'
   import { eventHub } from '../lib/eventHub.js'
+  import { percentRead } from '../lib/api/progress.js'
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
   import Cover from '../components/Cover.svelte'
@@ -120,7 +121,17 @@
 <ErrorNotice {error} onretry={load} />
 
 {#if series}
-  <SeriesMetadataPanel {series} />
+  <!-- The cover and the facts are one element, which is what lets a wide viewport put
+       them side by side. The page used to open on a title bar and a list of labels, so a
+       reader arriving from a cover found nothing that looked like what they tapped. -->
+  <section class="overview" data-testid="series-overview">
+    <div class="art" data-testid="series-cover">
+      <Cover src={artworkUrl('series', series.id)} />
+    </div>
+    <div class="facts" data-testid="series-facts">
+      <SeriesMetadataPanel {series} />
+    </div>
+  </section>
 {/if}
 
 <SeriesActions {first} {resume} />
@@ -140,6 +151,21 @@
           <span class="detail">
             <span class="label">{item.title ?? item.name ?? item.id}</span>
             <span class="sub">{progressLabel(item)}</span>
+            <!-- The words say what happened; the bar says how far. "Page 5" alone leaves a
+                 reader to work out whether that is the start or nearly the end. -->
+            {#if item.progress}
+              {@const read = percentRead(item.progress, item.media?.pageCount)}
+              <span
+                class="bar"
+                data-testid="item-progress"
+                data-percent={read}
+                role="progressbar"
+                aria-valuenow={read}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-label={progressLabel(item)}
+              ><i style={`width:${read}%`}></i></span>
+            {/if}
           </span>
         </a>
       </li>
@@ -164,6 +190,27 @@
 {/if}
 
 <style>
+  /* The cover keeps a fixed column and the facts take the rest, so a long publisher name
+     cannot squeeze the artwork down to a sliver. It wraps on a narrow screen because
+     112px of cover beside a column of labels leaves neither enough room to read. */
+  .overview {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-4);
+    padding: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
+  }
+  .art {
+    width: 112px;
+    flex: 0 0 112px;
+  }
+  /* The panel inside carries the page's own gutters, which would indent it a second time
+     inside this column. */
+  .facts {
+    min-width: min(220px, 100%);
+    flex: 1 1 220px;
+    margin-inline: calc(-1 * var(--gutter-left)) calc(-1 * var(--gutter-right));
+  }
   header {
     display: flex;
     align-items: center;
@@ -230,6 +277,21 @@
     display: block;
     color: var(--text-muted);
     font-size: var(--font-xs);
+  }
+  .bar {
+    display: block;
+    width: 100%;
+    max-width: 180px;
+    height: 3px;
+    margin-top: var(--space-1);
+    overflow: hidden;
+    border-radius: var(--radius-pill);
+    background: var(--surface-selected);
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
   }
   .empty,
   .waiting {

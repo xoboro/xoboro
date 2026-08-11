@@ -9,6 +9,7 @@
    */
   import Cover from './Cover.svelte'
   import { artworkUrl } from '../lib/api/catalog.js'
+  import { percentRead } from '../lib/api/progress.js'
 
   let {
     title,
@@ -28,6 +29,13 @@
         <li>
           <a href={href(item)}>
             <Cover src={artworkUrl(kind === 'series' ? 'series' : 'mediaItem', item.id)} />
+            <!-- Only for an item a reader has started. A shelf of full-width empty tracks
+                 would read as "nothing read" rather than as "no bar drawn". -->
+            {#if kind === 'mediaItem' && item.progress}
+              {@const read = percentRead(item.progress, item.media?.pageCount)}
+              <span class="bar" data-testid="shelf-progress" data-percent={read}
+                ><i style={`width:${read}%`}></i></span>
+            {/if}
             <span class="label">{item.title ?? item.name ?? item.id}</span>
             {#if kind === 'mediaItem' && item.seriesTitle}
               <span class="sub">{item.seriesTitle}</span>
@@ -76,6 +84,21 @@
     flex: 0 0 auto;
     width: 120px;
     scroll-snap-align: start;
+  }
+  .bar {
+    display: block;
+    width: 100%;
+    height: 3px;
+    /* Pulled onto the cover's bottom edge, the way a video thumbnail carries its
+       watched line, so the card's text starts where it always did. */
+    margin-top: -3px;
+    overflow: hidden;
+    background: var(--surface-selected);
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
   }
   .label {
     display: block;
