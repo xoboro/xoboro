@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import urllib.parse
 import urllib.request
@@ -55,7 +56,9 @@ VOLUME = os.environ.get("XOBORO_VOLUME", "xoboro_xoboro-config")
 # Required rather than defaulted. The deployment's address is not this repository's to
 # carry, and a stale default fails at the login step with nothing to say why.
 ADMIN = os.environ.get("XOBORO_ADMIN") or ""
-DOCKER = os.environ.get("DOCKER", "docker")
+# Looked up rather than hardcoded. The absolute path of one machine's docker - under
+# another account's home directory - is neither portable nor this repository's to carry.
+DOCKER = os.environ.get("DOCKER") or shutil.which("docker") or "docker"
 SAMPLE = int(os.environ.get("SAMPLE", "25"))
 PAGE = int(os.environ.get("PAGE", "200"))
 API = f"{BASE}/api/xoboro/v1"
@@ -64,18 +67,34 @@ API = f"{BASE}/api/xoboro/v1"
 # `apk add`, and there are three fragments per sampled title.
 SQLITE = [
     DOCKER, "run", "--rm", "-i", "-v", f"{VOLUME}:/c", "alpine:3", "sh", "-lc",
-    # A real tab, not the two characters `\t`: inside double quotes `sh` keeps a backslash
-    # literal, so writing it as an escape gives sqlite3 a separator no split will find and
-    # every row comes back as one field.
-    'apk add --no-cache sqlite >/dev/null 2>&1; sqlite3 -separator "' + "\t" + '" /c/xoboro.sqlite',
+    # JSON, not a separated format. A title is arbitrary text: one containing a tab
+    # truncates its own fragment, and one containing a newline becomes an extra row whose
+    # first column is title text where an id belongs. Both clear every guard downstream and
+    # corrupt the sample with no error at all — the failure is a wrong number, not a crash.
+    #
+    # The earlier separator bug is worth remembering for a different reason: written from
+    # Python as `-separator "\t"` it reaches sh as a literal backslash-t, because sh keeps a
+    # backslash literal inside double quotes, and every row came back as one field.
+    'apk add --no-cache sqlite >/dev/null 2>&1; sqlite3 -json /c/xoboro.sqlite',
 ]
 
 
 def sql(script: str) -> list[list[str]]:
-    """Runs a script and returns its rows. The script may contain titles; its output is
-    returned to the caller and never printed by this function."""
+    """Runs a script and returns its rows as lists of column values.
+
+    The script may contain titles; its output is returned to the caller and never printed
+    by this function. `sqlite3 -json` answers one array per statement, and an empty result
+    prints nothing at all rather than `[]`.
+    """
     done = subprocess.run(SQLITE, input=script, capture_output=True, text=True, check=True)
-    return [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
+    body = done.stdout.strip()
+    if not body:
+        return []
+    rows = []
+    for chunk in json.JSONDecoder().raw_decode(body)[:1]:
+        for row in chunk:
+            rows.append([("" if value is None else str(value)) for value in row.values()])
+    return rows
 
 
 def literal(value: str) -> str:
@@ -131,9 +150,11 @@ def samples(
     # different importer, a later scan, another script - is never once checked, and the
     # sample looks like 25 titles while being one corner of the catalogue.
     #
-    # Ordered by the TAIL of the id. Identifiers here are random hex, so their last
-    # characters are uncorrelated with their first - which is what makes this a reshuffle
-    # while staying stable between runs.
+    # Ordered by the TAIL of the id. These identifiers are TSIDs - Crockford base-32 and
+    # time-sortable - so their leading characters are a timestamp and their trailing ones
+    # are the random/counter component. Sorting on the tail is therefore uncorrelated with
+    # insertion order while staying stable between runs, which is exactly what a
+    # reproducible spread needs.
     #
     # `hex(e.id)` was the first attempt and is a no-op: hex-encoding a text value preserves
     # its byte order, so the sample came back character for character identical and only
@@ -212,9 +233,12 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
     ratio = f"{(on_page / checked * 100):.1f}%" if checked else "n/a"
     ordered = sorted(sizes)
     median = ordered[len(ordered) // 2] if ordered else 0
+    # The median cannot show the tail, and the tail is what explains a miss: an entity is
+    # only ever absent from the first page when its query answered with more than a page.
+    over_page = sum(1 for size in sizes if size > PAGE)
     print(
         f"{label:<26} checked={checked:<3} FOUND_ITSELF={on_page:<3} ({ratio:>6}) "
-        f"returned_nothing={empty:<3} median_matches={median:<6} "
+        f"returned_nothing={empty:<3} median_matches={median:<6} over_one_page={over_page:<3} "
         f"at_least_substring={recall_ok:<3} below_substring={recall_short:<3}"
     )
     for kind, shapes in sorted(failures.items()):
