@@ -238,3 +238,115 @@ describe('library switcher', () => {
     )
   })
 })
+
+/**
+ * Searching without leaving home.
+ *
+ * The reader this UI is modelled on searches on the home screen: a field above the
+ * shelves, results in their place as you type. Xoboro sent a reader to a separate screen
+ * for the same thing, so finding one title meant a navigation, a back, and losing the
+ * scroll position of the grid they were browsing.
+ *
+ * The dedicated screen stays — it carries facets, sorts and paging that do not belong
+ * above a shelf — but the first keystroke no longer costs a page change.
+ */
+describe('home search', () => {
+  function searchServer({ series = [], items = [] } = {}) {
+    return vi.fn(async (url) => {
+      if (url.includes('/feeds/')) return reply(envelope())
+      if (url.includes('/libraries')) return reply(envelope())
+      // A query is only ever sent to the two listings, so the presence of the parameter
+      // is what distinguishes a search from the grid's own request.
+      if (url.includes('query=')) {
+        return reply(envelope(url.includes('/media-items') ? items : series))
+      }
+      return reply(envelope())
+    })
+  }
+
+  async function typeQuery(value) {
+    const field = await screen.findByTestId('home-search')
+    await fireEvent.input(field, { target: { value } })
+    return field
+  }
+
+  it('shows results in place of the shelves', async () => {
+    globalThis.fetch = searchServer({
+      series: [{ id: 's1', title: 'Found Series', mediaItemCount: 3 }],
+      items: [{ id: 'm1', title: 'Found Chapter', seriesTitle: 'Found Series' }],
+    })
+    render(Home, {})
+
+    await typeQuery('found')
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results').textContent).toContain('Found Series'),
+    )
+    expect(screen.getByTestId('home-search-results').textContent).toContain('Found Chapter')
+    // The grid the search replaces is gone rather than pushed below the results.
+    expect(screen.queryByTestId('all-series-page-next')).toBeNull()
+  })
+
+  it('restores the shelves when the query is cleared', async () => {
+    globalThis.fetch = searchServer({ series: [{ id: 's1', title: 'Found Series' }] })
+    render(Home, {})
+
+    await typeQuery('found')
+    await waitFor(() => expect(screen.getByTestId('home-search-results')).toBeInTheDocument())
+
+    await typeQuery('')
+
+    await waitFor(() => expect(screen.queryByTestId('home-search-results')).toBeNull())
+  })
+
+  it('says when a query matched nothing, rather than showing an empty page', async () => {
+    globalThis.fetch = searchServer()
+    render(Home, {})
+
+    await typeQuery('nothing-matches-this')
+
+    await waitFor(() => expect(screen.getByTestId('home-search-empty')).toBeInTheDocument())
+  })
+
+  /**
+   * A slow first request must not overwrite a faster second one. Typed quickly, "ab"
+   * follows "a", and if "a" lands last the reader is looking at results for a query they
+   * have already replaced.
+   */
+  it('discards a response that a later query has superseded', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url) => {
+      if (url.includes('query=')) {
+        return new Promise((resolve) => {
+          pending.push({
+            url,
+            resolve: (body) => resolve(reply(envelope(body))),
+          })
+        })
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home, {})
+
+    await typeQuery('a')
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0))
+    const stale = pending.filter((p) => p.url.includes('query=a&') || p.url.endsWith('query=a'))
+
+    await typeQuery('ab')
+    await waitFor(() => expect(pending.length).toBeGreaterThan(stale.length))
+    const fresh = pending.filter((p) => p.url.includes('query=ab'))
+
+    // The later query answers first, then the earlier one arrives late.
+    fresh.forEach((p) => p.resolve([{ id: 's2', title: 'Later Answer' }]))
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results').textContent).toContain('Later Answer'),
+    )
+    stale.forEach((p) => p.resolve([{ id: 's1', title: 'Earlier Answer' }]))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results').textContent).toContain('Later Answer'),
+    )
+    expect(screen.getByTestId('home-search-results').textContent).not.toContain('Earlier Answer')
+  })
+})
+

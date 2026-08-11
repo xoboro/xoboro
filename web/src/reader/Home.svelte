@@ -14,10 +14,19 @@
    * moved" is both expensive and unrelated to when the work actually lands.
    */
   import { onMount } from 'svelte'
-  import { Languages, Layers3, BookOpen, LogOut, Search, Settings } from '@lucide/svelte'
+  import {
+    Languages,
+    Layers3,
+    BookOpen,
+    LogOut,
+    Search,
+    Settings,
+    SlidersHorizontal,
+  } from '@lucide/svelte'
   import { _, applyLocale, locale } from '../lib/i18n.js'
   import { isAdministrator, session, signOut } from '../lib/session.js'
   import { artworkUrl, listSeries, readFeed } from '../lib/api/catalog.js'
+  import { searchCatalog } from '../lib/api/catalogSearch.js'
   import { listLibraries } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
@@ -70,6 +79,79 @@
 
   const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
+
+  /**
+   * Searching without leaving home.
+   *
+   * A reader looking for one title had to change screens, and changing back lost the
+   * position of the grid they were browsing. The dedicated search screen stays: it carries
+   * facets, sorts and paging that do not belong above a shelf. What moved here is the
+   * first keystroke.
+   */
+  const SEARCH_DEBOUNCE_MILLIS = 300
+  const SEARCH_SIZE = 24
+
+  let query = $state('')
+  let results = $state(null)
+  let searching = $state(false)
+  let searchTimer = null
+  /**
+   * Which query the newest request belongs to.
+   *
+   * Typed quickly, `ab` follows `a`, and the two requests race. Without this the slower
+   * one wins whenever it lands last and the reader is shown results for a query they have
+   * already replaced.
+   */
+  let searchSerial = 0
+
+  const searchActive = $derived(query.trim().length > 0)
+
+  async function runSearch(term) {
+    const trimmed = term.trim()
+    if (!trimmed) {
+      // Bumped so an in-flight request cannot deliver into an empty field.
+      searchSerial += 1
+      results = null
+      searching = false
+      return
+    }
+    const serial = ++searchSerial
+    searching = true
+    try {
+      // `libraryId` is a list on this surface - the listing accepts more than one - and
+      // `commonQuery` spreads it. Passing the single id this screen holds, or null, threw
+      // before any request went out, so the field simply did nothing.
+      const criteria = {
+        query: trimmed,
+        libraryId: libraryId ? [libraryId] : [],
+        size: SEARCH_SIZE,
+      }
+      const [series, items] = await Promise.all([
+        searchCatalog('series', criteria),
+        searchCatalog('mediaItems', criteria),
+      ])
+      if (serial !== searchSerial) return
+      results = { series: series.items ?? [], items: items.items ?? [] }
+      error = null
+    } catch (caught) {
+      if (serial === searchSerial) error = caught
+    } finally {
+      if (serial === searchSerial) searching = false
+    }
+  }
+
+  function onQuery(event) {
+    query = event.target.value
+    clearTimeout(searchTimer)
+    const term = query
+    // Cleared immediately rather than after the debounce: a reader who empties the field
+    // is asking for their shelves back now, not in a third of a second.
+    if (!term.trim()) {
+      runSearch('')
+      return
+    }
+    searchTimer = setTimeout(() => runSearch(term), SEARCH_DEBOUNCE_MILLIS)
+  }
 
   async function loadLibraries() {
     // Settled with the rest: the switcher not loading must not blank the shelf, it
@@ -196,6 +278,66 @@
 
 <LibrarySwitcher {libraries} selected={libraryId} onchange={chooseLibrary} />
 
+<div class="searchbar">
+  <label class="visually-hidden" for="home-search">{$_('search.queryLabel')}</label>
+  <input
+    id="home-search"
+    data-testid="home-search"
+    type="search"
+    value={query}
+    placeholder={$_('search.queryLabel')}
+    oninput={onQuery}
+  />
+  <!-- The dedicated screen is still one tap away, and is where the facets live. -->
+  <a class="advanced" href="#/search" aria-label={$_('search.link')} title={$_('search.link')}>
+    <SlidersHorizontal size={18} aria-hidden="true" />
+  </a>
+</div>
+
+{#if searchActive}
+  {#if results}
+    {#if results.series.length === 0 && results.items.length === 0}
+      <p class="waiting" data-testid="home-search-empty" role="status">
+        {$_('search.results.noResults')}
+      </p>
+    {:else}
+      <div data-testid="home-search-results">
+        {#if results.series.length > 0}
+          <h2 class="all">{$_('search.scope.series')}</h2>
+          <ul class="grid">
+            {#each results.series as found (found.id)}
+              <li>
+                <a href={`#/series/${found.id}`}>
+                  <Cover src={artworkUrl('series', found.id)} />
+                  <span class="label">{found.title ?? found.name}</span>
+                  <span class="sub">
+                    {$_('reader.items', { values: { count: found.mediaItemCount ?? 0 } })}
+                  </span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if results.items.length > 0}
+          <h2 class="all">{$_('search.scope.mediaItems')}</h2>
+          <ul class="grid">
+            {#each results.items as found (found.id)}
+              <li>
+                <a href={`#/read/${found.id}`}>
+                  <Cover src={artworkUrl('mediaItem', found.id)} />
+                  <span class="label">{found.title ?? found.name}</span>
+                  <span class="sub">{found.seriesTitle ?? ''}</span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+  {:else if searching}
+    <p class="waiting" role="status">{$_('common.loading')}</p>
+  {/if}
+{:else}
 <nav class="library" aria-label={$_('catalog.navigation')}>
   <a href="#/search">
     <Search size={18} aria-hidden="true" /><span>{$_('search.link')}</span>
@@ -253,6 +395,7 @@
 {:else if !error}
   <p class="waiting" role="status">{$_('common.loading')}</p>
 {/if}
+{/if}
 
 <style>
   header {
@@ -295,6 +438,47 @@
     background: none;
     color: var(--text);
     cursor: pointer;
+  }
+  .searchbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--touch-target);
+    gap: var(--space-2);
+    padding: 0 var(--gutter-right) var(--space-3) var(--gutter-left);
+  }
+  .searchbar input {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--touch-target);
+    padding: 0 var(--space-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface-inset);
+    color: var(--text);
+    font: inherit;
+    /* 16px or iOS zooms the page on focus, which then never zooms back out. */
+    font-size: var(--font-md);
+  }
+  .searchbar input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .advanced {
+    display: grid;
+    width: var(--touch-target);
+    height: var(--touch-target);
+    place-items: center;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface-inset);
+    color: var(--text);
+  }
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .library {
     display: grid;
