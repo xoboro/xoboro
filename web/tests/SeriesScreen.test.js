@@ -118,7 +118,11 @@ describe('SeriesScreen', () => {
     const overview = container.querySelector('[data-testid="series-overview"]')
     expect(overview).toBeTruthy()
     expect(overview.querySelector('[data-testid="series-cover"]')).toBeTruthy()
-    expect(overview.querySelector('[data-testid="series-facts"]')).toBeTruthy()
+    // The panel's own `series-facts` list lives inside this column. The column carries a
+    // different id on purpose: two elements sharing one made `getByTestId` throw, and this
+    // file only escaped that by reaching for `querySelector`, which silently takes the first.
+    expect(overview.querySelector('[data-testid="series-overview-facts"]')).toBeTruthy()
+    expect(overview.querySelectorAll('[data-testid="series-facts"]')).toHaveLength(1)
   })
 
   it('still lists the chapters', async () => {

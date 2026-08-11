@@ -187,7 +187,7 @@
     <div class="art" data-testid="series-cover">
       <Cover src={artworkUrl('series', series.id)} />
     </div>
-    <div class="facts" data-testid="series-facts">
+    <div class="facts" data-testid="series-overview-facts">
       <SeriesMetadataPanel {series} />
     </div>
   </section>

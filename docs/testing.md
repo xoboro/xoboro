@@ -315,47 +315,57 @@ failure — the fragment's *shape* (its length and which scripts it mixes), neve
 
 ### Recall and rank are different questions
 
-Measured together, they make a correct index look broken. Asked separately:
+Measured together they make a correct index look broken. Asked separately, over 25 sampled
+titles each:
 
-| measurement | recall | on first page |
+| measurement | found itself | returned nothing |
 | --- | --- | --- |
-| series, interior fragment, single token | **25/25** | 25/25 |
-| media items, interior fragment, single token | **25/25** | 18/25 |
-| series, leading word | **25/25** | 25/25 |
-| media items, leading word | 23/25 | 14/25 |
-| six nonsense queries | `totalItems=0` for all | — |
+| series, interior fragment, single token | **25/25** | 0 |
+| series, interior fragment, 8 chars | **25/25** | 0 |
+| media items, interior fragment, 8 chars | **25/25** | 0 |
+| series, leading word | **25/25** | 0 |
+| media items, interior fragment, 3 chars | 18/25 | 0 |
+| media items, leading word | 14/25 | 1 |
+| six nonsense queries | — | `totalItems=0` for all |
 
-**Recall** is whether the index found everything a plain substring test finds, taken as the
-API's `totalItems` against an `instr` count over the same titles. **Rank** is whether the
-entity is on the first page, and a three-character fragment can legitimately match
-thousands of titles — so an entity below the first page is not evidence of anything. The
-negative controls are what stop a perfect recall score from being achievable by answering
+**Found itself** is a membership test: the entity the fragment was cut from is in the
+answer, or it is not. That is the metric to read.
+
+The rows below 25/25 are **selectivity, not loss**. Three characters out of 145,105 items
+match thousands of them, so the one the fragment came from is often past the first page —
+and `returned_nothing` stays at zero throughout, which is what says nothing was lost. Cut
+the same window at eight characters, long enough to be specific, and media items go to
+25/25 as well.
+
+The negative controls are what stop a perfect score from being reachable by answering
 "everything" to every query.
 
-### The first reading of this was wrong, and the reason transfers
+**What settles that the trigram index is the thing working**: a word index cannot match a
+fragment that starts inside a word, so a non-empty answer to an interior cut can only have
+come from the trigram index. A broken or absent one shows up here as `returned_nothing`,
+which is zero.
 
-Restricted to single-token fragments the engine is at 100%. Unrestricted it scored 84% on
-series and **68%** on items, and an earlier version of the same script reported 56% and
-20%.
+### Two ways this check was wrong before it was right
 
-Every failure — without exception — was a fragment containing a space or a punctuation
-mark: `hangul+space`, `digit+hangul+space`, `hangul+punct`. Not one purely-hangul, purely
-latin or purely CJK fragment failed. A trigram index tokenises on separators, so a
-three-character window straddling a word boundary is not one token and cannot be found as
-one; and `instr`, which does not care about boundaries, is an over-strict comparator for a
-tokenised index. The low numbers measured the measurement.
+Both are worth keeping, because both produced a confident number that meant nothing.
 
-Both rows are kept in the script's output rather than the flattering one alone, because
-the gap between them is the finding.
+**A tokenised index measured against a substring test.** Unrestricted, the same check
+scored 84% on series and 68% on items, and an earlier cut said 56% and 20%. Every failure
+without exception was a fragment containing a space or a punctuation mark; not one
+purely-hangul, latin or CJK fragment failed. A trigram index tokenises on separators, so a
+window straddling a word boundary is not one token — the low numbers measured the
+measurement.
+
+**A criterion that could not fail.** The first version reported `recall_ok` as
+`totalItems >= instr_count`. The trigram index concatenates title, sort title, series
+title and alternate titles into one indexed column, so its match set is a *superset* of a
+title-only substring test and that inequality is nearly always satisfied whatever the
+index does. It is still printed, as `at_least_substring`, but labelled as the lower bound
+it is rather than as recall.
+
+  A sample of two is not a measurement either. Restricting an eight-character window to
+  single tokens rejects most candidates, and the first run of that variant checked two
+  media items and reported 100%. The pool had to be deepened before the number meant
+  anything.
 
 ## Completion rule
-
-Code is not considered complete when only the happy path passes. Tests cover:
-
-- authorization and content restrictions;
-- invalid and boundary inputs;
-- unavailable and changing storage;
-- cancellation, restart, and idempotency;
-- concurrent access where applicable;
-- serialization and error compatibility;
-- migration from the supported Komga baseline.

@@ -327,6 +327,43 @@ class XoboroNativeProgressTest {
       assertEquals(4, fixture.storedProgress()?.page)
     }
 
+  /**
+   * Authorization, tested against an entity that **exists**.
+   *
+   * The 404 cases beside this use an identifier nothing holds, which proves the route
+   * answers 404 for a missing entity — not that it answers 404 for one this reader may not
+   * see. Those are different claims and only the second is about authorization: remove the
+   * library-grant term from the fake's lookup and a missing-id test still passes.
+   */
+  @Test
+  fun `refuses to clear progress for an item outside this reader's grants`() =
+    testApplication {
+      val fixture = Fixture.restricted(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      val response = client.delete(PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+      // The item is real and the progress is real; both survive, which is the point.
+      assertEquals(4, fixture.storedProgress()?.page)
+    }
+
+  @Test
+  fun `refuses to change series progress outside this reader's grants`() =
+    testApplication {
+      val fixture = Fixture.restricted(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      val marked = client.put(SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+      val cleared = client.delete(SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, marked.status)
+      assertEquals(HttpStatusCode.NotFound, cleared.status)
+      assertEquals("series_not_found", marked.body<XoboroApiError>().code)
+      assertEquals(4, fixture.storedProgress()?.page)
+    }
+
   @Test
   fun `marks every item in a series read`() =
     testApplication {
@@ -638,7 +675,14 @@ class XoboroNativeProgressTest {
           initialProgress = initialProgress,
         )
 
-      fun restricted(): Fixture =
+      /**
+       * A reader granted a library that holds none of the fixture's content.
+       *
+       * `initialProgress` matters for the clearing routes: an authorization test that
+       * starts with nothing stored cannot tell "refused" from "cleared", because both end
+       * with no progress.
+       */
+      fun restricted(initialProgress: ReadProgress? = null): Fixture =
         Fixture(
           user =
             syntheticUser(
@@ -646,7 +690,7 @@ class XoboroNativeProgressTest {
               sharesAllLibraries = false,
               sharedLibraryIds = setOf(VISIBLE_LIBRARY_ID),
             ),
-          initialProgress = null,
+          initialProgress = initialProgress,
         )
     }
   }
@@ -988,7 +1032,10 @@ class XoboroNativeProgressTest {
         series =
           Series(
             id = SERIES_ID,
-            libraryId = VISIBLE_LIBRARY_ID,
+            // The same library its book is in. With the series visible and the book hidden,
+            // a restricted reader could reach the series routes, and the authorization test
+            // for them would be checking nothing.
+            libraryId = HIDDEN_LIBRARY_ID,
             name = "Synthetic progress series",
             relativePath = "Synthetic progress series",
             sourceItemId = "file:///synthetic/progress",
