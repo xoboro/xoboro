@@ -336,6 +336,7 @@ export default {
     items: '{count} items',
     unread: 'Unread',
     markRead: 'Mark read',
+    percentRead: '{percent}% read',
     markUnread: 'Mark unread',
     markAllRead: 'Mark all read',
     markAllUnread: 'Mark all unread',

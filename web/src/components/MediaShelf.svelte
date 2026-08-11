@@ -8,6 +8,7 @@
    * and that is the normal case on a fresh install.
    */
   import Cover from './Cover.svelte'
+  import { _ } from '../lib/i18n.js'
   import { artworkUrl } from '../lib/api/catalog.js'
   import { percentRead } from '../lib/api/progress.js'
 
@@ -33,8 +34,16 @@
                  would read as "nothing read" rather than as "no bar drawn". -->
             {#if kind === 'mediaItem' && item.progress}
               {@const read = percentRead(item.progress, item.media?.pageCount)}
-              <span class="bar" data-testid="shelf-progress" data-percent={read}
-                ><i style={`width:${read}%`}></i></span>
+              <span
+                class="bar"
+                data-testid="shelf-progress"
+                data-percent={read}
+                role="progressbar"
+                aria-valuenow={read}
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-label={$_('reader.percentRead', { values: { percent: read } })}
+              ><i style={`width:${read}%`}></i></span>
             {/if}
             <span class="label">{item.title ?? item.name ?? item.id}</span>
             {#if kind === 'mediaItem' && item.seriesTitle}
