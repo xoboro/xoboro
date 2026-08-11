@@ -237,6 +237,31 @@ both that shape. When a test cannot reach the authority for part of its subject 
 with a template parameter, a route that needs a fixture — say so in the test, and name
 what is still covered by agreement alone.
 
+## A fix has to be seen working, not seen written
+
+Three of the corrections in this file's search section, and two in the reader, were fixes
+that changed nothing and read as though they had. None was caught by review or by the
+suite; each was caught by re-running the measurement and noticing the number had not moved.
+
+- **`ORDER BY hex(id)`** was meant to spread a sample across a table. Hex-encoding text
+  preserves its byte order, so the sample came back character for character identical. The
+  giveaway was eight rows of output matching the previous run exactly.
+- **A `background-color` under an opaque gradient.** The gradient tiles by default, so the
+  colour beneath it is never once painted. The giveaway was a pixel: the rested placeholder
+  sat 2 of 255 per channel from the container it was supposed to contrast with.
+- **`animation-fill-mode` removed without working out what replaces it.** The rest state
+  becomes the *specified* value, not the last frame, which parked a travelling highlight
+  mid-sweep inside the box.
+
+The rule that follows: when a fix targets something observable, observe it again afterwards
+and compare against the number you had. A fix whose measurement is unchanged is a fix that
+did nothing, and it is indistinguishable from a working one at the level of the diff.
+
+For CSS specifically, jsdom cannot help — Svelte's scoped styles are not injected under
+vitest, `document.styleSheets` is empty and `getComputedStyle` reports `animation-name:
+none`. Painting the element into a canvas through an SVG `foreignObject` and reading the
+pixel is what settles an appearance question.
+
 ## A tally of zero failures is not a green build
 
 The verification gate is a full rebuild in an isolated worktree:
