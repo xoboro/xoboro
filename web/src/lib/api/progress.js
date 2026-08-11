@@ -90,6 +90,29 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
  * An unread item starts at page one rather than at zero — page numbers are one-based
  * on this surface and there is no `zero_based` parameter to be confused by.
  */
+/**
+ * How far into an item a reader has got, as a whole percentage.
+ *
+ * Drawn as a bar beside the words. "Page 5" does not say whether that is the start or
+ * nearly the end without knowing how long the item is, and the reader should not have to
+ * do that arithmetic.
+ *
+ * Two cases decide the shape of this. A **finished** item is a full bar whatever page it
+ * stopped on, because a chapter can be marked read from the list without being opened and
+ * its stored page is then wherever the reader last was. An item with **no page count** —
+ * indexed but not yet analyzed — is zero rather than a division by zero: `Infinity` in a
+ * width renders as a full bar, which is the opposite of what is true.
+ */
+export function percentRead(progress, pageCount) {
+  if (!progress) return 0
+  if (progress.completed) return 100
+  const total = Number(pageCount)
+  const page = Number(progress.page)
+  if (!Number.isFinite(total) || total <= 0) return 0
+  if (!Number.isFinite(page) || page <= 0) return 0
+  return Math.min(100, Math.round((page / total) * 100))
+}
+
 export function resumePage(readProgress, pageCount) {
   if (!readProgress || readProgress.completed) return 1
   const page = Number(readProgress.page)

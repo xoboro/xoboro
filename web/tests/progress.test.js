@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ProgressConflict,
+  percentRead,
   progressStamp,
   resetProgressClock,
   resumePage,
@@ -152,5 +153,42 @@ describe('deviceIdentity', () => {
       },
     }
     expect(deviceIdentity(hostile).deviceId).toBeTruthy()
+  })
+})
+
+/**
+ * How far into a chapter a reader is, as a percentage.
+ *
+ * Shown as a bar on the series list and on a shelf card. A words-only label says
+ * "page 5" and leaves a reader to work out whether that is the start or nearly the end;
+ * the bar is the part that answers that at a glance.
+ */
+describe('percentRead', () => {
+  it('is zero for a chapter never opened', () => {
+    expect(percentRead(null, 10)).toBe(0)
+    expect(percentRead(undefined, 10)).toBe(0)
+  })
+
+  it('is the share of the pages read', () => {
+    expect(percentRead({ page: 5, completed: false }, 10)).toBe(50)
+    expect(percentRead({ page: 1, completed: false }, 4)).toBe(25)
+  })
+
+  it('is a full bar once the chapter is finished, whatever page it stopped on', () => {
+    // A finished chapter records the page it ended on, which is not always the last one -
+    // a reader can mark it read from the list without opening it.
+    expect(percentRead({ page: 3, completed: true }, 10)).toBe(100)
+  })
+
+  it('is zero rather than Infinity when the page count is unknown', () => {
+    // An item whose analysis has not run yet has no page count. Dividing by it would put
+    // `Infinity%` into a style attribute, which silently renders as a full bar.
+    expect(percentRead({ page: 5, completed: false }, 0)).toBe(0)
+    expect(percentRead({ page: 5, completed: false }, undefined)).toBe(0)
+  })
+
+  it('never exceeds a full bar', () => {
+    // Progress can outlive a re-analysis that found fewer pages.
+    expect(percentRead({ page: 99, completed: false }, 10)).toBe(100)
   })
 })

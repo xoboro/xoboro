@@ -478,6 +478,7 @@ export default {
         // be and fewer are here, so a part-scanned series does not read as complete.
         bookCountOfExpected: '{count} of {expected}',
         authors: 'Authors',
+        alternateTitles: 'Also known as',
         roles: {
           writer: 'Writer',
           penciller: 'Penciller',

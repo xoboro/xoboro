@@ -15,7 +15,7 @@
    * Locks are not shown. They govern what a metadata refresh may overwrite, which is a
    * concern for whoever edits the series, and the edit form already renders them.
    */
-  import { _ } from '../lib/i18n.js'
+  import { _, locale } from '../lib/i18n.js'
 
   let {
     /** The series, as `/series/{id}` returns it. */
@@ -57,6 +57,26 @@
 
   const authors = $derived(known?.authors ?? [])
 
+  const alternateTitles = $derived(known?.alternateTitles ?? [])
+
+  /**
+   * A language as a reader would name it.
+   *
+   * The route sends what the sidecar stored — `ko`, `ja` — which is a tag and not a name.
+   * `Intl.DisplayNames` throws on a malformed tag and returns the input for a well-formed
+   * one it does not know, and the value comes from a library file this server did not
+   * author, so both outcomes fall back to printing what arrived. Dropping the row instead
+   * would lose the fact that a language was recorded.
+   */
+  function languageName(code, activeLocale) {
+    if (!code) return ''
+    try {
+      return new Intl.DisplayNames([activeLocale], { type: 'language' }).of(code) || code
+    } catch {
+      return code
+    }
+  }
+
   /**
    * How many items are here, and how many the source says there should be.
    *
@@ -83,7 +103,7 @@
     [
       ['status', known?.status ? $_(`catalog.metadata.statuses.${known.status}`) : ''],
       ['publisher', known?.publisher ?? ''],
-      ['language', known?.language ?? ''],
+      ['language', languageName(known?.language, $locale)],
       [
         'ageRating',
         known?.ageRating == null
@@ -113,7 +133,12 @@
    * filled in" is. A zero item count is not content: every series has one.
    */
   const anything = $derived(
-    Boolean(known?.summary) || rows.length > 0 || authors.length > 0 || chipGroups.length > 0 || links.length > 0,
+    Boolean(known?.summary) ||
+      rows.length > 0 ||
+      authors.length > 0 ||
+      chipGroups.length > 0 ||
+      alternateTitles.length > 0 ||
+      links.length > 0,
   )
 </script>
 
@@ -154,6 +179,19 @@
       </ul>
     </section>
   {/each}
+
+  {#if alternateTitles.length > 0}
+    <section class="chips" data-testid="series-alternate-titles">
+      <h2>{$_('catalog.metadata.display.alternateTitles')}</h2>
+      <ul>
+        {#each alternateTitles as alternate, at (`${alternate.label}:${alternate.title}:${at}`)}
+          <!-- The label is what distinguishes one alternate from another - a romanisation
+               from a short form - so it is shown rather than used only as a key. -->
+          <li>{alternate.label ? `${alternate.label}: ${alternate.title}` : alternate.title}</li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   {#if links.length > 0}
     <section class="chips" data-testid="series-links">

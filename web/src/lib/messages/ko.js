@@ -477,6 +477,7 @@ export default {
         // 완결처럼 보이지 않게 하는 것이 목적이다.
         bookCountOfExpected: '{expected}화 중 {count}화',
         authors: '작가',
+        alternateTitles: '다른 제목',
         roles: {
           writer: '글',
           penciller: '그림',
