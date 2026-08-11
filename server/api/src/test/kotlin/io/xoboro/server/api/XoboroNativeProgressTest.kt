@@ -6,6 +6,7 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.cookie
 import io.ktor.client.request.header
+import io.ktor.client.request.delete
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -272,6 +273,99 @@ class XoboroNativeProgressTest {
       assertEquals(HttpStatusCode.NotFound, response.status)
       assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
       assertEquals(0, fixture.progresses.writeAttempts)
+    }
+
+  /**
+   * Clearing progress.
+   *
+   * A reader can start a chapter by accident, and until now the only way to undo that was to
+   * open it and read to the end: the surface offered `PUT` and nothing else, so "unread" was
+   * a state the server could hold and no client could ask for.
+   *
+   * `ReadProgressLifecycle.deleteBook` has always existed — the Tachiyomi compatibility
+   * routes use it — so this is the native surface catching up with its own domain.
+   */
+  @Test
+  fun `clears stored progress for one media item`() =
+    testApplication {
+      val fixture = Fixture.administrator(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      val response = client.delete(PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NoContent, response.status)
+      assertNull(fixture.storedProgress())
+    }
+
+  @Test
+  fun `clearing progress that was never recorded is not an error`() =
+    testApplication {
+      // Idempotent on purpose: a reader pressing "unread" on an unread chapter has asked for
+      // the state it is already in, and answering 404 would report that as a failure.
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response = client.delete(PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NoContent, response.status)
+      assertNull(fixture.storedProgress())
+    }
+
+  @Test
+  fun `hides a media item this reader cannot see before clearing anything`() =
+    testApplication {
+      val fixture = Fixture.administrator(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      // 404 rather than 403, so an identifier cannot be probed for existence - the rule the
+      // rest of this surface follows.
+      val response = client.delete(HIDDEN_PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, response.status)
+      assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+      // The authorization check comes before the write, so the stored progress is untouched.
+      assertEquals(4, fixture.storedProgress()?.page)
+    }
+
+  @Test
+  fun `marks every item in a series read`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response = client.put(SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NoContent, response.status)
+      val stored = fixture.storedProgress()
+      assertEquals(PAGE_COUNT, stored?.page)
+      assertEquals(true, stored?.completed)
+    }
+
+  @Test
+  fun `clears progress for every item in a series`() =
+    testApplication {
+      val fixture = Fixture.administrator(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      val response = client.delete(SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NoContent, response.status)
+      assertNull(fixture.storedProgress())
+    }
+
+  @Test
+  fun `hides a series this reader cannot see before writing anything`() =
+    testApplication {
+      val fixture = Fixture.administrator(syntheticProgress(page = 4, readAtMillis = 100))
+      installProgress(fixture)
+
+      val marked = client.put(HIDDEN_SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+      val cleared = client.delete(HIDDEN_SERIES_PROGRESS_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.NotFound, marked.status)
+      assertEquals(HttpStatusCode.NotFound, cleared.status)
+      assertEquals("series_not_found", marked.body<XoboroApiError>().code)
+      assertEquals(4, fixture.storedProgress()?.page)
     }
 
   @Test
@@ -592,10 +686,22 @@ class XoboroNativeProgressTest {
       page: CatalogPageRequest,
     ): CatalogPage<CatalogSeries> = error("Not used")
 
+    /**
+     * Answers for the series the fixture's one book belongs to.
+     *
+     * This returned `null` unconditionally, which was harmless while no route asked it and
+     * became a fake that refuses what the real repository allows the moment one did. A fake
+     * that always says "not found" turns an authorization test into a tautology.
+     */
     override fun findSeriesByIdOrNull(
       id: SeriesId,
       access: CatalogAccess,
-    ): CatalogSeries? = null
+    ): CatalogSeries? {
+      val libraryIds = access.libraryIds
+      return syntheticSeries().takeIf {
+        it.series.id == id && (libraryIds == null || it.series.libraryId in libraryIds)
+      }
+    }
 
     override fun countSeriesByFirstCharacter(
       query: SeriesCatalogQuery,
@@ -641,7 +747,14 @@ class XoboroNativeProgressTest {
   }
 
   private class InMemorySeriesRepository : SeriesRepository {
-    override fun findByIdOrNull(id: SeriesId): Series? = null
+    /**
+     * Holds the one series the fixture's book belongs to.
+     *
+     * This answered `null` for everything, which no test noticed while no route asked - and
+     * made both series-progress routes silently write nothing the moment one did.
+     */
+    override fun findByIdOrNull(id: SeriesId): Series? =
+      syntheticSeries().series.takeIf { it.id == id }
 
     override fun findAllByLibraryId(libraryId: LibraryId): List<Series> = emptyList()
 
@@ -725,10 +838,19 @@ class XoboroNativeProgressTest {
       values.remove(bookId to userId)
     }
 
+    /**
+     * Was `error("Not used")`, which is honest right up to the moment something uses it - and
+     * then it is a fake that cannot do what the real repository does.
+     */
     override fun deleteBySeriesIdAndUserId(
       seriesId: SeriesId,
       userId: UserId,
-    ) = error("Not used")
+    ) {
+      // The fixture carries exactly one book, in exactly one series, so membership is that
+      // identity rather than a lookup this fake has no repository for.
+      if (seriesId != SERIES_ID) return
+      values.keys.filter { (_, owner) -> owner == userId }.forEach(values::remove)
+    }
   }
 
   private class InMemoryUserRepository(
@@ -773,6 +895,12 @@ class XoboroNativeProgressTest {
     private val SERIES_ID = SeriesId("series-progress")
     private val USER_ID = UserId("user-progress")
     private const val PROGRESS_PATH = "$XOBORO_API_PREFIX/media-items/media-progress/progress"
+    private const val SERIES_PROGRESS_PATH =
+      "$XOBORO_API_PREFIX/series/series-progress/progress"
+    private const val HIDDEN_PROGRESS_PATH =
+      "$XOBORO_API_PREFIX/media-items/media-missing/progress"
+    private const val HIDDEN_SERIES_PROGRESS_PATH =
+      "$XOBORO_API_PREFIX/series/series-missing/progress"
 
     private fun validRequest(
       page: Int = 4,
@@ -854,6 +982,33 @@ class XoboroNativeProgressTest {
         readProgress = null,
       )
     }
+
+    private fun syntheticSeries(): CatalogSeries =
+      CatalogSeries(
+        series =
+          Series(
+            id = SERIES_ID,
+            libraryId = VISIBLE_LIBRARY_ID,
+            name = "Synthetic progress series",
+            relativePath = "Synthetic progress series",
+            sourceItemId = "file:///synthetic/progress",
+            fileModifiedAtMillis = 1,
+            bookCount = 1,
+            createdAtMillis = 1,
+          ),
+        metadata =
+          SeriesMetadata(
+            seriesId = SERIES_ID,
+            title = "Synthetic progress series",
+            createdAtMillis = 1,
+          ),
+        booksMetadata =
+          io.xoboro.core.application.BookMetadataAggregation(
+            createdAtMillis = 1,
+            updatedAtMillis = 1,
+          ),
+        readProgress = null,
+      )
 
     private fun syntheticProgress(
       page: Int,
