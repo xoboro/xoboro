@@ -172,10 +172,15 @@ def shape(fragment: str) -> str:
 def measure(bearer, label, scope, table, meta, id_column, cut, single_token=False):
     pairs = samples(table, meta, id_column, cut, single_token)
     checked = recall_ok = recall_short = empty = on_page = 0
+    # First-page membership only means something when the answer is small enough for a
+    # first page to be most of it. Printing the median result size is what lets a reader of
+    # this output tell "the engine found it" from "the query happened to be narrow".
+    sizes: list[int] = []
     failures: dict[str, list[str]] = {}
     for entity_id, fragment in pairs:
         checked += 1
         total, ids = search(bearer, scope, fragment)
+        sizes.append(total)
         expected = substring_count(table, meta, id_column, fragment)
         if entity_id in ids:
             on_page += 1
@@ -191,10 +196,12 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
             recall_ok += 1
     # The headline is the membership test, not the inequality.
     ratio = f"{(on_page / checked * 100):.1f}%" if checked else "n/a"
+    ordered = sorted(sizes)
+    median = ordered[len(ordered) // 2] if ordered else 0
     print(
         f"{label:<26} checked={checked:<3} FOUND_ITSELF={on_page:<3} ({ratio:>6}) "
-        f"returned_nothing={empty:<3} at_least_substring={recall_ok:<3} "
-        f"below_substring={recall_short:<3}"
+        f"returned_nothing={empty:<3} median_matches={median:<6} "
+        f"at_least_substring={recall_ok:<3} below_substring={recall_short:<3}"
     )
     for kind, shapes in sorted(failures.items()):
         counted: dict[str, int] = {}
