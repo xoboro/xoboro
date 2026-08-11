@@ -207,6 +207,10 @@ def shape(fragment: str) -> str:
 def measure(bearer, label, scope, table, meta, id_column, cut, single_token=False):
     pairs = samples(table, meta, id_column, cut, single_token)
     checked = recall_ok = recall_short = empty = on_page = 0
+    # A miss the ranking explanation does not cover: the entity was not returned even though
+    # the first page was the entire answer. Any of these is a real recall loss, and the claim
+    # "misses are ranking" is only a mechanism rather than a correlation while this is zero.
+    unexplained = 0
     # First-page membership only means something when the answer is small enough for a
     # first page to be most of it. Printing the median result size is what lets a reader of
     # this output tell "the engine found it" from "the query happened to be narrow".
@@ -219,6 +223,8 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
         expected = substring_count(table, meta, id_column, fragment)
         if entity_id in ids:
             on_page += 1
+        elif total <= PAGE:
+            unexplained += 1
         if total == 0:
             empty += 1
             failures.setdefault("returned_nothing", []).append(shape(fragment))
@@ -238,7 +244,8 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
     over_page = sum(1 for size in sizes if size > PAGE)
     print(
         f"{label:<26} checked={checked:<3} FOUND_ITSELF={on_page:<3} ({ratio:>6}) "
-        f"returned_nothing={empty:<3} median_matches={median:<6} over_one_page={over_page:<3} "
+        f"returned_nothing={empty:<3} UNEXPLAINED={unexplained:<3} "
+        f"median_matches={median:<6} over_one_page={over_page:<3} "
         f"at_least_substring={recall_ok:<3} below_substring={recall_short:<3}"
     )
     for kind, shapes in sorted(failures.items()):
