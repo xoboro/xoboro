@@ -318,29 +318,40 @@ failure — the fragment's *shape* (its length and which scripts it mixes), neve
 Measured together they make a correct index look broken. Asked separately, over 25 sampled
 titles each:
 
-| measurement | found itself | median matches | answers over one page | returned nothing |
+| measurement | found itself | unexplained | median | over one page |
 | --- | --- | --- | --- | --- |
-| series, interior fragment, single token | **25/25** | 1 | 0 | 0 |
-| series, interior fragment, 8 chars | **25/25** | 1 | 0 | 0 |
-| series, leading word | **25/25** | 1 | 0 | 0 |
-| media items, interior fragment, 8 chars | **25/25** | 76 | 5 | 0 |
-| media items, interior fragment, 3 chars | 19/25 | 145 | 8 | 0 |
-| media items, leading word | 10/25 | 549 | 19 | 0 |
-| six nonsense queries | — | 0 | 0 | `totalItems=0` for all |
+| series, interior fragment, single token | **25/25** | 0 | 1 | 0 |
+| series, interior fragment, 8 chars | **25/25** | 0 | 1 | 0 |
+| series, leading word | **25/25** | 0 | 1 | 0 |
+| media items, interior fragment, 8 chars | **25/25** | 0 | 76 | 5 |
+| media items, interior fragment, 3 chars | 19/25 | **0** | 145 | 8 |
+| media items, leading word | 10/25 | **0** | 549 | 19 |
+| series, any interior fragment | 13/25 | **12** | 2 | 0 |
+| six nonsense queries | — | — | 0 | `totalItems=0` for all |
 
 **Found itself** is a membership test: the entity the fragment was cut from is in the
 answer, or it is not. That is the metric to read.
 
-The rows below 25/25 are **selectivity, not loss**, and the last two columns are what show
-it rather than asserting it. Every row where no answer exceeded one page is 25/25, without
-exception; every miss is in a row where some did. An entity can only be absent from the
-first page when its query answered with more than a page, so the two columns together are
-the whole explanation rather than a plausible one.
+**`unexplained` is the column that decides this**, and it exists because the first version
+of this section overstated what was measured. It counts a miss the ranking explanation does
+not cover: the entity absent from a first page that was *the entire answer*. Saying "the
+misses are ranking" without it is a correlation being read as a mechanism — the numbers
+could equally have described over-page queries ranking well while under-page ones lost
+their entity outright.
 
-Three characters out of 145,105 items is simply a broad query. `returned_nothing` stays at
-zero throughout, which is what says nothing was lost — and the 8-character media-item row
-finds its entity 25 times out of 25 even though five of those answers ran past a page,
-which is ranking working, not just recall.
+Measured, it splits cleanly, and not the way the earlier draft claimed:
+
+- **Every single-token row is 0.** Where fragments are one token, no miss is ever a recall
+  loss; the media-item rows at 19/25 and 10/25 miss only because their answers ran to 145
+  and 549 rows. That is ranking, now demonstrated rather than inferred.
+- **The unrestricted row is 12**, and those are real absences — the entity was not returned
+  although the whole answer fit on one page. They are the separator-straddling fragments,
+  and a trigram index tokenises on separators, so a window spanning a word boundary is not
+  a token it can match. Expected behaviour of the index, but *not* ranking, and the earlier
+  wording covered it with the wrong explanation.
+
+So: the trigram and word paths are complete for anything that is one token, and a query
+straddling a boundary is tokenised rather than matched whole.
 
 The negative controls are what stop a perfect score from being reachable by answering
 "everything" to every query.

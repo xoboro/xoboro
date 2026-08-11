@@ -149,8 +149,18 @@
      * `load` nor `error`, so its placeholder is the one that never resolves — and a home
      * grid holds a hundred of them. An unbounded shimmer there is a hundred compositor
      * animations running for a page nobody has scrolled to.
+     *
+     * Seventeen iterations rather than six, because six ends at 10.8s while `retryDelays`
+     * keeps asking until 30s: a cover still on its way and one that will never arrive
+     * looked identical for the nineteen seconds in between. This covers the whole window.
+     *
+     * `forwards` is required, not decoration. Without it the rest state is the *specified*
+     * position, `0%`, which parks the sheen inside the box on a mid-sweep frame — the
+     * highlight pops back in at the edge and freezes there, which reads as a rendering
+     * fault. At the `to` frame it sits entirely outside.
      */
-    animation: cover-shimmer 1.8s ease-in-out 6;
+    animation: cover-shimmer 1.8s ease-in-out 17;
+    animation-fill-mode: forwards;
   }
   /* Nothing is on its way any more, so the movement would be saying something untrue. The
      fill is already the one underneath the highlight, so stopping changes only the motion. */
