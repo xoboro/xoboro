@@ -348,5 +348,49 @@ describe('home search', () => {
     )
     expect(screen.getByTestId('home-search-results').textContent).not.toContain('Earlier Answer')
   })
+
+  /**
+   * A failed search has to say so.
+   *
+   * The shared error notice sits inside the branch the results *replace*, so a search that
+   * threw had nowhere to render: offline, three characters produced a blank page with no
+   * message and no way to retry. Every other test here searches successfully, which is
+   * exactly why nothing covered it.
+   */
+  it('reports a search that failed instead of showing a blank page', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('query=')) throw new TypeError('Failed to fetch')
+      return reply(envelope())
+    })
+    render(Home, {})
+
+    await typeQuery('anything')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  /**
+   * The two errors are not the same error. A search that succeeds says nothing about
+   * whether the grid loaded, and clearing the grid's failure would strand it on its
+   * loading state with no notice and no retry.
+   */
+  it('does not clear a grid failure by searching successfully', async () => {
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found' }]))
+      if (url.includes('/feeds/') || url.includes('/libraries')) return reply(envelope())
+      return reply({ code: 'internal_error', message: 'no' }, 500)
+    })
+    render(Home, {})
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    await typeQuery('found')
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results').textContent).toContain('Found'),
+    )
+
+    await typeQuery('')
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
 })
 

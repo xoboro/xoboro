@@ -8,9 +8,22 @@ engine had made so far: non-zero was read as working.
 This asks two different questions per sampled title, because conflating them is how a
 healthy index gets reported as broken.
 
-**Recall** — does the index find everything a plain substring test finds? Answered by
-comparing the API's ``totalItems`` against an ``instr`` count over the same titles,
-computed in SQL. If the API returns at least as many, the index is losing nothing.
+**Recall** — is the entity the fragment was cut from actually returned? This is a direct
+membership test and it is the metric that matters: the id is either in the answer or it is
+not.
+
+A second, weaker number is also reported. ``at_least_substring`` compares the API's
+``totalItems`` against an ``instr`` count over titles. It is a *lower bound only*, and it
+is labelled that way because it cannot fail for the reason one might expect: the trigram
+index concatenates title, sort title, series title and alternate titles into one indexed
+column (``V32__catalog_title_substring_search.sql``), so its match set is a superset of a
+title-only substring test and the inequality is nearly always satisfied. Reading it as
+"recall is fine" would be reading a tautology.
+
+**What settles it** is that an interior fragment returns anything at all. A word index
+cannot match a fragment starting inside a word, so a non-empty answer for an interior cut
+can only have come from the trigram index — and a wrong or absent trigram index shows up
+here as ``returned_nothing``, not as a small number.
 
 **Rank** — is the entity the fragment came from on the first page? A three-character
 fragment can legitimately match thousands of titles, so an entity below the first page is
@@ -107,7 +120,10 @@ def samples(
     """
     # Over-sampled, because the filter below rejects candidates and the point is to end up
     # with SAMPLE of them rather than SAMPLE minus however many straddled a space.
-    limit = SAMPLE * 20 if single_token else SAMPLE
+    # A long window is rejected far more often than a short one - most titles carry a
+    # space within eight characters - so the pool has to be much deeper or the sample comes
+    # back too small to claim anything from. An n of 2 is not a measurement.
+    limit = SAMPLE * 400 if single_token else SAMPLE
     rows = sql(
         f"SELECT e.id, {cut} FROM {table} e JOIN {meta} m ON m.{id_column} = e.id "
         f"WHERE e.deleted_at_ms IS NULL AND length(trim(m.title)) >= 5 "
@@ -173,11 +189,12 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
             )
         else:
             recall_ok += 1
-    ratio = f"{(recall_ok / checked * 100):.1f}%" if checked else "n/a"
+    # The headline is the membership test, not the inequality.
+    ratio = f"{(on_page / checked * 100):.1f}%" if checked else "n/a"
     print(
-        f"{label:<26} checked={checked:<3} recall_ok={recall_ok:<3} "
-        f"recall_short={recall_short:<3} returned_nothing={empty:<3} "
-        f"on_first_page={on_page:<3} recall_ratio={ratio}"
+        f"{label:<26} checked={checked:<3} FOUND_ITSELF={on_page:<3} ({ratio:>6}) "
+        f"returned_nothing={empty:<3} at_least_substring={recall_ok:<3} "
+        f"below_substring={recall_short:<3}"
     )
     for kind, shapes in sorted(failures.items()):
         counted: dict[str, int] = {}
@@ -211,6 +228,14 @@ def main() -> None:
     measure(bearer, "series_leading_word", "series", "series", "series_metadata", "series_id", leading)
     measure(bearer, "item_leading_word", "media-items", "book", "book_metadata", "book_id", leading)
 
+    # A longer interior cut, which is the control for selectivity rather than for the index.
+    # Three characters out of 145,105 items matches thousands of them, so an entity below
+    # the first page says the query was ambiguous, not that the engine lost it. Eight
+    # characters is specific enough that first-page membership means something.
+    selective = "substr(trim(m.title), 2, 8)"
+    measure(bearer, "series_interior_long", "series", "series", "series_metadata", "series_id", selective, True)
+    measure(bearer, "item_interior_long", "media-items", "book", "book_metadata", "book_id", selective, True)
+
     # Without a negative control, an engine that answered "everything" for every query
     # would score a perfect recall above and look ideal.
     for nonsense in ("zzqxjvw", "qqzzxxjj", "龘齾齉"):
@@ -220,4 +245,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # A bare traceback is the one way this could print library data: an exception's
+    # rendering can carry the value that caused it, and every value handled here is a
+    # title or a fragment of one. The class and where it came from are enough to debug
+    # with, and neither can contain a title.
+    try:
+        main()
+    except Exception as failure:  # noqa: BLE001 - the point is that nothing escapes
+        import traceback
+
+        frames = traceback.extract_tb(failure.__traceback__)
+        where = f"{frames[-1].name}:{frames[-1].lineno}" if frames else "unknown"
+        print(f"failed kind={type(failure).__name__} at={where}")
+        raise SystemExit(1) from None
