@@ -150,7 +150,10 @@ describe('SeriesScreen', () => {
     // One bar, for the one chapter that has been started. Chapter 2 has no progress.
     expect(bars).toHaveLength(1)
     expect(bars[0].getAttribute('data-percent')).toBe('50')
-    expect(bars[0].getAttribute('aria-valuenow')).toBe('50')
+    // Hidden from assistive technology on purpose: the row states the same progress in
+    // words directly above it, so naming the bar as well would say it twice.
+    expect(bars[0].getAttribute('aria-hidden')).toBe('true')
+    expect(screen.getByTestId('reading-order').textContent).toContain('5')
   })
 
   it('fills the bar for a finished chapter whatever page it stopped on', async () => {
