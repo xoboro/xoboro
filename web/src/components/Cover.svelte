@@ -60,6 +60,8 @@
     attempt = 0
   })
 
+  onDestroy(() => clearTimeout(retryTimer))
+
   function missing() {
     const delay = retryDelays[attempt]
     if (delay === undefined) {
@@ -71,7 +73,6 @@
     retryTimer = setTimeout(() => (attempt = next), delay)
   }
 
-  onDestroy(() => clearTimeout(retryTimer))
 </script>
 
 <div class="cover" style={`aspect-ratio:${ratio}`}>
@@ -134,6 +135,18 @@
      */
     animation: cover-shimmer 1.8s ease-in-out 6;
     animation-fill-mode: forwards;
+  }
+  /*
+   * Where the shimmer comes to rest.
+   *
+   * The travelling gradient ends past its own stops, on flat `--surface-raised` — which is
+   * `.cover`'s own background, so a placeholder that stopped there would be indistinguishable
+   * from no placeholder at all. Eleven seconds of motion would end in exactly the blank box
+   * this component was changed to stop showing. The still gradient underneath it is what
+   * remains visible, and it is the same one a cover that will never arrive settles on.
+   */
+  .placeholder {
+    background-color: var(--surface-selected);
   }
   /* Nothing is on its way any more, so the movement would be saying something untrue. */
   .placeholder.permanent {

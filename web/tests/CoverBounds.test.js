@@ -38,14 +38,31 @@ describe('Cover retry bounds', () => {
   })
 
   it('does not fire a scheduled retry after the component is gone', async () => {
-    const cleared = vi.spyOn(globalThis, 'clearTimeout')
+    /*
+     * Counted across the unmount boundary, and against the id that is actually pending.
+     *
+     * `toHaveBeenCalled()` here could not fail: `clearTimeout` has already run twice by
+     * this point - once from the effect that resets on mount, once from `missing()` before
+     * it schedules - so deleting the `onDestroy` entirely left the assertion green. It was
+     * a test of the setup, not of the teardown.
+     */
+    const scheduled = []
+    const setSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout')
     const { container, unmount } = render(Cover, { src: '/artwork/s1', retryDelays: [10_000] })
 
     await fireEvent.error(container.querySelector('img'))
+    scheduled.push(...setSpy.mock.results.map((result) => result.value))
+    const pending = scheduled.at(-1)
+    const before = clearSpy.mock.calls.length
+
     unmount()
 
-    // The pending timer is cancelled rather than left to fire into a destroyed component.
-    expect(cleared).toHaveBeenCalled()
-    cleared.mockRestore()
+    expect(clearSpy.mock.calls.length).toBeGreaterThan(before)
+    // The one that was actually waiting, not merely some timer.
+    expect(clearSpy.mock.calls.slice(before).flat()).toContain(pending)
+
+    setSpy.mockRestore()
+    clearSpy.mockRestore()
   })
 })

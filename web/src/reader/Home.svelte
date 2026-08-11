@@ -126,6 +126,10 @@
     }
     const serial = ++searchSerial
     searching = true
+    // Cleared as the new request goes out, not when it comes back. Left until then, a
+    // failed search's alert sits beside "Loading…" for the whole of the next attempt and
+    // reads as a fresh failure.
+    searchError = null
     try {
       // `libraryId` is a list on this surface - the listing accepts more than one - and
       // `commonQuery` spreads it. Passing the single id this screen holds, or null, threw
