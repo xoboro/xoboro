@@ -31,6 +31,10 @@
      translucent, so they are colour-with-alpha rather than a flat surface. */
   --surface-overlay: rgba(25, 28, 32, 0.97);
   --surface-scrim: rgba(0, 0, 0, 0.58);
+  /* The sheen that travels across a placeholder while its image is still arriving. It is
+     translucent rather than a colour, so it can sit over any surface without deciding what
+     that surface looks like once the motion stops. */
+  --surface-sheen: rgb(255 255 255 / 7%);
 
   /* ── line ──────────────────────────────────────────────────────────────── */
   --line: #292d33;              /* default border */

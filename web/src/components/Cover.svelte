@@ -114,52 +114,55 @@
   img.ready {
     opacity: 1;
   }
+  /*
+   * Two layers: a travelling highlight, and the fill it travels over.
+   *
+   * The highlight is translucent rather than opaque, and that is the whole point. An opaque
+   * travelling gradient decides the resting appearance by wherever it happens to stop — and
+   * `background-position: -220%` computes back to about 0%, so it stopped showing its own
+   * first stop, which is `--surface-raised`, which is `.cover`'s own background. Eleven
+   * seconds of motion ended in the empty box this component exists to stop showing.
+   * Measured, not reasoned: the rested centre pixel differed from the cover's own
+   * background by 2 of 255 per channel — invisible. With the fill underneath it differs by
+   * 9 at the centre and 17 at the corner.
+   *
+   * With the fill underneath and the highlight see-through, where the animation stops no
+   * longer decides anything: the placeholder always reads as the same distinct fill a cover
+   * that will never arrive settles on.
+   */
   .placeholder {
     position: absolute;
     inset: 0;
     display: block;
-    background: linear-gradient(
-      110deg,
-      var(--surface-raised) 25%,
-      var(--surface-selected) 42%,
-      var(--surface-raised) 60%
-    );
-    background-size: 220% 100%;
+    background-image:
+      linear-gradient(
+        110deg,
+        transparent 25%,
+        var(--surface-sheen) 42%,
+        transparent 60%
+      ),
+      linear-gradient(160deg, var(--surface-raised) 0%, var(--surface-selected) 100%);
+    background-size: 220% 100%, 100% 100%;
+    background-repeat: no-repeat, no-repeat;
     /*
      * Bounded, not `infinite`. `loading="lazy"` means an off-screen image fires neither
-     * `load` nor `error`, so its placeholder is the one that never resolves - and a home
+     * `load` nor `error`, so its placeholder is the one that never resolves — and a home
      * grid holds a hundred of them. An unbounded shimmer there is a hundred compositor
-     * animations running for a page nobody has scrolled to. Six iterations is about eleven
-     * seconds, well past any cover that is actually coming, and it settles into the same
-     * still gradient afterwards.
+     * animations running for a page nobody has scrolled to.
      */
     animation: cover-shimmer 1.8s ease-in-out 6;
-    animation-fill-mode: forwards;
   }
-  /*
-   * Where the shimmer comes to rest.
-   *
-   * The travelling gradient ends past its own stops, on flat `--surface-raised` — which is
-   * `.cover`'s own background, so a placeholder that stopped there would be indistinguishable
-   * from no placeholder at all. Eleven seconds of motion would end in exactly the blank box
-   * this component was changed to stop showing. The still gradient underneath it is what
-   * remains visible, and it is the same one a cover that will never arrive settles on.
-   */
-  .placeholder {
-    background-color: var(--surface-selected);
-  }
-  /* Nothing is on its way any more, so the movement would be saying something untrue. */
+  /* Nothing is on its way any more, so the movement would be saying something untrue. The
+     fill is already the one underneath the highlight, so stopping changes only the motion. */
   .placeholder.permanent {
     animation: none;
-    background: linear-gradient(
-      160deg,
-      var(--surface-raised) 0%,
-      var(--surface-selected) 100%
-    );
   }
   @keyframes cover-shimmer {
+    from {
+      background-position: 220% 0, 0 0;
+    }
     to {
-      background-position: -220% 0;
+      background-position: -220% 0, 0 0;
     }
   }
   @media (prefers-reduced-motion: reduce) {

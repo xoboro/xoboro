@@ -32,8 +32,23 @@ describe('Cover motion', () => {
     expect(declaration).toMatch(/\s\d+\s*$/)
   })
 
-  it('holds the last frame instead of snapping back to the first', () => {
-    expect(source).toContain('animation-fill-mode: forwards')
+  /**
+   * The resting appearance must not depend on where the animation stopped.
+   *
+   * It used to: an opaque travelling gradient rested on its own first stop, which is
+   * `--surface-raised`, which is the cover's own background — so eleven seconds of motion
+   * ended in the empty box the placeholder exists to replace. Measured in a browser, the
+   * rested centre pixel was rgb(27,30,34) against a cover of rgb(25,28,32). Two layers fix
+   * it: a translucent highlight over an opaque fill, so where the highlight stops changes
+   * nothing about what is visible. With the fill in place the rested centre is 9 away from
+   * the cover background and the corner 17.
+   */
+  it('puts the fill under the highlight rather than relying on where it stops', () => {
+    // Two images, and the travelling one must be see-through or it decides the rest state.
+    expect(source).toMatch(/background-image:\s*\n?\s*linear-gradient\(\s*\n?\s*110deg/)
+    expect(source).toContain('var(--surface-sheen)')
+    expect(source).toContain('linear-gradient(160deg, var(--surface-raised) 0%, var(--surface-selected) 100%)')
+    expect(source).not.toContain('animation-fill-mode: forwards')
   })
 
   it('still drops the motion entirely under prefers-reduced-motion', () => {
