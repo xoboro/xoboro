@@ -290,6 +290,64 @@ So when a build fails with no failing test:
 
 Only the third is about the code.
 
+## Checking that search finds the right rows, not merely some rows
+
+Every check of this engine had been a row count. `GET /series?query=이` answering 1,523
+and `/media-items?query=이` answering 77,360 was read as "search works" — and it does not
+say that. It says search answers.
+
+`scripts/search-accuracy.py` asks the discriminating question. It takes a title the
+catalogue actually holds, cuts a fragment out of the **interior** of it, asks the API for
+that fragment, and checks whether the entity the fragment came from is in the answer. The
+interior matters: a prefix is answered by the word index, and only an interior fragment
+exercises the trigram index V32 added so a Korean title could be found by a fragment
+inside it.
+
+Run it against the host, never against a copy pulled locally:
+
+```shell
+ssh <host> 'SAMPLE=25 python3 -' < scripts/search-accuracy.py
+```
+
+Titles are the owner's private material. They are read inside SQL, held in memory, and
+used only to build a URL and a count query; the output is counts, ratios and — for a
+failure — the fragment's *shape* (its length and which scripts it mixes), never its value.
+
+### Recall and rank are different questions
+
+Measured together, they make a correct index look broken. Asked separately:
+
+| measurement | recall | on first page |
+| --- | --- | --- |
+| series, interior fragment, single token | **25/25** | 25/25 |
+| media items, interior fragment, single token | **25/25** | 18/25 |
+| series, leading word | **25/25** | 25/25 |
+| media items, leading word | 23/25 | 14/25 |
+| six nonsense queries | `totalItems=0` for all | — |
+
+**Recall** is whether the index found everything a plain substring test finds, taken as the
+API's `totalItems` against an `instr` count over the same titles. **Rank** is whether the
+entity is on the first page, and a three-character fragment can legitimately match
+thousands of titles — so an entity below the first page is not evidence of anything. The
+negative controls are what stop a perfect recall score from being achievable by answering
+"everything" to every query.
+
+### The first reading of this was wrong, and the reason transfers
+
+Restricted to single-token fragments the engine is at 100%. Unrestricted it scored 84% on
+series and **68%** on items, and an earlier version of the same script reported 56% and
+20%.
+
+Every failure — without exception — was a fragment containing a space or a punctuation
+mark: `hangul+space`, `digit+hangul+space`, `hangul+punct`. Not one purely-hangul, purely
+latin or purely CJK fragment failed. A trigram index tokenises on separators, so a
+three-character window straddling a word boundary is not one token and cannot be found as
+one; and `instr`, which does not care about boundaries, is an over-strict comparator for a
+tokenised index. The low numbers measured the measurement.
+
+Both rows are kept in the script's output rather than the flattering one alone, because
+the gap between them is the finding.
+
 ## Completion rule
 
 Code is not considered complete when only the happy path passes. Tests cover:
