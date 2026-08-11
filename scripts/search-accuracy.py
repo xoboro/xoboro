@@ -225,6 +225,9 @@ def measure(bearer, label, scope, table, meta, id_column, cut, single_token=Fals
             on_page += 1
         elif total <= PAGE:
             unexplained += 1
+            # Shaped, so "these are the separator-straddling ones" is something this run
+            # says rather than something carried over from a different metric.
+            failures.setdefault("unexplained", []).append(shape(fragment))
         if total == 0:
             empty += 1
             failures.setdefault("returned_nothing", []).append(shape(fragment))

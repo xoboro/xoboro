@@ -145,6 +145,16 @@
     background-size: 220% 100%, 100% 100%;
     background-repeat: no-repeat, no-repeat;
     /*
+     * Where the sheen sits when it is not moving at all.
+     *
+     * `forwards` only covers the path that runs the animation to its end. `.permanent` and
+     * the reduced-motion rule below never start one, so without this they would rest at the
+     * initial `0% 0%` — the sheen parked mid-sweep inside the box, frozen, on exactly the
+     * covers that are never going to change. Declaring the `to` position keeps all three
+     * resting states identical.
+     */
+    background-position: -220% 0, 0 0;
+    /*
      * Bounded, not `infinite`. `loading="lazy"` means an off-screen image fires neither
      * `load` nor `error`, so its placeholder is the one that never resolves — and a home
      * grid holds a hundred of them. An unbounded shimmer there is a hundred compositor
