@@ -880,12 +880,33 @@ class JooqCatalogReadRepository(
     return "LIMIT ? OFFSET ?"
   }
 
+  /**
+   * The word query, with short terms held to the title.
+   *
+   * Every term carries FTS5's prefix operator, and the indexed document is not only the title: it
+   * reaches `summary`, `contributors`, `labels` and `identifiers`. For a word that is a word, that
+   * is the point - it is how a reader finds a series by its author. For a term of one or two
+   * characters it is noise, because a prefix that short occurs inside ordinary prose constantly and
+   * the reader cannot see why the answer is on screen.
+   *
+   * Measured on the real catalogue: `원` matched **175** series across the whole document and
+   * **12** against titles alone - 93% of the answer was summaries, and the one a reader reported
+   * was `개구리 하사 케로로`, matched on the word `원래` in the middle of its plot summary.
+   *
+   * So a short term is answered by `title:` and nothing else. It still reaches every title the
+   * document holds - the name, the sort title and the alternates are all in that column - and the
+   * interior half of a two-character term is unaffected, because [toInteriorSearch] only ever
+   * searched titles.
+   */
   private fun String.toFtsQuery(): String? =
     SEARCH_TOKEN
       .findAll(this)
       .map(MatchResult::value)
       .filter(String::isNotBlank)
-      .map { token -> "\"${token.replace("\"", "\"\"")}\"*" }
+      .map { token ->
+        val quoted = "\"${token.replace("\"", "\"\"")}\"*"
+        if (token.codePointCount(0, token.length) >= TRIGRAM_MINIMUM_TERM) quoted else "title:$quoted"
+      }
       .toList()
       .takeIf(List<String>::isNotEmpty)
       ?.joinToString(" AND ")
