@@ -270,11 +270,23 @@ describe('home search', () => {
     return field
   }
 
-  it('shows results in place of the shelves', async () => {
-    globalThis.fetch = searchServer({
+  /**
+   * Works, and not their chapters.
+   *
+   * A chapter's indexed title carries its series' title, so a series that matches drags every one
+   * of its chapters in behind it. Measured on the real catalogue for the two-character term
+   * `부터`: of 789 chapter matches, 777 belonged to a series already in the answer above them, and
+   * all 789 came from 22 series. The section was this list again, longer, with a cover to fetch
+   * per row — and it was the slow half of the search (113 ms against 39 ms).
+   *
+   * The `편` scope in the options below still searches them, for a reader who asks on purpose.
+   */
+  it('shows the works it found in place of the shelves, and does not ask for chapters', async () => {
+    const fetchImpl = searchServer({
       series: [{ id: 's1', title: 'Found Series', mediaItemCount: 3 }],
       items: [{ id: 'm1', title: 'Found Chapter', seriesTitle: 'Found Series' }],
     })
+    globalThis.fetch = fetchImpl
     render(Home, {})
 
     await typeQuery('found')
@@ -282,7 +294,11 @@ describe('home search', () => {
     await waitFor(() =>
       expect(screen.getByTestId('home-search-results').textContent).toContain('Found Series'),
     )
-    expect(screen.getByTestId('home-search-results').textContent).toContain('Found Chapter')
+    expect(screen.getByTestId('home-search-results').textContent).not.toContain('Found Chapter')
+    // Not merely hidden: the request itself is not made, which is where the time went.
+    expect(
+      fetchImpl.mock.calls.some(([url]) => url.includes('/media-items') && url.includes('query=')),
+    ).toBe(false)
     // The grid the search replaces is gone rather than pushed below the results.
     expect(screen.queryByTestId('all-series-page-next')).toBeNull()
   })

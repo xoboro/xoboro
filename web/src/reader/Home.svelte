@@ -93,6 +93,22 @@
   const SEARCH_SIZE = 24
 
   let query = $state('')
+  /**
+   * Series only, and the chapters deliberately left out.
+   *
+   * This asked both listings and drew neither until the slower had answered. Measured against the
+   * real catalogue for the two-character term `부터`: the series listing answers in 39 ms and the
+   * media-item listing in 113 ms, so the fast half spent its time waiting for the slow one.
+   *
+   * Dropping the chapters is not only about the 113 ms. A chapter's indexed title carries its
+   * series' title, so a series that matches drags every one of its chapters in with it: of **789**
+   * chapter matches for that term, **777** belonged to a series already in the answer above them,
+   * and all 789 came from just **22** series. The section was the same answer again, longer, with
+   * a cover to fetch per row.
+   *
+   * Chapters stay searchable where a reader asks for them on purpose — the `편` scope in the
+   * options below, which has the filters, sorts and paging that make a long list usable.
+   */
   let results = $state(null)
   let searching = $state(false)
   let searchTimer = null
@@ -165,17 +181,13 @@
       // `libraryId` is a list on this surface - the listing accepts more than one - and
       // `commonQuery` spreads it. Passing the single id this screen holds, or null, threw
       // before any request went out, so the field simply did nothing.
-      const criteria = {
+      const found = await searchCatalog('series', {
         query: trimmed,
         libraryId: libraryId ? [libraryId] : [],
         size: SEARCH_SIZE,
-      }
-      const [series, items] = await Promise.all([
-        searchCatalog('series', criteria),
-        searchCatalog('mediaItems', criteria),
-      ])
+      })
       if (serial !== searchSerial) return
-      results = { series: series.items ?? [], items: items.items ?? [] }
+      results = found.items ?? []
       // Deliberately not clearing `error`. It may belong to the grid or the shelves, which
       // this request knows nothing about - clearing it would hide a failure and leave the
       // screen it belongs to stranded on "Loading…" with no notice and no retry.
@@ -373,44 +385,28 @@
        three answers to the same question stacked down one screen is not three times the help. -->
 {:else if searchActive}
   <ErrorNotice error={searchError} onretry={() => runSearch(query)} />
+  <!-- Works, and only works. The chapter section that used to sit under this one is gone: see
+       the note on `results` for the 777-of-789 measurement that made it a second copy of this
+       list rather than an addition to it. -->
   {#if results}
-    {#if results.series.length === 0 && results.items.length === 0}
+    {#if results.length === 0}
       <p class="waiting" data-testid="home-search-empty" role="status">
         {$_('search.results.noResults')}
       </p>
     {:else}
-      <div data-testid="home-search-results">
-        {#if results.series.length > 0}
-          <h2 class="all">{$_('search.scope.series')}</h2>
-          <ul class="grid">
-            {#each results.series as found (found.id)}
-              <li>
-                <a href={`#/series/${found.id}`}>
-                  <Cover src={artworkUrl('series', found.id)} />
-                  <span class="label">{found.title ?? found.name}</span>
-                  <span class="sub">
-                    {$_('reader.items', { values: { count: found.mediaItemCount ?? 0 } })}
-                  </span>
-                </a>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-        {#if results.items.length > 0}
-          <h2 class="all">{$_('search.scope.mediaItems')}</h2>
-          <ul class="grid">
-            {#each results.items as found (found.id)}
-              <li>
-                <a href={`#/read/${found.id}`}>
-                  <Cover src={artworkUrl('mediaItem', found.id)} />
-                  <span class="label">{found.title ?? found.name}</span>
-                  <span class="sub">{found.seriesTitle ?? ''}</span>
-                </a>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
+      <ul class="grid" data-testid="home-search-results">
+        {#each results as found (found.id)}
+          <li>
+            <a href={`#/series/${found.id}`}>
+              <Cover src={artworkUrl('series', found.id)} />
+              <span class="label">{found.title ?? found.name}</span>
+              <span class="sub">
+                {$_('reader.items', { values: { count: found.mediaItemCount ?? 0 } })}
+              </span>
+            </a>
+          </li>
+        {/each}
+      </ul>
     {/if}
   {:else if searching}
     <p class="waiting" role="status">{$_('common.loading')}</p>
