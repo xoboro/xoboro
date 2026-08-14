@@ -662,7 +662,14 @@ class XoboroRuntime private constructor(
         activityRetentionScheduler = createdActivityRetentionScheduler
         val createdSeriesAggregationScheduler =
           SeriesAggregationScheduler(
-            sweepOnce = JooqBookMetadataAggregationRepository(database)::refreshSomeDirty,
+            sweepOnce = JooqBookMetadataAggregationRepository(database)::sweepSomeDirty,
+            // The sweep is where a series gains its authors and tags, and it runs a minute after
+            // whatever dirtied it. Until this was published, a screen opened inside that window
+            // kept a series with no author for as long as the reader stayed on it.
+            publisher = { event ->
+              sseBridge.publish(event)
+              nativeEvents.publish(XoboroNativeEventBridge.map(event))
+            },
             scheduler =
               ExecutorFixedRateTaskScheduler(
                 shutdownTimeoutMillis = config.shutdownTimeoutMillis,
