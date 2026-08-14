@@ -61,7 +61,7 @@ class JooqBookMetadataAggregationRepositoryContentionTest {
         holder.createStatement().use { it.executeUpdate("UPDATE library SET name = name") }
         try {
           // Both sweeps and the read, under the held lock. None may throw.
-          aggregations.refreshSomeDirty()
+          aggregations.sweepSomeDirty()
           aggregations.refreshAllDirty()
           aggregations.findAllBySeriesIds(listOf(seriesId))
         } finally {

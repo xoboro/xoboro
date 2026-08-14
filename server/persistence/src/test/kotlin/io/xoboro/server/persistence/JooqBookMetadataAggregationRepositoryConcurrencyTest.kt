@@ -23,7 +23,7 @@ import org.junit.jupiter.api.io.TempDir
 
 /**
  * Regression coverage for the SQLITE_BUSY_SNAPSHOT race between
- * [JooqBookMetadataAggregationRepository.refreshSomeDirty] and a concurrent, independent writer touching
+ * [JooqBookMetadataAggregationRepository.sweepSomeDirty] and a concurrent, independent writer touching
  * `book_metadata` for the same series on another pooled connection.
  *
  * Before the fix, the sweep read `series_book_metadata_aggregation_dirty` and only then wrote to
@@ -147,7 +147,7 @@ class JooqBookMetadataAggregationRepositoryConcurrencyTest {
           executor.submit {
             repeat(iterationsPerReader) { iteration ->
               val callStart = System.currentTimeMillis()
-              runCatching { aggregations.refreshSomeDirty() }
+              runCatching { aggregations.sweepSomeDirty() }
                 .onFailure { failure ->
                   failures.incrementAndGet()
                   val now = System.currentTimeMillis()
