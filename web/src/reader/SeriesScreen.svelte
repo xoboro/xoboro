@@ -56,26 +56,46 @@
   let editing = $state(false)
   let order = $state(SeriesOrder.NEWEST)
 
+  /**
+   * Which read is the current one.
+   *
+   * This screen re-reads on its own events and on the reader changing the order, so two reads can
+   * be in flight at once — and the slower one lands last whatever it was asked for. Without this,
+   * changing the order and having the previous request answer afterwards leaves the list in the
+   * order the reader just turned away from, and the control still showing the order they chose.
+   * Marking read has the same shape: the reload it triggers races the one an event triggered.
+   */
+  let loadSequence = 0
+
   async function load() {
+    const mine = ++loadSequence
     try {
       const [detail, page, resumePoint] = await Promise.all([
         readSeries(params.id),
         listSeriesMediaItems(params.id, { sort: order }),
         readResumePoint(params.id),
       ])
+      if (mine !== loadSequence) return
       series = detail
       items = page
       resume = resumePoint
       // The earliest chapter is only the head of the listing when the listing runs
       // that way; under newest-first it is on the last page, so it is asked for
       // directly rather than guessed at from whichever page arrived.
-      first =
+      const earliest =
         order === SeriesOrder.OLDEST
           ? (page.items[0] ?? null)
           : ((await listSeriesMediaItems(params.id, { size: 1, sort: SeriesOrder.OLDEST }))
               .items[0] ?? null)
+      // Checked again: the line above can await a second request, and a newer read may have
+      // finished entirely while it was outstanding.
+      if (mine !== loadSequence) return
+      first = earliest
       error = null
     } catch (caught) {
+      // A superseded read's failure is not this screen's state either. Reporting it would put an
+      // error over results that loaded perfectly.
+      if (mine !== loadSequence) return
       error = caught
     }
   }
@@ -93,8 +113,56 @@
       SeriesOrder.NEWEST,
     )
     load()
-    return eventHub.on(['series.changed', 'media-item.added', 'media-item.changed'], load)
+    const offCatalog = eventHub.on(
+      ['series.changed', 'media-item.added', 'media-item.changed'],
+      (message) => {
+        if (concerns(message)) reloadSoon()
+      },
+    )
+    // A gap in the stream is the only signal the server sends that a view may be stale without
+    // saying which view. The other screens already listen for it; this one did not, so a reader
+    // sitting on a series page kept whatever it had loaded for as long as they stayed.
+    const offResync = eventHub.onResync(() => reloadSoon())
+    return () => {
+      offCatalog()
+      offResync()
+      clearTimeout(reloadTimer)
+    }
   })
+
+  /**
+   * Whether an event is about the series on screen.
+   *
+   * Without this the screen reloaded for **every** catalogue event: a scan of a few thousand
+   * series had one open tab issuing four requests per series it had never heard of. The payload
+   * carries `ids` for the entities the event is about and `seriesId` for a media item's parent,
+   * so the question is answerable without asking the server anything.
+   *
+   * An event with neither is treated as concerning this series. Guessing "not mine" from a
+   * payload that says nothing would trade a storm of needless reloads for a screen that silently
+   * stops updating, and of the two, the stale screen is the one nobody reports.
+   */
+  function concerns(message) {
+    const ids = message?.ids
+    const seriesId = message?.seriesId
+    if (!Array.isArray(ids) && seriesId == null) return true
+    if (seriesId != null && seriesId === params.id) return true
+    return Array.isArray(ids) && ids.includes(params.id)
+  }
+
+  /**
+   * Coalesces a burst into one reload.
+   *
+   * A scan announces a series and each of its chapters, so the events that do concern this
+   * series still arrive several at a time. `load()` is four requests; running it per event was
+   * four times the work for one answer.
+   */
+  const RELOAD_DEBOUNCE_MILLIS = 200
+  let reloadTimer = null
+  function reloadSoon() {
+    clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(load, RELOAD_DEBOUNCE_MILLIS)
+  }
 
   /**
    * Which rows have a request in flight.
