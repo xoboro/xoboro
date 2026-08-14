@@ -1,7 +1,11 @@
 package io.xoboro.server.persistence
 
 import io.xoboro.core.application.BookMetadataAggregation
+import io.xoboro.core.application.CatalogMutationEvent
+import io.xoboro.core.application.CatalogMutationKind
+import io.xoboro.core.application.SeriesAggregationSweep
 import io.xoboro.core.domain.Author
+import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.SeriesId
 import org.jooq.DSLContext
 import org.jooq.Record
@@ -64,9 +68,51 @@ class JooqBookMetadataAggregationRepository(
    * appears, so draining in the background costs freshness rather than visibility. A caller whose
    * answer actually depends on the aggregation - sorting on it - still has to sweep it all.
    */
-  fun refreshSomeDirty(): Boolean {
-    val refreshed = sweepOrNull { it.claimOldestDirty() } ?: return true
-    return refreshed >= QUERY_BATCH_SIZE
+  /**
+   * Sweeps one batch, reporting which series it rebuilt.
+   *
+   * The ids come from the claim's `RETURNING`, so they are exactly the rows this transaction took
+   * responsibility for - not a re-read, which another sweeper could have emptied in between. The
+   * library each belongs to is read in the same transaction for the same reason, and it is read at
+   * all because a subscriber's access is decided by `libraryId`: an id with no library cannot be
+   * delivered to anyone.
+   *
+   * A series claimed as dirty but since deleted contributes no event. It has no row to join, and
+   * announcing a change to something that is gone would be a lie about a screen the reader can no
+   * longer open.
+   */
+  fun sweepSomeDirty(): SeriesAggregationSweep {
+    var events = emptyList<CatalogMutationEvent.Series>()
+    val refreshed =
+      sweepOrNull { transaction ->
+        val ids = transaction.claimOldestDirty()
+        events = transaction.mutationEventsFor(ids)
+        ids
+      // Locked out rather than finished: the backlog stands, and the next tick tries again.
+      } ?: return SeriesAggregationSweep(rebuilt = emptyList(), moreRemaining = true)
+    return SeriesAggregationSweep(rebuilt = events, moreRemaining = refreshed >= QUERY_BATCH_SIZE)
+  }
+
+  private fun DSLContext.mutationEventsFor(
+    ids: List<SeriesId>,
+  ): List<CatalogMutationEvent.Series> {
+    if (ids.isEmpty()) return emptyList()
+    return ids.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
+      fetch(
+        """
+        SELECT id, library_id
+        FROM series
+        WHERE id IN (${batch.placeholders()})
+        """.trimIndent(),
+        *batch.bindings(),
+      ).map { row ->
+        CatalogMutationEvent.Series(
+          kind = CatalogMutationKind.UPDATED,
+          seriesId = SeriesId(row.requiredString("id")),
+          libraryId = LibraryId(row.requiredString("library_id")),
+        )
+      }
+    }
   }
 
   fun findAllBySeriesIds(ids: Collection<SeriesId>): Map<SeriesId, BookMetadataAggregation> {
