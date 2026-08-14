@@ -30,7 +30,7 @@ class CatalogSearchIndexUpgradeTest {
     val before = seedCatalogueAtVersion35(path)
 
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
-      assertEquals(1, database.migrationResult.migrationsExecuted)
+      assertEquals(3, database.migrationResult.migrationsExecuted)
 
       assertEquals(
         before.bookFtsRowid,
