@@ -392,5 +392,82 @@ describe('home search', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
   })
+
+  /**
+   * The complaint this replaced a link to fix: narrowing a search used to be a `#/search`
+   * navigation, so the screen was exchanged for another one with its own header, its own empty
+   * field and a back arrow. Nothing was lost and all of it looked lost.
+   *
+   * The hash is asserted because that is the thing that used to change. A surface that appears
+   * in place while the URL moves is the same defect with a nicer transition.
+   */
+  it('opens the scoped options in place rather than navigating to a search screen', async () => {
+    globalThis.fetch = searchServer({})
+    render(Home, {})
+    const hashBefore = window.location.hash
+
+    await fireEvent.click(await screen.findByTestId('toggle-advanced'))
+
+    expect(screen.getByTestId('home-advanced')).toBeInTheDocument()
+    expect(window.location.hash).toBe(hashBefore)
+    // The field the reader was typing in is still the field they are typing in.
+    expect(screen.getByTestId('home-search')).toBeInTheDocument()
+    expect(screen.getByTestId('toggle-advanced')).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  /** The same surface from the library nav, which is where a reader looks for "search". */
+  it('opens the same surface from the library navigation', async () => {
+    globalThis.fetch = searchServer({})
+    render(Home, {})
+
+    const entry = await screen.findByTestId('open-advanced')
+    // A button, not a link: it acts on this screen instead of going to another one.
+    expect(entry.tagName).toBe('BUTTON')
+    await fireEvent.click(entry)
+
+    expect(screen.getByTestId('home-advanced')).toBeInTheDocument()
+  })
+
+  /** Closing puts the shelves back, so the surface is a state of this screen and not a trip. */
+  it('closes the options and restores the shelves', async () => {
+    globalThis.fetch = searchServer({})
+    render(Home, {})
+
+    await fireEvent.click(await screen.findByTestId('toggle-advanced'))
+    expect(screen.getByTestId('home-advanced')).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByTestId('toggle-advanced'))
+
+    expect(screen.queryByTestId('home-advanced')).toBeNull()
+    expect(screen.getByTestId('open-advanced')).toBeInTheDocument()
+  })
+
+  /**
+   * Opening the options mid-word continues that search rather than restarting it. The old link
+   * could not do this at all — the screen it opened had an empty field — and it is the whole
+   * reason the surface is here rather than there.
+   */
+  it('carries the typed words into the options', async () => {
+    const fetched = []
+    globalThis.fetch = vi.fn(async (url) => {
+      fetched.push(url)
+      if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found Series' }]))
+      return reply(envelope())
+    })
+    render(Home, {})
+
+    await typeQuery('found')
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results').textContent).toContain('Found Series'),
+    )
+
+    await fireEvent.click(screen.getByTestId('toggle-advanced'))
+
+    await waitFor(() =>
+      expect(
+        fetched.some((url) => url.includes('/series') && url.includes('query=found')),
+      ).toBe(true),
+    )
+  })
 })
 
