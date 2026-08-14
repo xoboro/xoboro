@@ -125,6 +125,24 @@ describe('SeriesScreen', () => {
     expect(overview.querySelectorAll('[data-testid="series-facts"]')).toHaveLength(1)
   })
 
+  /**
+   * How many chapters are here, on the list rather than among the facts above it.
+   *
+   * The overview already says what the source claims exists ("3 of 167"); this says what is
+   * present to open, next to the control that reorders it. A reader who has scrolled to the
+   * chapters has left the facts behind, and otherwise learns the length by reaching the end.
+   *
+   * Taken from the envelope's total, not from the page: the listing is paged, so counting the
+   * rows on screen would report the page size as the series length.
+   */
+  it('says how many chapters the list holds', async () => {
+    globalThis.fetch = server()
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(screen.getByTestId('item-count')).toBeInTheDocument())
+    expect(screen.getByTestId('item-count').textContent).toContain('2')
+  })
+
   it('still lists the chapters', async () => {
     // The cover must be added to the page, not in place of what was already there.
     globalThis.fetch = server()
