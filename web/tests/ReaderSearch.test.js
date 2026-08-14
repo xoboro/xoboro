@@ -160,6 +160,26 @@ describe('reader search', () => {
   })
 
   /**
+   * Submitting a word and then narrowing what it returned is one search rather than two, so
+   * asking opens the options in place instead of leaving them behind a second control the
+   * reader has to find. Opening, not toggling: a second submit closing what somebody is
+   * reading would be the same defect the other way round, so it is asserted here.
+   */
+  it('opens the options on submit, and a second submit leaves them open', async () => {
+    globalThis.fetch = server().fetch
+    render(Search)
+
+    await fireEvent.submit(screen.getByTestId('search-submit').closest('form'))
+
+    expect(screen.getByTestId('search-filters')).not.toHaveAttribute('hidden')
+    expect(screen.getByTestId('toggle-filters')).toHaveAttribute('aria-expanded', 'true')
+
+    await fireEvent.submit(screen.getByTestId('search-submit').closest('form'))
+
+    expect(screen.getByTestId('search-filters')).not.toHaveAttribute('hidden')
+  })
+
+  /**
    * A closed column would otherwise hide that anything is applied at all, which is the failure
    * the chips beside the results exist to prevent - but the count is what makes the closed
    * control itself honest, before any chip is read.
@@ -353,8 +373,12 @@ describe('reader search', () => {
     globalThis.fetch = fetch
     render(Search)
 
-    await waitFor(() => expect(screen.getByTestId('no-results')).toBeInTheDocument())
-    expect(screen.getByTestId('result-summary').textContent).not.toBe('')
+    const empty = await screen.findByTestId('no-results')
+    // Said once. The count for zero and the guidance below it opened with the same sentence,
+    // so the screen repeated itself and only the half carrying the way out was any use.
+    expect(screen.queryByTestId('result-summary')).toBeNull()
+    // Still announced, because a reader who cannot see the grid empty has to be told it did.
+    expect(empty).toHaveAttribute('role', 'status')
     // No paging controls for a result set with no pages to walk.
     expect(screen.queryByTestId('search-page-next')).toBeNull()
   })

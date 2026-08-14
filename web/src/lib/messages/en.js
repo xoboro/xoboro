@@ -428,7 +428,7 @@ export default {
       active: 'Currently narrowed by',
       remove: 'Stop narrowing by {value}',
       appliedCount: '{count} applied',
-      show: 'Narrow',
+      show: 'Advanced search',
     },
     results: {
       summary:

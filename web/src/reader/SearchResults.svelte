@@ -35,15 +35,20 @@
 </script>
 
 {#if page}
-  <!-- polite: the count follows a search the reader started, so it is worth
-       announcing, but not worth interrupting whatever is being read out. -->
-  <p class="summary" role="status" aria-live="polite" data-testid="result-summary">
-    {$_('search.results.summary', { values: { total: page.totalItems } })}
-  </p>
-
   {#if items.length === 0}
-    <p class="empty" data-testid="no-results">{$_('search.results.noResults')}</p>
+    <!-- One line, not two. The count for zero reads "nothing found", and the guidance below it
+         opened with the same sentence again - the screen said the same thing twice and only the
+         second half of it was any use. This carries the announcement as well, so a reader who
+         cannot see the change is still told there was one. -->
+    <p class="empty" role="status" aria-live="polite" data-testid="no-results">
+      {$_('search.results.noResults')}
+    </p>
   {:else}
+    <!-- polite: the count follows a search the reader started, so it is worth
+         announcing, but not worth interrupting whatever is being read out. -->
+    <p class="summary" role="status" aria-live="polite" data-testid="result-summary">
+      {$_('search.results.summary', { values: { total: page.totalItems } })}
+    </p>
     <ul class="grid">
       {#each items as item (item.id)}
         <li>

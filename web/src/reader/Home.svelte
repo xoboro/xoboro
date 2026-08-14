@@ -30,6 +30,7 @@
   import { listLibraries } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
+  import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
@@ -114,6 +115,36 @@
 
   const searchActive = $derived(query.trim().length > 0)
 
+  /**
+   * Whether the scoped, filtered surface is showing, here rather than on a screen of its own.
+   *
+   * It used to be a link to `#/search`, and that link is what made narrowing a search feel like
+   * losing one: the shelves, the library the reader had chosen and their place in the grid were
+   * all replaced by a second screen with a back arrow and an empty field. Nothing was actually
+   * lost and it read as everything being lost. So the surface opens **under the field the reader
+   * is already typing in**, and closing it puts the shelves straight back.
+   *
+   * Mounted only once asked for: it lists the catalogue when it opens, and a home screen that
+   * asked for a page of every series on every visit would pay for a search nobody started.
+   */
+  let advancedOpen = $state(false)
+  /**
+   * The words the advanced surface is searching for: the debounced text, not the live field.
+   *
+   * The same value the quick search asks with, so opening the options mid-word continues that
+   * search instead of restarting it — which is the whole point of opening them in place.
+   */
+  let submittedQuery = $state('')
+  /** The field itself, so opening the options from elsewhere can put the caret back in it. */
+  let searchField = $state(null)
+
+  function openAdvanced() {
+    advancedOpen = true
+    // Focus follows the disclosure, because the control that opened it may be a screen away
+    // from the field it belongs to - and the first thing a reader does next is type.
+    searchField?.focus()
+  }
+
   async function runSearch(term) {
     const trimmed = term.trim()
     if (!trimmed) {
@@ -167,10 +198,14 @@
     // Cleared immediately rather than after the debounce: a reader who empties the field
     // is asking for their shelves back now, not in a third of a second.
     if (!term.trim()) {
+      submittedQuery = ''
       runSearch('')
       return
     }
-    searchTimer = setTimeout(() => runSearch(term), SEARCH_DEBOUNCE_MILLIS)
+    searchTimer = setTimeout(() => {
+      submittedQuery = term
+      runSearch(term)
+    }, SEARCH_DEBOUNCE_MILLIS)
   }
 
   async function loadLibraries() {
@@ -304,17 +339,39 @@
     id="home-search"
     data-testid="home-search"
     type="search"
+    bind:this={searchField}
     value={query}
     placeholder={$_('search.queryLabel')}
     oninput={onQuery}
   />
-  <!-- The dedicated screen is still one tap away, and is where the facets live. -->
-  <a class="advanced" href="#/search" aria-label={$_('search.link')} title={$_('search.link')}>
+  <!-- A disclosure, not a link. The facets open under this field; nothing navigates. -->
+  <button
+    class="advanced"
+    type="button"
+    data-testid="toggle-advanced"
+    aria-expanded={advancedOpen}
+    aria-controls="home-advanced"
+    aria-label={$_('search.filters.show')}
+    title={$_('search.filters.show')}
+    onclick={() => (advancedOpen ? (advancedOpen = false) : openAdvanced())}
+  >
     <SlidersHorizontal size={18} aria-hidden="true" />
-  </a>
+  </button>
 </div>
 
-{#if searchActive}
+{#if advancedOpen}
+  <!-- Between the field and the shelves, in document order as well as on screen: what it
+       narrows is what the field asked for, and a reader tabbing out of the field reaches the
+       scopes and the facets before anything else. -->
+  <div id="home-advanced" class="advanced-surface" data-testid="home-advanced">
+    <AdvancedSearch query={submittedQuery} open={true} />
+  </div>
+{/if}
+
+{#if advancedOpen}
+  <!-- The quick results and the shelves both stand down while the scoped surface is open:
+       three answers to the same question stacked down one screen is not three times the help. -->
+{:else if searchActive}
   <ErrorNotice error={searchError} onretry={() => runSearch(query)} />
   {#if results}
     {#if results.series.length === 0 && results.items.length === 0}
@@ -360,9 +417,11 @@
   {/if}
 {:else}
 <nav class="library" aria-label={$_('catalog.navigation')}>
-  <a href="#/search">
+  <!-- The one entry here that is not a place: searching happens on this screen, so this opens
+       the surface above rather than replacing the screen with another one. -->
+  <button type="button" data-testid="open-advanced" aria-controls="home-advanced" onclick={openAdvanced}>
     <Search size={18} aria-hidden="true" /><span>{$_('search.link')}</span>
-  </a>
+  </button>
   <a href="#/collections">
     <Layers3 size={18} aria-hidden="true" /><span>{$_('catalog.collection.title')}</span>
   </a>
@@ -488,10 +547,23 @@
     width: var(--touch-target);
     height: var(--touch-target);
     place-items: center;
+    padding: 0;
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     background: var(--surface-inset);
     color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  /* Open is a state of this control, not just of the panel below it: pressed and left alone,
+     an unmarked toggle is indistinguishable from one that did nothing. */
+  .advanced[aria-expanded='true'] {
+    border-color: var(--accent);
+    background: var(--surface-raised);
+    color: var(--accent-text);
+  }
+  .advanced-surface {
+    padding: 0 var(--gutter-right) var(--space-4) var(--gutter-left);
   }
   .visually-hidden {
     position: absolute;
@@ -507,7 +579,11 @@
     gap: var(--space-2);
     padding: 0 var(--gutter-right) var(--space-5) var(--gutter-left);
   }
-  .library a {
+  /* One of the three is a button and two are links, because one of them opens something on this
+     screen and the others go somewhere. They are styled together so that difference stays a
+     matter of what happens, not of what it looks like. */
+  .library a,
+  .library button {
     display: flex;
     min-width: 0;
     min-height: var(--touch-target);
@@ -517,8 +593,11 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface-inset);
+    color: var(--text);
+    font: inherit;
     font-size: var(--font-sm);
     font-weight: 600;
+    cursor: pointer;
   }
   .all {
     margin: 0 0 var(--space-2);
