@@ -334,6 +334,7 @@ export default {
       '{count, plural, one {One shelf could not be loaded} other {# shelves could not be loaded}}. They are not empty \u2014 they are unknown.',
     noItems: 'No items',
     items: '{count} items',
+    itemCount: 'Contents: {count}',
     unread: 'Unread',
     markRead: 'Mark read',
     percentRead: '{percent}% read',
