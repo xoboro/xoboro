@@ -3,6 +3,50 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SeriesScreen from '../src/reader/SeriesScreen.svelte'
 
 /**
+ * A hub the test can publish into.
+ *
+ * The real one only ever delivers what a live `EventSource` gave it, so nothing in a test can
+ * make it speak. Doubling it here is what lets these tests state which events reach the screen —
+ * the property under test is precisely *which* events it reacts to.
+ */
+const listeners = { domain: [], resync: [] }
+vi.mock('../src/lib/eventHub.js', () => ({
+  eventHub: {
+    status: { subscribe: (run) => { run('open'); return () => {} } },
+    on: (names, handler) => {
+      const entry = { names: Array.isArray(names) ? names : [names], handler }
+      listeners.domain.push(entry)
+      return () => {
+        listeners.domain = listeners.domain.filter((each) => each !== entry)
+      }
+    },
+    onResync: (handler) => {
+      listeners.resync.push(handler)
+      return () => {
+        listeners.resync = listeners.resync.filter((each) => each !== handler)
+      }
+    },
+  },
+}))
+
+function emit(name, payload = {}) {
+  for (const { names, handler } of listeners.domain) {
+    if (names.includes(name)) handler({ name, ...payload })
+  }
+}
+
+function emitResync() {
+  for (const handler of listeners.resync) handler({ reason: 'gap' })
+}
+
+/** How many times the screen has asked for the series itself. */
+function detailRequests(fetchImpl) {
+  return fetchImpl.mock.calls.filter(
+    ([url]) => url.includes('/series/s1') && !url.includes('/media-items') && !url.includes('/resume'),
+  ).length
+}
+
+/**
  * The series page as a reader sees it.
  *
  * The page opened with a title bar, a facts panel and a chapter list, and never showed
@@ -91,6 +135,152 @@ function server(overrides = []) {
 
 beforeEach(() => {
   localStorage.clear()
+  listeners.domain = []
+  listeners.resync = []
+})
+
+/**
+ * Which events this screen answers, and which it must ignore.
+ *
+ * It answered all of them. A scan announces every series and every chapter in the library, so one
+ * open series page issued four requests per entity it had never heard of — measured on a
+ * catalogue of 3,339 series, that is thousands of requests for one page nobody touched.
+ */
+describe('series screen refreshes', () => {
+  it('ignores a change to a different series', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emit('series.changed', { ids: ['other'] })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+
+    expect(detailRequests(fetchImpl)).toBe(before)
+  })
+
+  it('reloads when its own series changes', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emit('series.changed', { ids: ['s1'] })
+
+    await waitFor(() => expect(detailRequests(fetchImpl)).toBeGreaterThan(before))
+  })
+
+  it('reloads for a chapter of this series and ignores another series’ chapter', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emit('media-item.changed', { ids: ['m9'], seriesId: 'other' })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(detailRequests(fetchImpl)).toBe(before)
+
+    emit('media-item.changed', { ids: ['m1'], seriesId: 's1' })
+    await waitFor(() => expect(detailRequests(fetchImpl)).toBeGreaterThan(before))
+  })
+
+  /** A scan announces a series and each of its chapters, so the relevant events arrive together. */
+  it('coalesces a burst into one reload', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emit('series.changed', { ids: ['s1'] })
+    emit('media-item.changed', { ids: ['m1'], seriesId: 's1' })
+    emit('media-item.added', { ids: ['m3'], seriesId: 's1' })
+
+    await waitFor(() => expect(detailRequests(fetchImpl)).toBe(before + 1))
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(detailRequests(fetchImpl)).toBe(before + 1)
+  })
+
+  /**
+   * The only signal the server sends that a view may be stale without saying which view. The
+   * other reader screens listened for it; this one did not, so a reader sitting here kept
+   * whatever had loaded — which is how a series showed no authors while the route returned two.
+   */
+  it('reloads when the stream reports a gap', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emitResync()
+
+    await waitFor(() => expect(detailRequests(fetchImpl)).toBeGreaterThan(before))
+  })
+
+  /**
+   * The slower read must not win.
+   *
+   * Two reads are in flight whenever an event lands while the reader is changing the order or
+   * marking something read, and the one that answers last is the one that paints. Held here at the
+   * series request: the first read is made to answer after the second, and what stays on screen has
+   * to be the second read's answer.
+   */
+  it('ignores an answer to a read that a newer one has superseded', async () => {
+    let seriesRequests = 0
+    let releaseFirst = () => {}
+    const held = new Promise((resolve) => {
+      releaseFirst = resolve
+    })
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) return reply(envelope(ITEMS))
+      if (url.includes('/series/s1/resume')) return reply(null, 404)
+      if (url.includes('/series/s1')) {
+        seriesRequests += 1
+        if (seriesRequests === 2) {
+          // The first read is released only once the second has been asked for, so the order the
+          // answers arrive in is the order under test rather than a matter of timing.
+          await held
+          return reply({ ...SERIES, title: 'Stale Answer' })
+        }
+        if (seriesRequests === 3) return reply({ ...SERIES, title: 'Fresh Answer' })
+        return reply(SERIES)
+      }
+      return reply(envelope())
+    })
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+
+    emit('series.changed', { ids: ['s1'] })
+    await waitFor(() => expect(seriesRequests).toBe(2))
+    emit('series.changed', { ids: ['s1'] })
+    await waitFor(() => expect(seriesRequests).toBe(3))
+    releaseFirst()
+
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Fresh Answer'))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(screen.getByRole('heading', { level: 1 }).textContent).not.toContain('Stale Answer')
+  })
+
+  /**
+   * A payload naming nothing still reloads. Guessing "not mine" from a payload that says nothing
+   * would trade needless reloads for a screen that silently stops updating, and only one of those
+   * two gets reported.
+   */
+  it('reloads for an event whose payload names nothing', async () => {
+    const fetchImpl = server()
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    const before = detailRequests(fetchImpl)
+
+    emit('series.changed')
+
+    await waitFor(() => expect(detailRequests(fetchImpl)).toBeGreaterThan(before))
+  })
 })
 
 describe('SeriesScreen', () => {
