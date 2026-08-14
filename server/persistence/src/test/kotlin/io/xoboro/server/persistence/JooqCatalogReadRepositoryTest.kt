@@ -1362,17 +1362,13 @@ class JooqCatalogReadRepositoryTest {
   }
 
   /**
-   * The trigram index holds three-character windows, so two characters have no trigram and interior
-   * matching cannot serve them at all. What has to survive that is the prefix search those terms
-   * already had - the union must not become a replacement - and the second assertion states the
-   * remaining limit out loud so it reads as the tokeniser's floor rather than as a bug.
-   *
-   * This does not pin the length filter in `toSubstringQuery`: lowering that floor leaves every test
-   * here passing, because FTS5 answers a short trigram term with no rows instead of an error. The
-   * filter skips a pointless index probe; only this test's first assertion is load-bearing.
+   * A two-character term has no trigram, so `MATCH` cannot answer it however it is phrased, and the
+   * prefix index only matches a token's opening. Both assertions are needed: the first is what the
+   * short term already had and must not lose, the second is what it never had - the interior - and
+   * is reached by testing the indexed titles rather than by looking a trigram up.
    */
   @Test
-  fun `keeps prefix search for terms too short to have a trigram`() {
+  fun `finds a two-character fragment inside and at the opening of a title`() {
     withCatalog("substring-short") { database ->
       database.retitleSeriesA(RUN_TOGETHER_TITLE)
       val catalog = JooqCatalogReadRepository(database)
@@ -1389,14 +1385,109 @@ class JooqCatalogReadRepositoryTest {
         "two characters still match the title's opening, as they did before this index existed",
       )
       assertEquals(
-        0,
+        listOf("series-a"),
         catalog
           .findSeries(
             SeriesCatalogQuery(fullTextSearch = "ng"),
             CatalogAccess(),
             CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+        "and two characters now match the interior, which no trigram can be looked up for",
+      )
+    }
+  }
+
+  /**
+   * The report this was fixed from, in the script it was reported in.
+   *
+   * `블리치` is one token to `unicode61` and has exactly one trigram, so `리치` - its last two
+   * characters and the way a Korean reader shortens it - could be answered by neither index and
+   * returned nothing at all. Two-character fragments are ordinary in Korean rather than an edge
+   * case, which is why this is kept as its own test in Hangul instead of resting on the ASCII one
+   * above: the mechanism is the same, and the evidence that it is the right mechanism is not.
+   */
+  @Test
+  fun `finds a Korean title by the two characters it is shortened to`() {
+    withCatalog("substring-hangul") { database ->
+      database.retitleSeriesA("블리치")
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "리치"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+      )
+    }
+  }
+
+  /**
+   * One character is not offered, and that is a choice rather than a limit of the index: a single
+   * character is inside a large share of a real catalogue's titles, so answering it by scan would
+   * return most of the library. The opening still matches, through the prefix index.
+   */
+  @Test
+  fun `does not scan the titles for a single character`() {
+    withCatalog("substring-one") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        0,
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "g"),
+            CatalogAccess(),
+            CatalogPageRequest(),
           ).totalElements,
-        "and two characters cannot match the title's interior: the floor is the tokeniser's",
+      )
+      assertEquals(
+        1,
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "v"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+      )
+    }
+  }
+
+  /**
+   * Terms of different lengths take different routes to the interior, and a query mixing them has to
+   * be narrowed by all of them rather than by whichever route ran. Both are inside the title and
+   * never at a token's start, so only the interior branch can answer either.
+   */
+  @Test
+  fun `requires every term when a query mixes a long fragment with a short one`() {
+    withCatalog("substring-mixed") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "synthetic ng"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+      )
+      assertEquals(
+        0,
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "synthetic zq"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+        "the short term is a condition, not a hint: a title without it must not be returned",
       )
     }
   }
