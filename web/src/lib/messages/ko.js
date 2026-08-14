@@ -335,6 +335,7 @@ export default {
     shelvesFailed: '선반 {count}개를 읽지 못했습니다. 비어 있는 것이 아니라 알 수 없는 상태입니다.',
     noItems: '항목이 없습니다',
     items: '{count}편',
+    itemCount: '콘텐츠 {count}개',
     unread: '안 읽음',
     markRead: '읽음으로 표시',
     percentRead: '{percent}% 읽음',

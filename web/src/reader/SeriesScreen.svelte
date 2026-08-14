@@ -216,9 +216,18 @@
   </div>
 {/if}
 
-{#if items && items.items.length > 1}
+{#if items && items.items.length > 0}
+  <!-- The count belongs on the list rather than among the facts above it: "167화 중 3화" answers
+       what the source says exists, and this answers what is here to open. A reader scrolling to
+       the chapters has left the facts behind and is looking at a list whose length they can only
+       otherwise learn by reaching the end of it. -->
   <div class="ordering">
-    <SeriesOrderToggle {order} onchange={choose} />
+    <h2 class="count" data-testid="item-count">
+      {$_('reader.itemCount', { values: { count: items.totalItems ?? items.items.length } })}
+    </h2>
+    {#if items.items.length > 1}
+      <SeriesOrderToggle {order} onchange={choose} />
+    {/if}
   </div>
 {/if}
 
@@ -335,8 +344,19 @@
      costs a reader the time it takes to work that out. */
   .ordering {
     display: flex;
-    justify-content: flex-end;
+    flex-wrap: wrap;
+    align-items: center;
+    /* The count anchors left and the order control right, and `space-between` keeps that true when
+       one of them is absent - a single-chapter series has no order to choose, and the count must
+       not slide across to where the control was. */
+    justify-content: space-between;
+    gap: var(--space-2);
     padding: 0 var(--gutter-right) var(--space-2) var(--gutter-left);
+  }
+  .count {
+    margin: 0;
+    font-size: var(--font-md);
+    font-weight: 700;
   }
   .items {
     margin: 0;
