@@ -428,7 +428,7 @@ export default {
       active: '지금 좁힌 것',
       remove: '{value} 좁히기 풀기',
       appliedCount: '{count}개 적용됨',
-      show: '좁히기',
+      show: '상세 검색',
     },
     results: {
       summary: '{total, plural, =0 {찾은 것이 없습니다} other {#개를 찾았습니다}}',
