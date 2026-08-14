@@ -448,10 +448,10 @@ class JooqCatalogReadRepository(
       if (match == null) {
         parts += "1 = 0"
       } else {
-        val substring = it.toSubstringQuery()
-        parts += fullTextClause("b.id", "BOOK", substring != null)
+        val interior = it.toInteriorSearch()
+        parts += fullTextClause("b.id", "BOOK", interior)
         bindings += match
-        substring?.let(bindings::add)
+        bindings.addAll(interior.bindings())
       }
     }
     query.condition?.let {
@@ -488,10 +488,10 @@ class JooqCatalogReadRepository(
       if (match == null) {
         parts += "1 = 0"
       } else {
-        val substring = it.toSubstringQuery()
-        parts += fullTextClause("s.id", "SERIES", substring != null)
+        val interior = it.toInteriorSearch()
+        parts += fullTextClause("s.id", "SERIES", interior)
         bindings += match
-        substring?.let(bindings::add)
+        bindings.addAll(interior.bindings())
       }
     }
     query.regexSearch?.let {
@@ -891,25 +891,60 @@ class JooqCatalogReadRepository(
       ?.joinToString(" AND ")
 
   /**
-   * The same terms as interior matches, for those long enough to have one.
+   * How each term reaches the interior of a title, which is not the same route for every length.
    *
-   * FTS5's trigram index holds three-character windows, so a shorter term has no trigram to look up.
-   * Sending one anyway is not wrong - the index returns nothing rather than erroring, which was
-   * verified by lowering this floor and watching every test still pass - so dropping short terms here
-   * buys a skipped index probe, not a different answer. When every term is too short the caller gets
-   * null and the clause is left off entirely, and the query is the prefix search it was before this
-   * index existed. That case is the tokeniser's floor rather than a choice: two characters have no
-   * trigram, so interior matching cannot serve them however the query is phrased.
+   * A term of three characters or more has a trigram, and the index answers it by lookup. A term of
+   * two has none - FTS5 produces no tokens at all below the tokeniser's window, so `MATCH` returns
+   * nothing whether or not the prefix operator is used - and the only thing that can answer it is
+   * reading the indexed titles and testing each. Both routes are needed and neither substitutes for
+   * the other, so they are kept apart here and composed in [interiorClause].
+   *
+   * @property match the `MATCH` expression for the terms long enough to be looked up, or null.
+   * @property contains the shorter terms, each to be tested against every indexed title.
    */
-  private fun String.toSubstringQuery(): String? =
-    SEARCH_TOKEN
-      .findAll(this)
-      .map(MatchResult::value)
-      .filter { token -> token.codePointCount(0, token.length) >= TRIGRAM_MINIMUM_TERM }
-      .map { token -> "\"${token.replace("\"", "\"\"")}\"" }
-      .toList()
-      .takeIf(List<String>::isNotEmpty)
-      ?.joinToString(" AND ")
+  private data class InteriorSearch(
+    val match: String?,
+    val contains: List<String>,
+  ) {
+    val isEmpty: Boolean get() = match == null && contains.isEmpty()
+
+    /**
+     * The bindings in the order [interiorClause] writes its placeholders.
+     *
+     * `%` and `_` are LIKE's wildcards and are **not** escaped, because [SEARCH_TOKEN] admits only
+     * letters and digits so a term cannot contain either. Escaping them anyway would cost the match:
+     * an `ESCAPE` clause stops FTS5 from handling the LIKE itself, which the query plan shows as the
+     * `L` marker disappearing, and with it the index's own path for the longer patterns. Widening
+     * that regex means adding the escape here.
+     */
+    fun bindings(): List<String> = listOfNotNull(match) + contains.map { "%$it%" }
+  }
+
+  /**
+   * The terms of a query, sorted by which interior route can answer each.
+   *
+   * Terms shorter than [CONTAINS_MINIMUM_TERM] appear in neither: one character is inside most of the
+   * catalogue, and the prefix index already matches a one-character opening. When nothing survives,
+   * the caller gets an empty value and the interior branch is left off entirely, leaving the query as
+   * the prefix search it was before either index existed.
+   */
+  private fun String.toInteriorSearch(): InteriorSearch {
+    val terms =
+      SEARCH_TOKEN
+        .findAll(this)
+        .map(MatchResult::value)
+        .groupBy { term -> term.codePointCount(0, term.length) >= TRIGRAM_MINIMUM_TERM }
+    return InteriorSearch(
+      match =
+        terms[true]
+          ?.map { term -> "\"${term.replace("\"", "\"\"")}\"" }
+          ?.joinToString(" AND "),
+      contains =
+        terms[false]
+          ?.filter { term -> term.codePointCount(0, term.length) >= CONTAINS_MINIMUM_TERM }
+          .orEmpty(),
+    )
+  }
 
   /**
    * Word search, widened by interior match when the terms allow one.
@@ -918,12 +953,12 @@ class JooqCatalogReadRepository(
    * whole words from their start and reaches `summary`, `contributors`, `labels` and `identifiers`;
    * `catalog_title_substring` matches any interior fragment but only of titles. Intersecting them would
    * lose a word found in a summary, and replacing the first with the second would lose every query
-   * shorter than three characters, so the union is the only composition that takes nothing away.
+   * shorter than two characters, so the union is the only composition that takes nothing away.
    */
   private fun fullTextClause(
     idColumn: String,
     entityType: String,
-    withSubstring: Boolean,
+    interior: InteriorSearch,
   ): String {
     val words =
       """
@@ -933,15 +968,41 @@ class JooqCatalogReadRepository(
         WHERE entity_type = '$entityType' AND catalog_search_fts MATCH ?
       )
       """.trimIndent()
-    if (!withSubstring) return words
+    if (interior.isEmpty) return words
     return """
       (
         $words
-        OR $idColumn IN (
-          SELECT entity_id
-          FROM catalog_title_substring
-          WHERE entity_type = '$entityType' AND catalog_title_substring MATCH ?
-        )
+        OR ${interiorClause(idColumn, entityType, interior)}
+      )
+      """.trimIndent()
+  }
+
+  /**
+   * The interior branch: one pass over the title index, narrowed by trigram first where it can be.
+   *
+   * The terms are ANDed inside a single subquery rather than split into one subquery each, and that
+   * is what keeps the short ones affordable. `MATCH` is a lookup and reduces the rows before any
+   * title is read, so a query pairing a long term with a short one - the ordinary case, since a
+   * reader who types two words rarely types two of two characters - never scans at all. Only a query
+   * whose every term is two characters reaches the whole index, and that is measured rather than
+   * assumed: **15-36 ms** across the real catalogue's 123,748 indexed titles (52 MiB), against
+   * sub-millisecond for the trigram lookup it falls back from. Fast enough to answer a reader, and
+   * the alternative - a second index of two-character windows - costs another ~50 MiB, its own
+   * triggers and a migration to buy back 30 ms.
+   */
+  private fun interiorClause(
+    idColumn: String,
+    entityType: String,
+    interior: InteriorSearch,
+  ): String {
+    val conditions = mutableListOf("entity_type = '$entityType'")
+    if (interior.match != null) conditions += "catalog_title_substring MATCH ?"
+    interior.contains.forEach { _ -> conditions += "title LIKE ?" }
+    return """
+      $idColumn IN (
+        SELECT entity_id
+        FROM catalog_title_substring
+        WHERE ${conditions.joinToString(" AND ")}
       )
       """.trimIndent()
   }
@@ -1062,5 +1123,21 @@ class JooqCatalogReadRepository(
 
     /** FTS5's trigram tokeniser indexes three-character windows and so cannot match anything shorter. */
     private const val TRIGRAM_MINIMUM_TERM = 3
+
+    /**
+     * The shortest term answered by scanning the title index instead of looking a trigram up.
+     *
+     * Two, because two is the length the trigram index cannot serve however the query is phrased -
+     * measured, not assumed: against a trigram index over the whole catalogue, `MATCH '"리치"'`,
+     * `MATCH '"리치"*'` and the one-character forms each return nothing, while `title LIKE '%리치%'`
+     * returns every title holding it. Two-character fragments are ordinary in Korean, where `블리치`
+     * is one token to `unicode61` and has exactly one trigram, so without this a reader searching
+     * `리치` gets nothing at all.
+     *
+     * One is excluded rather than forgotten. A single character is inside a large share of the
+     * catalogue's titles, so the scan would answer with most of the library - a result nobody can
+     * read - and the prefix index already matches a one-character opening.
+     */
+    private const val CONTAINS_MINIMUM_TERM = 2
   }
 }
