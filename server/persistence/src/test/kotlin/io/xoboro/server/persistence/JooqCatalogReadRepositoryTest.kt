@@ -1427,6 +1427,55 @@ class JooqCatalogReadRepositoryTest {
   }
 
   /**
+   * A short term is a title's business and nothing else's.
+   *
+   * Every term carries the prefix operator and the indexed document reaches the summary, so `원`
+   * matched the word `원래` in the middle of a plot summary and put a series on screen with nothing
+   * a reader could see to explain it. Measured on the real catalogue: 175 series matched across
+   * the whole document, 12 against titles alone.
+   *
+   * A long term keeps the whole document - that is how a series is found by its author - which the
+   * second assertion holds in place.
+   */
+  @Test
+  fun `keeps a short term out of the summary while a long one still reaches it`() {
+    withCatalog("short-term-title-only") { database ->
+      database.retitleSeriesA(RUN_TOGETHER_TITLE)
+      val metadata = JooqSeriesMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findBySeriesIdOrNull(SeriesId("series-a"))).copy(
+          title = RUN_TOGETHER_TITLE,
+          summary = "A navigational archive",
+          updatedAtMillis = 3,
+        ),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertEquals(
+        0,
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "n"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).totalElements,
+        "one character must not match `navigational` in a summary the reader cannot see",
+      )
+      assertEquals(
+        listOf("series-a"),
+        catalog
+          .findSeries(
+            SeriesCatalogQuery(fullTextSearch = "navigational"),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          ).content
+          .map { it.series.id.value },
+        "and a term long enough to mean something still reaches the summary",
+      )
+    }
+  }
+
+  /**
    * One character is not offered, and that is a choice rather than a limit of the index: a single
    * character is inside a large share of a real catalogue's titles, so answering it by scan would
    * return most of the library. The opening still matches, through the prefix index.
