@@ -55,7 +55,7 @@ function server({ feedStatus = 200 } = {}) {
 function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {}) {
   const totalPages = Math.ceil(totalItems / size)
   return vi.fn(async (url) => {
-    if (url.includes('/libraries')) return reply(envelope(libraries))
+    if (url.includes('/libraries')) return reply(libraries)
     if (url.includes('/feeds/')) return reply(envelope())
     if (url.includes('/series?')) {
       const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
@@ -164,7 +164,7 @@ describe('Reader home', () => {
 /** Answers `/libraries` with the given libraries and everything else with an empty page. */
 function serverWithLibraries(libraries) {
   return vi.fn(async (url) => {
-    if (url.includes('/libraries')) return reply(envelope(libraries))
+    if (url.includes('/libraries')) return reply(libraries)
     return reply(envelope())
   })
 }
@@ -254,7 +254,7 @@ describe('home search', () => {
   function searchServer({ series = [], items = [] } = {}) {
     return vi.fn(async (url) => {
       if (url.includes('/feeds/')) return reply(envelope())
-      if (url.includes('/libraries')) return reply(envelope())
+      if (url.includes('/libraries')) return reply([])
       // A query is only ever sent to the two listings, so the presence of the parameter
       // is what distinguishes a search from the grid's own request.
       if (url.includes('query=')) {
@@ -393,7 +393,8 @@ describe('home search', () => {
   it('does not clear a grid failure by searching successfully', async () => {
     globalThis.fetch = vi.fn(async (url) => {
       if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found' }]))
-      if (url.includes('/feeds/') || url.includes('/libraries')) return reply(envelope())
+      if (url.includes('/libraries')) return reply([])
+      if (url.includes('/feeds/')) return reply(envelope())
       return reply({ code: 'internal_error', message: 'no' }, 500)
     })
     render(Home, {})
@@ -486,4 +487,3 @@ describe('home search', () => {
     )
   })
 })
-

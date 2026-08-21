@@ -224,7 +224,7 @@
     // Settled with the rest: the switcher not loading must not blank the shelf, it
     // just leaves the reader unable to narrow it.
     try {
-      libraries = (await listLibraries()).items ?? []
+      libraries = await listLibraries()
     } catch {
       libraries = []
     }
