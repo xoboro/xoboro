@@ -7,6 +7,7 @@ import io.xoboro.core.application.BookMetadataProvider
 import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.LocalArtworkRefreshLifecycle
 import io.xoboro.core.application.MetadataRefreshLifecycle
+import io.xoboro.core.application.TaskPriority
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
@@ -158,6 +159,7 @@ class OneShotSeriesMetadataSelfHealTest {
             ),
           accesses = emptyList(),
         )
+      val generatedCovers = mutableListOf<BookId>()
       val bookHandler =
         RefreshBookMetadataTaskHandler(
           lifecycle,
@@ -166,6 +168,7 @@ class OneShotSeriesMetadataSelfHealTest {
               books = books,
               localArtworkRefresh = localArtworkRefresh,
               refreshMetadataTaskEmitter = emitter,
+              generateCover = { generatedCovers += it },
             ),
         )
 
@@ -174,11 +177,13 @@ class OneShotSeriesMetadataSelfHealTest {
           id = RefreshMetadataTaskEmitter.bookTaskId(BOOK_ID),
           type = RefreshBookMetadataTaskHandler.TASK_TYPE,
           payloadJson = """{"bookId":"${BOOK_ID.value}"}""",
+          priority = TaskPriority.LOW,
           availableAtMillis = 0,
         ),
       )
 
       assertEquals("Synthetic Standalone", bookMetadata.findByBookIdOrNull(BOOK_ID)?.title)
+      assertEquals(listOf(BOOK_ID), generatedCovers)
 
       val claimedSeriesTask =
         requireNotNull(
@@ -190,6 +195,7 @@ class OneShotSeriesMetadataSelfHealTest {
           ),
         ) { "Expected the book refresh to have re-enqueued a series metadata refresh" }
       assertEquals(RefreshMetadataTaskEmitter.seriesTaskId(SERIES_ID), claimedSeriesTask.task.id)
+      assertEquals(TaskPriority.LOW, claimedSeriesTask.task.priority)
 
       RefreshSeriesMetadataTaskHandler(lifecycle).handle(claimedSeriesTask.task)
 

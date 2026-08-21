@@ -22,8 +22,8 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 /**
- * Produces a media item's cover during analysis, and keeps its series' cover pointed at the first
- * item in reading order.
+ * Produces a media item's cover after metadata refresh, and keeps its series' cover pointed at the
+ * first item in reading order.
  *
  * Builds entirely on [ArtworkLifecycle.replaceGenerated] rather than a parallel storage path: that
  * is the API that already keeps a `GENERATED` artwork from accumulating across re-analysis and
@@ -33,9 +33,9 @@ import java.util.logging.Logger
  * A missing cover is always a normal outcome, never a failure: a corrupt page, an EPUB with no
  * declared cover, or a series whose first item has not been analyzed yet all leave the owner
  * without a `GENERATED` artwork rather than throwing. [generateForBook] and [generateForSeries]
- * catch everything for that reason - they run from `AnalyzeBookTaskHandler.afterAnalyze`, and a
- * thrown exception there would fail the analysis task itself even though analysis already
- * succeeded and was already persisted.
+ * catch everything for that reason. Cover generation runs in the durable metadata-refresh task,
+ * after analysis has succeeded, so transient store contention can retry enrichment without making
+ * the media item unreadable again.
  */
 class BookCoverGenerationLifecycle(
   private val books: BookRepository,
@@ -79,9 +79,8 @@ class BookCoverGenerationLifecycle(
    * single `WARNING` as the only record - observed during a scan of 145,105 archives, whose write
    * lock made `DELETE FROM artwork_thumbnail` fail for a run of items.
    *
-   * Propagating fails the analysis task that called this, which the worker then retries. That costs
-   * a re-analysis, which is idempotent and does not undo the analysis already persisted - a cheaper
-   * price than a cover that never appears and never explains itself.
+   * Propagating fails the metadata-refresh task that called this, which the worker then retries.
+   * Analysis remains complete and the media item stays readable while enrichment is retried.
    */
   private fun rethrowIfBusy(error: Throwable) {
     if (isStoreBusy(error)) throw error
