@@ -313,6 +313,8 @@ export default {
     position: '{total}쪽 중 {page}쪽',
     previousItem: '이전 화',
     nextItem: '다음 화',
+    analysisWaiting: '읽을 준비를 하고 있습니다',
+    analysisWaitingHint: '이 항목을 대기열 맨 앞으로 옮겼습니다. 준비되는 즉시 페이지를 표시합니다.',
     mode: '보기 방식',
     direction: '방향',
     fit: '맞춤',
@@ -446,7 +448,6 @@ export default {
     navigation: '내 서재',
     library: {
       switcher: '라이브러리',
-      all: '전체',
     },
     metadata: {
       seriesTitle: '시리즈 정보 수정',

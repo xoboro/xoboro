@@ -30,7 +30,7 @@
    * discovery feed rejects `sort` with `400 invalid_query` because its ordering is part of its
    * definition. Choosing an order is what the general listing is for, which is what this uses.
    */
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount, untrack } from 'svelte'
   import { ChevronDown } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import { listLibraries } from '../lib/api/libraries.js'
@@ -42,6 +42,7 @@
     searchCatalog,
   } from '../lib/api/catalogSearch.js'
   import { eventHub } from '../lib/eventHub.js'
+  import { readReaderRouteMemory, writeReaderRouteMemory } from '../lib/readerRouteMemory.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import ActiveFilters from './ActiveFilters.svelte'
   import MediaItemFilters from './MediaItemFilters.svelte'
@@ -60,20 +61,27 @@
      * somebody expands a panel would make every search a two-step.
      */
     open = $bindable(false),
+    /** Distinguishes the home surface from the dedicated search route. */
+    memoryKey = null,
+    userId = null,
   } = $props()
 
-  let scope = $state('series')
-  let pageIndex = $state(0)
-  let sort = $state({ ...SCOPES.series.defaultSort })
-  let filters = $state(freshFilters('series'))
+  const remembered = untrack(() =>
+    memoryKey ? readReaderRouteMemory(memoryKey, userId) : null,
+  )
 
-  let results = $state(null)
+  let scope = $state(remembered?.scope ?? 'series')
+  let pageIndex = $state(remembered?.pageIndex ?? 0)
+  let sort = $state(remembered?.sort ?? { ...SCOPES.series.defaultSort })
+  let filters = $state(remembered?.filters ?? freshFilters('series'))
+
+  let results = $state(remembered?.results ?? null)
   let error = $state(null)
   let loading = $state(false)
-  let libraries = $state([])
-  let choices = $state({})
+  let libraries = $state(remembered?.libraries ?? [])
+  let choices = $state(remembered?.choices ?? {})
   /** A filter group is missing because a choice list could not be read, not empty. */
-  let filtersIncomplete = $state(false)
+  let filtersIncomplete = $state(remembered?.filtersIncomplete ?? false)
 
   const criteria = $derived({
     ...filters,
@@ -217,6 +225,20 @@
       offResync()
       controller?.abort()
     }
+  })
+
+  onDestroy(() => {
+    if (!memoryKey) return
+    writeReaderRouteMemory(memoryKey, userId, {
+      scope,
+      pageIndex,
+      sort,
+      filters,
+      results,
+      libraries,
+      choices,
+      filtersIncomplete,
+    })
   })
 
   /**

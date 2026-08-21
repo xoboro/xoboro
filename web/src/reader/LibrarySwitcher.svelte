@@ -1,6 +1,6 @@
 <script>
   /**
-   * Narrows the shelf to one library, or opens it to all of them.
+   * Narrows the shelf to exactly one library.
    *
    * Distinct from LibraryFilter, which belongs to search: that one is a multi-select
    * over which libraries a query covers, this one is a single choice about what the
@@ -21,24 +21,15 @@
   let {
     /** Libraries visible to this reader, as `/libraries` returns them. */
     libraries,
-    /** The chosen library id, or null for all of them. */
+    /** The chosen library id. */
     selected,
-    /** Called with the chosen library id, or null. */
+    /** Called with the chosen library id. */
     onchange,
   } = $props()
 </script>
 
 {#if libraries.length > 1}
   <nav class="switcher" aria-label={$_('catalog.library.switcher')}>
-    <button
-      type="button"
-      class:on={selected === null}
-      data-testid="library-all"
-      aria-current={selected === null ? 'true' : undefined}
-      onclick={() => onchange(null)}
-    >
-      {$_('catalog.library.all')}
-    </button>
     {#each libraries as library (library.id)}
       <button
         type="button"
