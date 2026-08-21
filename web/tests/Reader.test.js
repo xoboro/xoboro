@@ -71,6 +71,55 @@ beforeEach(() => {
 })
 
 describe('Reader', () => {
+  it('shows the known item while its archive is waiting for analysis', async () => {
+    globalThis.fetch = routes([
+      [
+        '/media-items/m1/pages',
+        reply({ code: 'media_not_ready', message: 'Media item is not ready' }, 409),
+      ],
+      ['/media-items/m1', reply({ ...ITEM, media: { status: 'UNKNOWN', pageCount: 0 } })],
+    ])
+    render(Reader, { params: { id: 'm1' } })
+
+    const waiting = await screen.findByTestId('analysis-waiting')
+    expect(waiting).toHaveTextContent('Synthetic Chapter')
+    expect(waiting.querySelector('a')).toHaveAttribute('href', '#/series/s1')
+  })
+
+  it('renders pages when background analysis finishes without a reload', async () => {
+    let detailReads = 0
+    let manifestReads = 0
+    globalThis.fetch = routes([
+      [
+        '/media-items/m1/pages',
+        () => {
+          manifestReads += 1
+          return manifestReads === 1
+            ? reply({ code: 'media_not_ready', message: 'Media item is not ready' }, 409)
+            : reply(PAGES)
+        },
+      ],
+      ['/media-items/m1/previous', reply({ code: 'media_item_not_found' }, 404)],
+      ['/media-items/m1/next', reply({ code: 'media_item_not_found' }, 404)],
+      [
+        '/media-items/m1',
+        () => {
+          detailReads += 1
+          return reply(
+            detailReads === 1 ? { ...ITEM, media: { status: 'UNKNOWN', pageCount: 0 } } : ITEM,
+          )
+        },
+      ],
+    ])
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    await screen.findByTestId('analysis-waiting')
+    await waitFor(() => expect(container.querySelector('.slot img')).toBeTruthy(), {
+      timeout: 2_500,
+    })
+    expect(screen.queryByTestId('analysis-waiting')).toBeNull()
+  })
+
   it('announces the position once, as live text', async () => {
     // The base put the page number in every image's alt attribute — a position rather
     // than a description, and noise repeated on every page for a screen reader.

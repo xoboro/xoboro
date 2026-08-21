@@ -18,7 +18,7 @@
    * The image is decorative: the title sits beside it as text, so announcing the same
    * words again from an `alt` would just repeat them.
    */
-  import { onDestroy } from 'svelte'
+  import { onDestroy, tick } from 'svelte'
 
   let {
     src,
@@ -41,6 +41,7 @@
   /** Bumped per retry and appended to the URL, because the browser caches the 404. */
   let attempt = $state(0)
   let retryTimer = null
+  let image = $state(null)
 
   const url = $derived(
     attempt === 0 ? src : `${src}${src.includes('?') ? '&' : '?'}retry=${attempt}`,
@@ -58,6 +59,20 @@
     ready = false
     failed = false
     attempt = 0
+  })
+
+  /**
+   * A cached image can finish before this component observes its `load` event.
+   *
+   * That happens most often after returning to a catalogue: the browser reuses the valid
+   * artwork while the router creates a fresh component. `complete` alone also describes a
+   * failed image, so natural width is the part that proves decoding succeeded.
+   */
+  $effect(() => {
+    const expectedUrl = url
+    tick().then(() => {
+      if (url === expectedUrl && image?.complete && image.naturalWidth > 0) ready = true
+    })
   })
 
   onDestroy(() => clearTimeout(retryTimer))
@@ -81,6 +96,7 @@
   {/if}
   {#if !failed}
     <img
+      bind:this={image}
       src={url}
       alt=""
       class:ready

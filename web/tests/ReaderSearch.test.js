@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Search from '../src/reader/Search.svelte'
 import { SCOPES } from '../src/lib/api/catalogSearch.js'
+import { clearReaderRouteMemory } from '../src/lib/readerRouteMemory.js'
+
+beforeEach(() => clearReaderRouteMemory())
 
 /**
  * The reader's search screen.
@@ -116,6 +119,49 @@ const parameters = (url) => new URL(url, 'http://localhost').searchParams
 const lastListing = (urls, collection) => parameters(listings(urls, collection).at(-1))
 
 describe('reader search', () => {
+  it('restores its vertical position after returning from a result', async () => {
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    try {
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 480 })
+      globalThis.fetch = server().fetch
+      const first = render(Search)
+      first.unmount()
+
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+      globalThis.fetch = vi.fn(() => new Promise(() => {}))
+      render(Search)
+
+      await waitFor(() =>
+        expect(scrollTo).toHaveBeenCalledWith({ top: 480, behavior: 'instant' }),
+      )
+    } finally {
+      scrollTo.mockRestore()
+      if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
+      else delete window.scrollY
+    }
+  })
+
+  it('restores its query and filters after returning from a result', async () => {
+    globalThis.fetch = server().fetch
+    const first = render(Search)
+
+    await fireEvent.input(screen.getByTestId('search-query'), {
+      target: { value: 'remembered words' },
+    })
+    await fireEvent.submit(screen.getByTestId('search-submit').closest('form'))
+    await fireEvent.change(await screen.findByTestId('filter-one-shot'), {
+      target: { value: 'exclude' },
+    })
+    first.unmount()
+
+    globalThis.fetch = vi.fn(() => new Promise(() => {}))
+    render(Search)
+
+    expect(screen.getByTestId('search-query')).toHaveValue('remembered words')
+    expect(screen.getByTestId('filter-one-shot')).toHaveValue('exclude')
+  })
+
   it('labels the query input, so it is reachable without seeing the placeholder', async () => {
     globalThis.fetch = server().fetch
     render(Search)

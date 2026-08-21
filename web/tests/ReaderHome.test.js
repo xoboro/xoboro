@@ -1,6 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Home from '../src/reader/Home.svelte'
+import { clearReaderRouteMemory } from '../src/lib/readerRouteMemory.js'
+
+beforeEach(() => {
+  localStorage.clear()
+  clearReaderRouteMemory()
+})
 
 /**
  * The reader's home page, and what it says when a shelf cannot be read.
@@ -34,9 +40,12 @@ function envelope(items = []) {
   }
 }
 
+const DEFAULT_LIBRARY = { id: 'lib-default', name: '기본 서재' }
+
 /** Answers feeds with `status` and everything else with an empty page. */
 function server({ feedStatus = 200 } = {}) {
   return vi.fn(async (url) => {
+    if (url.includes('/libraries')) return reply([DEFAULT_LIBRARY])
     if (url.includes('/feeds/')) {
       return feedStatus === 200
         ? reply(envelope())
@@ -52,10 +61,10 @@ function server({ feedStatus = 200 } = {}) {
  * `totalItems` and `totalPages` describe the whole set while `items` carries only this
  * page - the distinction the grid used to discard.
  */
-function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {}) {
+function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [DEFAULT_LIBRARY] } = {}) {
   const totalPages = Math.ceil(totalItems / size)
   return vi.fn(async (url) => {
-    if (url.includes('/libraries')) return reply(envelope(libraries))
+    if (url.includes('/libraries')) return reply(libraries)
     if (url.includes('/feeds/')) return reply(envelope())
     if (url.includes('/series?')) {
       const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
@@ -80,6 +89,55 @@ function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {
 }
 
 describe('Reader home', () => {
+  it('loads the main series grid before optional shelves', async () => {
+    let resolveSeries
+    const calls = []
+    globalThis.fetch = vi.fn((url) => {
+      calls.push(url)
+      if (url.includes('/libraries')) return Promise.resolve(reply([DEFAULT_LIBRARY]))
+      if (url.includes('/series?')) {
+        return new Promise((resolve) => {
+          resolveSeries = () =>
+            resolve(reply(envelope([{ id: 'series-first', title: 'Primary catalogue' }])))
+        })
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+
+    render(Home)
+
+    await waitFor(() => expect(resolveSeries).toBeTypeOf('function'))
+    expect(calls.filter((url) => url.includes('/feeds/'))).toHaveLength(0)
+
+    resolveSeries()
+    await screen.findByText('Primary catalogue')
+    await waitFor(() => expect(calls.some((url) => url.includes('/feeds/'))).toBe(true))
+  })
+
+  it('restores the vertical position after returning from a series', async () => {
+    const originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    try {
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 720 })
+      globalThis.fetch = pagedSeriesServer({ totalItems: 1 })
+      const first = render(Home)
+      await screen.findByText('Synthetic series 0')
+      first.unmount()
+
+      Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+      globalThis.fetch = vi.fn(() => new Promise(() => {}))
+      render(Home)
+
+      await waitFor(() =>
+        expect(scrollTo).toHaveBeenCalledWith({ top: 720, behavior: 'instant' }),
+      )
+    } finally {
+      scrollTo.mockRestore()
+      if (originalScrollY) Object.defineProperty(window, 'scrollY', originalScrollY)
+      else delete window.scrollY
+    }
+  })
+
   it('reaches a catalog larger than one page', async () => {
     // The grid asked for one page of 100 and rendered it as "all series", so a library of
     // 3,339 showed its first 100 and offered no route to the other 3,239. The listing it
@@ -161,28 +219,49 @@ describe('Reader home', () => {
   })
 })
 
-/** Answers `/libraries` with the given libraries and everything else with an empty page. */
+/** Answers `/libraries` with its real bare-array shape and everything else with an empty page. */
 function serverWithLibraries(libraries) {
   return vi.fn(async (url) => {
-    if (url.includes('/libraries')) return reply(envelope(libraries))
+    if (url.includes('/libraries')) return reply(libraries)
     return reply(envelope())
   })
 }
 
 const TWO_LIBRARIES = [
-  { id: 'lib-comics', name: 'comics' },
-  { id: 'lib-webtoon', name: 'webtoon' },
+  { id: 'lib-comics', name: '내 만화책' },
+  { id: 'lib-webtoon', name: '세로 웹툰' },
 ]
 
 describe('library switcher', () => {
-  it('offers every library plus all of them', async () => {
+  it('offers each configured library without a combined view', async () => {
     globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
     render(Home)
 
     await waitFor(() => expect(screen.getByTestId('library-lib-webtoon')).toBeInTheDocument())
     expect(screen.getByTestId('library-lib-comics')).toBeInTheDocument()
-    // "All" is a choice of its own, not the absence of one.
-    expect(screen.getByTestId('library-all')).toBeInTheDocument()
+    expect(screen.getByTestId('library-lib-comics')).toHaveTextContent('내 만화책')
+    expect(screen.getByTestId('library-lib-webtoon')).toHaveTextContent('세로 웹툰')
+    expect(screen.queryByTestId('library-all')).toBeNull()
+  })
+
+  it('starts in the first configured library without an unscoped catalog request', async () => {
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-lib-comics')).toHaveAttribute('aria-current', 'true'),
+    )
+    await waitFor(() => {
+      const catalogUrls = globalThis.fetch.mock.calls
+        .map(([url]) => url)
+        .filter((url) => !url.includes('/libraries'))
+      expect(catalogUrls.length).toBeGreaterThan(0)
+    })
+    const catalogUrls = globalThis.fetch.mock.calls
+      .map(([url]) => url)
+      .filter((url) => !url.includes('/libraries'))
+    for (const url of catalogUrls) expect(url).toContain('libraryId=lib-comics')
+    expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe('lib-comics')
   })
 
   it('stays hidden when there is only one library to choose', async () => {
@@ -191,7 +270,13 @@ describe('library switcher', () => {
     globalThis.fetch = serverWithLibraries([TWO_LIBRARIES[0]])
     render(Home)
 
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    await waitFor(() => {
+      const catalogUrls = globalThis.fetch.mock.calls
+        .map(([url]) => url)
+        .filter((url) => !url.includes('/libraries'))
+      expect(catalogUrls.length).toBeGreaterThan(0)
+      for (const url of catalogUrls) expect(url).toContain('libraryId=lib-comics')
+    })
     expect(screen.queryByTestId('library-all')).toBeNull()
   })
 
@@ -215,27 +300,47 @@ describe('library switcher', () => {
 
   it('remembers the chosen library for the next visit', async () => {
     globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
-    render(Home)
+    const firstVisit = render(Home)
 
     await fireEvent.click(await screen.findByTestId('library-lib-webtoon'))
 
     await waitFor(() =>
       expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe('lib-webtoon'),
     )
+    firstVisit.unmount()
+    globalThis.fetch.mockClear()
+
+    render(Home)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('library-lib-webtoon')).toHaveAttribute('aria-current', 'true'),
+    )
+    await waitFor(() => {
+      const catalogUrls = globalThis.fetch.mock.calls
+        .map(([url]) => url)
+        .filter((url) => !url.includes('/libraries'))
+      expect(catalogUrls.length).toBeGreaterThan(0)
+    })
+    const catalogUrls = globalThis.fetch.mock.calls
+      .map(([url]) => url)
+      .filter((url) => !url.includes('/libraries'))
+    for (const url of catalogUrls) expect(url).toContain('libraryId=lib-webtoon')
   })
 
-  it('stores all-libraries as a decision rather than as no decision', async () => {
-    // Empty string, not a removed key: without the distinction, choosing "all" after
-    // narrowing could not be persisted and the narrow choice would come back.
-    localStorage.setItem('xoboro.pref.anonymous.global.library', 'lib-webtoon')
+  it('repairs a remembered library that is no longer visible', async () => {
+    localStorage.setItem('xoboro.pref.anonymous.global.library', 'removed-library')
     globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
     render(Home)
 
-    await fireEvent.click(await screen.findByTestId('library-all'))
-
-    await waitFor(() =>
-      expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe(''),
-    )
+    await waitFor(() => {
+      expect(screen.getByTestId('library-lib-comics')).toHaveAttribute('aria-current', 'true')
+      expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe('lib-comics')
+    })
+    const catalogUrls = globalThis.fetch.mock.calls
+      .map(([url]) => url)
+      .filter((url) => !url.includes('/libraries'))
+    expect(catalogUrls.length).toBeGreaterThan(0)
+    for (const url of catalogUrls) expect(url).toContain('libraryId=lib-comics')
   })
 })
 
@@ -254,7 +359,7 @@ describe('home search', () => {
   function searchServer({ series = [], items = [] } = {}) {
     return vi.fn(async (url) => {
       if (url.includes('/feeds/')) return reply(envelope())
-      if (url.includes('/libraries')) return reply(envelope())
+      if (url.includes('/libraries')) return reply([DEFAULT_LIBRARY])
       // A query is only ever sent to the two listings, so the presence of the parameter
       // is what distinguishes a search from the grid's own request.
       if (url.includes('query=')) {
@@ -269,6 +374,45 @@ describe('home search', () => {
     await fireEvent.input(field, { target: { value } })
     return field
   }
+
+  it('restores the visible search immediately after returning from a series', async () => {
+    globalThis.fetch = searchServer({
+      series: [{ id: 's1', title: 'Remembered result', mediaItemCount: 3 }],
+    })
+    const first = render(Home, {})
+
+    await typeQuery('remembered words')
+    await screen.findByText('Remembered result')
+    first.unmount()
+
+    // A return must not depend on the next catalogue response. Production currently spends
+    // roughly fifteen seconds in one of those requests, which is why an empty remount reads as
+    // a permanently loading page.
+    globalThis.fetch = vi.fn(() => new Promise(() => {}))
+    render(Home, {})
+
+    expect(screen.getByTestId('home-search')).toHaveValue('remembered words')
+    expect(screen.getByText('Remembered result')).toBeInTheDocument()
+    expect(screen.queryByText('불러오는 중...')).toBeNull()
+  })
+
+  it('restores advanced search filters after returning from a series', async () => {
+    globalThis.fetch = searchServer()
+    const first = render(Home, {})
+
+    await fireEvent.click(await screen.findByTestId('toggle-advanced'))
+    await fireEvent.change(await screen.findByTestId('filter-one-shot'), {
+      target: { value: 'exclude' },
+    })
+    expect(screen.getByTestId('filter-one-shot')).toHaveValue('exclude')
+    first.unmount()
+
+    globalThis.fetch = vi.fn(() => new Promise(() => {}))
+    render(Home, {})
+
+    expect(screen.getByTestId('home-advanced')).toBeInTheDocument()
+    expect(screen.getByTestId('filter-one-shot')).toHaveValue('exclude')
+  })
 
   /**
    * Works, and not their chapters.
@@ -332,6 +476,7 @@ describe('home search', () => {
   it('discards a response that a later query has superseded', async () => {
     const pending = []
     globalThis.fetch = vi.fn((url) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([DEFAULT_LIBRARY]))
       if (url.includes('query=')) {
         return new Promise((resolve) => {
           pending.push({
@@ -375,6 +520,7 @@ describe('home search', () => {
    */
   it('reports a search that failed instead of showing a blank page', async () => {
     globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('/libraries')) return reply([DEFAULT_LIBRARY])
       if (url.includes('query=')) throw new TypeError('Failed to fetch')
       return reply(envelope())
     })
@@ -393,7 +539,8 @@ describe('home search', () => {
   it('does not clear a grid failure by searching successfully', async () => {
     globalThis.fetch = vi.fn(async (url) => {
       if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found' }]))
-      if (url.includes('/feeds/') || url.includes('/libraries')) return reply(envelope())
+      if (url.includes('/libraries')) return reply([DEFAULT_LIBRARY])
+      if (url.includes('/feeds/')) return reply(envelope())
       return reply({ code: 'internal_error', message: 'no' }, 500)
     })
     render(Home, {})
@@ -467,6 +614,7 @@ describe('home search', () => {
     const fetched = []
     globalThis.fetch = vi.fn(async (url) => {
       fetched.push(url)
+      if (url.includes('/libraries')) return reply([DEFAULT_LIBRARY])
       if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found Series' }]))
       return reply(envelope())
     })
@@ -486,4 +634,3 @@ describe('home search', () => {
     )
   })
 })
-

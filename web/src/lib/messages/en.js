@@ -311,6 +311,8 @@ export default {
     position: 'Page {page} of {total}',
     previousItem: 'Previous',
     nextItem: 'Next',
+    analysisWaiting: 'Preparing this item to read',
+    analysisWaitingHint: 'It was moved to the front of the queue. Pages will appear as soon as it is ready.',
     mode: 'Layout',
     direction: 'Direction',
     fit: 'Fit',
@@ -447,7 +449,6 @@ export default {
     navigation: 'My library',
     library: {
       switcher: 'Library',
-      all: 'All',
     },
     metadata: {
       seriesTitle: 'Edit series metadata',
