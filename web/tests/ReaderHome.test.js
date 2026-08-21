@@ -34,9 +34,10 @@ function envelope(items = []) {
   }
 }
 
-/** Answers feeds with `status` and everything else with an empty page. */
+/** Answers feeds with `status`, libraries with an empty array, and listings with an empty page. */
 function server({ feedStatus = 200 } = {}) {
   return vi.fn(async (url) => {
+    if (url.includes('/libraries')) return reply([])
     if (url.includes('/feeds/')) {
       return feedStatus === 200
         ? reply(envelope())
@@ -340,6 +341,7 @@ describe('home search', () => {
           })
         })
       }
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
       return Promise.resolve(reply(envelope()))
     })
     render(Home, {})
@@ -376,6 +378,7 @@ describe('home search', () => {
   it('reports a search that failed instead of showing a blank page', async () => {
     globalThis.fetch = vi.fn(async (url) => {
       if (url.includes('query=')) throw new TypeError('Failed to fetch')
+      if (url.includes('/libraries')) return reply([])
       return reply(envelope())
     })
     render(Home, {})
@@ -469,6 +472,7 @@ describe('home search', () => {
     globalThis.fetch = vi.fn(async (url) => {
       fetched.push(url)
       if (url.includes('query=')) return reply(envelope([{ id: 's1', title: 'Found Series' }]))
+      if (url.includes('/libraries')) return reply([])
       return reply(envelope())
     })
     render(Home, {})
