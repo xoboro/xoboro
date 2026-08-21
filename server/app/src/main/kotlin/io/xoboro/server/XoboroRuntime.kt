@@ -79,6 +79,7 @@ import io.xoboro.server.media.BookContentService
 import io.xoboro.server.media.LocalFontResourceCatalog
 import io.xoboro.server.media.LocalTransientBookLifecycle
 import io.xoboro.server.media.RarToCbzConverter
+import io.xoboro.server.media.ReaderReadyBookIndexer
 import io.xoboro.server.media.SafeJpegArtworkProcessor
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.metadata.ComicInfoMetadataProvider
@@ -159,6 +160,8 @@ import io.xoboro.server.tasks.DurableLibraryMaintenanceRequester
 import io.xoboro.server.tasks.DurableTaskWorker
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskEmitter
 import io.xoboro.server.tasks.EmptyLibraryTrashTaskHandler
+import io.xoboro.server.tasks.EnrichBookTaskEmitter
+import io.xoboro.server.tasks.EnrichBookTaskHandler
 import io.xoboro.server.tasks.ExecutorFixedRateTaskScheduler
 import io.xoboro.server.tasks.FindBookArtworkTaskHandler
 import io.xoboro.server.tasks.GenerateBookArtworkTaskHandler
@@ -931,6 +934,21 @@ class XoboroRuntime private constructor(
             randomAccesses = randomAccesses,
             currentTimeMillis = System::currentTimeMillis,
           )
+        val readerReadyBookIndexer =
+          ReaderReadyBookIndexer(
+            books = books,
+            libraries = libraries,
+            media = media,
+            randomAccesses = randomAccesses,
+            fallback = analyzeBook::execute,
+            currentTimeMillis = System::currentTimeMillis,
+          )
+        val enrichBookTaskEmitter =
+          EnrichBookTaskEmitter(
+            books = books,
+            queue = queue,
+            currentTimeMillis = System::currentTimeMillis,
+          )
         val bookCoverGeneration =
           BookCoverGenerationLifecycle(
             books = books,
@@ -982,9 +1000,17 @@ class XoboroRuntime private constructor(
                 ),
                 AnalyzeBookTaskHandler(
                   analyzeBook = { bookId ->
-                    analyzeBook.execute(bookId)
+                    readerReadyBookIndexer.execute(bookId)
                   },
                   afterAnalyze = { bookId ->
+                    enrichBookTaskEmitter.enrich(bookId)
+                  },
+                ),
+                EnrichBookTaskHandler(
+                  enrichBook = { bookId ->
+                    analyzeBook.execute(bookId)
+                  },
+                  afterEnrich = { bookId ->
                     refreshMetadataTaskEmitter.refreshBook(bookId)
                     bookCoverGeneration.generateForBook(bookId)
                     books.findByIdOrNull(bookId)?.let { book ->

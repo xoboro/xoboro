@@ -29,6 +29,7 @@ import io.xoboro.core.application.MediaContentStream
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
 import io.xoboro.core.application.SeriesCatalogQuery
+import io.xoboro.core.application.TaskStoreUnavailableException
 import io.xoboro.core.application.TokenEncoder
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.Book
@@ -82,6 +83,33 @@ class XoboroNativeDeliveryTest {
       assertFalse("KiB" in json)
       assertEquals(0, fixture.content.openPageCallCount)
       assertEquals(0, fixture.content.pagesCallCount)
+    }
+
+  @Test
+  fun `page manifest prioritizes analysis instead of rendering an empty comic`() =
+    testApplication {
+      val fixture = Fixture.nonEpub(MediaStatus.UNKNOWN)
+      installDelivery(fixture)
+
+      val response = client.get(PAGES_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_not_ready", response.body<XoboroApiError>().code)
+      assertEquals(listOf(MEDIA_ID), fixture.prioritizedBookIds)
+      assertEquals(0, fixture.content.pagesCallCount)
+    }
+
+  @Test
+  fun `page manifest stays retryable while its priority update is locked`() =
+    testApplication {
+      val fixture = Fixture.nonEpub(MediaStatus.UNKNOWN)
+      fixture.priorityFailure = TaskStoreUnavailableException("ANALYZE_BOOK_media-delivery")
+      installDelivery(fixture)
+
+      val response = client.get(PAGES_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_not_ready", response.body<XoboroApiError>().code)
     }
 
   @Test
@@ -803,9 +831,22 @@ class XoboroNativeDeliveryTest {
             XoboroApiError("invalid_query", requireNotNull(cause.message)),
           )
         }
+        exception<TaskStoreUnavailableException> { call, _ ->
+          call.respond(
+            HttpStatusCode.InternalServerError,
+            XoboroApiError("internal_error", "Task store unavailable"),
+          )
+        }
       }
       routing {
-        xoboroNativeDeliveryRoutes(fixture.catalog, fixture.content)
+        xoboroNativeDeliveryRoutes(
+          fixture.catalog,
+          fixture.content,
+          prioritizeAnalysis = {
+            fixture.priorityFailure?.let { failure -> throw failure }
+            fixture.prioritizedBookIds += it
+          },
+        )
       }
     }
     client =
@@ -844,6 +885,8 @@ class XoboroNativeDeliveryTest {
     val token = requireNotNull(sessions.create(user)).plainToken
     val catalog = RecordingCatalog(book)
     val content = FakeBookContentAccess()
+    val prioritizedBookIds = mutableListOf<BookId>()
+    var priorityFailure: TaskStoreUnavailableException? = null
 
     companion object {
       fun visible(status: MediaStatus = MediaStatus.READY): Fixture =

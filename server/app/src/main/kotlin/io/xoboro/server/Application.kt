@@ -606,8 +606,12 @@ fun Application.xoboroModule(
                 availabilityProbe = libraryAvailabilityProbe,
               )
             }
-            if (bookContentAccess != null) {
-              xoboroNativeDeliveryRoutes(catalogReadRepository, bookContentAccess)
+            if (bookContentAccess != null && catalogMaintenanceRequester != null) {
+              xoboroNativeDeliveryRoutes(
+                catalogReadRepository,
+                bookContentAccess,
+                prioritizeAnalysis = { catalogMaintenanceRequester.analyzeBook(it) },
+              )
             }
             readProgressLifecycle?.let {
               xoboroNativeProgressRoutes(catalogReadRepository, it)
