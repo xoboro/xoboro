@@ -51,8 +51,27 @@ class JooqBookMediaRepositoryTest {
                 mediaType = "image/webp",
                 fileSize = 6_000_000_000L,
               ),
+              io.xoboro.core.domain.BookPage(
+                number = 2,
+                fileName = "opening.png",
+                mediaType = "image/png",
+                fileSize = 30L,
+              ),
             ),
-          files = emptyList(),
+          pageCount = 2,
+          files =
+            listOf(
+              MediaFile(
+                fileName = "second.xml",
+                mediaType = "application/xml",
+                fileSize = 20L,
+              ),
+              MediaFile(
+                fileName = "first.txt",
+                mediaType = "text/plain",
+                fileSize = 10L,
+              ),
+            ),
           comment = "updated",
           updatedAtMillis = 1_700_000_002_000L,
         )
@@ -60,8 +79,8 @@ class JooqBookMediaRepositoryTest {
       repository.upsert(updated)
 
       assertEquals(updated, repository.findByBookIdOrNull(BOOK_ID))
-      assertEquals(1, database.dsl.fetchCount(org.jooq.impl.DSL.table("book_page")))
-      assertEquals(0, database.dsl.fetchCount(org.jooq.impl.DSL.table("media_file")))
+      assertEquals(2, database.dsl.fetchCount(org.jooq.impl.DSL.table("book_page")))
+      assertEquals(2, database.dsl.fetchCount(org.jooq.impl.DSL.table("media_file")))
     }
   }
 

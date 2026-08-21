@@ -17,6 +17,7 @@ import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogReadRepository
 import io.xoboro.core.application.PageImageFormat
 import io.xoboro.core.application.PageImageRequest
+import io.xoboro.core.application.TaskStoreUnavailableException
 import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.MediaFileKind
@@ -27,6 +28,7 @@ import io.xoboro.core.domain.UserRole
 fun Route.xoboroNativeDeliveryRoutes(
   catalog: CatalogReadRepository,
   content: BookContentAccess,
+  prioritizeAnalysis: (BookId) -> Unit,
 ) {
   route(XOBORO_API_PREFIX) {
     authenticate(
@@ -51,10 +53,22 @@ fun Route.xoboroNativeDeliveryRoutes(
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
           }
+          val media = item.media
+          if (media == null || media.status != MediaStatus.READY) {
+            if (media?.status != MediaStatus.UNSUPPORTED) {
+              try {
+                prioritizeAnalysis(item.book.id)
+              } catch (_: TaskStoreUnavailableException) {
+                // A scan can hold SQLite's one writer while this read arrives. The item
+                // is still not ready, and the reader's next manifest poll retries the
+                // same deterministic priority update after that writer releases it.
+              }
+            }
+            call.respondMediaUnusable(media?.status)
+            return@get
+          }
           call.respond(
-            item.media
-              ?.pages
-              .orEmpty()
+            media.pages
               .map { page ->
                 XoboroMediaPageResponse(
                   number = page.number,
