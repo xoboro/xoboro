@@ -5,6 +5,7 @@ import io.xoboro.core.application.DurableTask
 import io.xoboro.core.application.DurableTaskQueue
 import io.xoboro.core.application.TaskCounts
 import io.xoboro.core.application.TaskEnqueue
+import io.xoboro.core.application.TaskPriority
 import java.util.logging.Level
 import java.util.logging.Logger
 import org.jooq.Record
@@ -63,7 +64,7 @@ class JooqDurableTaskQueue(
           ON CONFLICT(id) DO UPDATE SET
             task_type = excluded.task_type,
             payload_json = excluded.payload_json,
-            priority = excluded.priority,
+            priority = max(task.priority, excluded.priority),
             group_id = excluded.group_id,
             max_attempts = excluded.max_attempts,
             state = 'PENDING',
@@ -139,15 +140,12 @@ class JooqDurableTaskQueue(
       transaction
         .fetchOne(
           """
-          UPDATE task SET
-            state = 'RUNNING',
-            attempt_count = attempt_count + 1,
-            lease_owner = ?,
-            lease_token = ?,
-            lease_expires_at_ms = ?,
-            updated_at_ms = ?
-          WHERE id = (
-            SELECT candidate.id
+          -- A background task waiting two minutes competes at DEFAULT priority, ordered by its
+          -- original creation time. The two inner candidates stay indexable; only their two rows
+          -- are sorted together, avoiding a computed-priority sort over the entire pending queue.
+          WITH normal_candidate AS (
+            SELECT candidate.id, candidate.priority AS effective_priority,
+              candidate.created_at_ms
             FROM task candidate
             WHERE candidate.state = 'PENDING'
               AND candidate.available_at_ms <= ?
@@ -163,7 +161,46 @@ class JooqDurableTaskQueue(
               )
             ORDER BY candidate.priority DESC, candidate.created_at_ms, candidate.id
             LIMIT 1
+          ),
+          aged_candidate AS (
+            SELECT candidate.id, $BACKGROUND_EFFECTIVE_PRIORITY AS effective_priority,
+              candidate.created_at_ms
+            FROM task AS candidate INDEXED BY task_pending_background_age_idx
+            WHERE candidate.state = 'PENDING'
+              AND candidate.priority < $BACKGROUND_EFFECTIVE_PRIORITY
+              AND candidate.created_at_ms <= ?
+              AND candidate.available_at_ms <= ?
+              AND (
+                candidate.group_id IS NULL
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM task active
+                  WHERE active.state = 'RUNNING'
+                    AND active.group_id = candidate.group_id
+                    AND active.lease_expires_at_ms > ?
+                )
+              )
+            ORDER BY candidate.created_at_ms, candidate.id
+            LIMIT 1
+          ),
+          chosen_candidate AS (
+            SELECT id
+            FROM (
+              SELECT * FROM normal_candidate
+              UNION ALL
+              SELECT * FROM aged_candidate
+            ) candidates
+            ORDER BY effective_priority DESC, created_at_ms, id
+            LIMIT 1
           )
+          UPDATE task SET
+            state = 'RUNNING',
+            attempt_count = attempt_count + 1,
+            lease_owner = ?,
+            lease_token = ?,
+            lease_expires_at_ms = ?,
+            updated_at_ms = ?
+          WHERE id = (SELECT id FROM chosen_candidate)
           AND state = 'PENDING'
           RETURNING
             id, task_type, payload_json, priority, group_id, max_attempts,
@@ -171,11 +208,14 @@ class JooqDurableTaskQueue(
             CAST(available_at_ms AS TEXT) AS available_at_ms_64,
             CAST(lease_expires_at_ms AS TEXT) AS lease_expires_at_ms_64
           """.trimIndent(),
+          nowMillis,
+          nowMillis,
+          nowMillis - BACKGROUND_STARVATION_LIMIT_MILLIS,
+          nowMillis,
+          nowMillis,
           workerId,
           leaseToken,
           leaseExpiresAtMillis,
-          nowMillis,
-          nowMillis,
           nowMillis,
         )
         ?.toClaimedTask()
@@ -458,5 +498,7 @@ class JooqDurableTaskQueue(
   private companion object {
     private val logger = Logger.getLogger(JooqDurableTaskQueue::class.java.name)
     private const val DEAD_LETTER_LOG_ERROR_LIMIT = 500
+    private const val BACKGROUND_EFFECTIVE_PRIORITY: Int = TaskPriority.DEFAULT
+    private const val BACKGROUND_STARVATION_LIMIT_MILLIS: Long = 120_000L
   }
 }

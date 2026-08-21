@@ -10,8 +10,11 @@ import java.util.logging.Logger
 /**
  * Runs after `RefreshBookMetadataTaskHandler` successfully applies a book metadata refresh.
  *
- * Refreshes local artwork for the book, then re-enqueues a series metadata refresh for the
- * book's series. The re-enqueue is what makes a one-shot series title self-heal when its
+ * Refreshes local artwork and generates the book and series covers, then re-enqueues a series
+ * metadata refresh for the book's series. Cover generation stays in this durable background task
+ * instead of delaying the analysis task that makes a book readable.
+ *
+ * The re-enqueue is what makes a one-shot series title self-heal when its
  * `RefreshSeriesMetadataTask` happened to run before this book's own refresh completed (see ADR
  * 0077): `OneShotSeriesMetadataProvider` promotes the book's title into the series, so once the
  * book's title is corrected here, re-running the series refresh lets it pick up the correction
@@ -25,12 +28,19 @@ class BookMetadataRefreshCompletion(
   private val books: BookRepository,
   private val localArtworkRefresh: LocalArtworkRefreshLifecycle,
   private val refreshMetadataTaskEmitter: RefreshMetadataTaskEmitter,
+  private val generateCover: (BookId) -> Unit = {},
   private val logger: Logger = Logger.getLogger(BookMetadataRefreshCompletion::class.java.name),
-) : (BookId) -> Unit {
-  override fun invoke(bookId: BookId) {
+) : (BookId, Int) -> Unit {
+  override fun invoke(
+    bookId: BookId,
+    priority: Int,
+  ) {
     localArtworkRefresh.refreshBook(bookId)
+    generateCover(bookId)
     val book = books.findByIdOrNull(bookId) ?: return
-    val enqueued = refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
+    // Preserve the parent task's priority: an automatic LOW refresh must not create HIGH work that
+    // jumps back ahead of the DEFAULT analyses it was deliberately scheduled behind.
+    val enqueued = refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId, priority)
     if (!enqueued) {
       // enqueue() drops this request if the series task row is already RUNNING (see
       // JooqDurableTaskQueue.enqueue). The mechanism behind the ordering inversion this class

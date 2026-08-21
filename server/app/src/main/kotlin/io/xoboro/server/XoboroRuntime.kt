@@ -985,11 +985,12 @@ class XoboroRuntime private constructor(
                     analyzeBook.execute(bookId)
                   },
                   afterAnalyze = { bookId ->
-                    refreshMetadataTaskEmitter.refreshBook(bookId)
-                    bookCoverGeneration.generateForBook(bookId)
+                    refreshMetadataTaskEmitter.refreshBook(bookId, TaskPriority.LOW)
                     books.findByIdOrNull(bookId)?.let { book ->
-                      refreshMetadataTaskEmitter.refreshSeriesMetadata(book.seriesId)
-                      bookCoverGeneration.generateForSeries(book.seriesId)
+                      refreshMetadataTaskEmitter.refreshSeriesMetadata(
+                        book.seriesId,
+                        TaskPriority.LOW,
+                      )
                     }
                   },
                 ),
@@ -1018,6 +1019,12 @@ class XoboroRuntime private constructor(
                       books = books,
                       localArtworkRefresh = localArtworkRefreshLifecycle,
                       refreshMetadataTaskEmitter = refreshMetadataTaskEmitter,
+                      generateCover = { bookId ->
+                        bookCoverGeneration.generateForBook(bookId)
+                        books.findByIdOrNull(bookId)?.let { book ->
+                          bookCoverGeneration.generateForSeries(book.seriesId)
+                        }
+                      },
                     ),
                 ),
                 RefreshSeriesMetadataTaskHandler(
