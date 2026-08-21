@@ -2,6 +2,16 @@ import '@testing-library/jest-dom/vitest'
 import { waitLocale } from 'svelte-i18n'
 import { setupI18n } from '../src/lib/i18n.js'
 
+// Node 26 reserves a global localStorage getter that returns undefined unless its
+// file-backed implementation is configured. Vitest therefore sees the name as already
+// occupied and skips jsdom's storage while populating browser globals. Resolve it through
+// the active jsdom instance so each test environment receives its own in-memory store.
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  enumerable: true,
+  get: () => globalThis.jsdom?.window.localStorage,
+})
+
 // Tests assert on keys, roles and accessible names rather than on copy, but the
 // catalog still has to be initialised or every rendered component would show a
 // raw key path and the assertions would pass for the wrong reason.
