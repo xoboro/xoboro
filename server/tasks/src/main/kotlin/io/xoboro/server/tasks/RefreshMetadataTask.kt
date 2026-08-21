@@ -356,7 +356,7 @@ class RefreshLibraryMetadataTaskHandler(
 
 class RefreshBookMetadataTaskHandler(
   private val metadata: MetadataRefreshLifecycle,
-  private val afterRefresh: (BookId) -> Unit = {},
+  private val afterRefresh: (BookId, Int) -> Unit = { _, _ -> },
   private val json: Json = Json,
 ) : TaskHandler {
   override val taskType: String = TASK_TYPE
@@ -364,7 +364,7 @@ class RefreshBookMetadataTaskHandler(
   override fun handle(task: DurableTask) {
     require(task.type == taskType) { "Unexpected task type: ${task.type}" }
     val bookId = BookId(task.requiredStringPayload(json, BOOK_ID_FIELD, TASK_TYPE))
-    metadata.refreshBook(bookId)?.let { afterRefresh(bookId) }
+    metadata.refreshBook(bookId)?.let { afterRefresh(bookId, task.priority) }
   }
 
   companion object {

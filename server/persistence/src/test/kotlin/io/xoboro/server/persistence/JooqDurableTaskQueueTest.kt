@@ -45,6 +45,40 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `ages background work into FIFO competition with default tasks`() {
+    withQueue("priority-aging") { queue, _ ->
+      queue.enqueue(taskFixture(id = "aged-low", priority = TaskPriority.LOW), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "newer-default"), nowMillis = 2L)
+
+      assertEquals(
+        "aged-low",
+        queue.claim(
+          workerId = "worker",
+          leaseToken = "lease-1",
+          nowMillis = TimeUnit.MINUTES.toMillis(10),
+        )?.task?.id,
+      )
+    }
+  }
+
+  @Test
+  fun `keeps urgent work ahead of aged background work`() {
+    withQueue("priority-aging-urgent") { queue, _ ->
+      queue.enqueue(taskFixture(id = "aged-low", priority = TaskPriority.LOW), nowMillis = 1L)
+      queue.enqueue(taskFixture(id = "newer-high", priority = TaskPriority.HIGH), nowMillis = 2L)
+
+      assertEquals(
+        "newer-high",
+        queue.claim(
+          workerId = "worker",
+          leaseToken = "lease-1",
+          nowMillis = TimeUnit.MINUTES.toMillis(10),
+        )?.task?.id,
+      )
+    }
+  }
+
+  @Test
   fun `counts queued and running tasks by compatibility type`() {
     withQueue("counts-by-type") { queue, _ ->
       queue.enqueue(taskFixture(id = "scan-1"), nowMillis = 1L)
@@ -141,6 +175,23 @@ class JooqDurableTaskQueueTest {
         ),
       )
       assertTrue(queue.complete("task-1", "lease-1"))
+    }
+  }
+
+  @Test
+  fun `does not downgrade pending urgent work when background work reuses its ID`() {
+    withQueue("deduplicate-priority") { queue, _ ->
+      assertQueued(
+        queue.enqueue(taskFixture(priority = TaskPriority.HIGH), nowMillis = 1L),
+      )
+      assertQueued(
+        queue.enqueue(taskFixture(priority = TaskPriority.LOW), nowMillis = 2L),
+      )
+
+      assertEquals(
+        TaskPriority.HIGH,
+        queue.claim("worker", "lease-1", nowMillis = 10L)?.task?.priority,
+      )
     }
   }
 
