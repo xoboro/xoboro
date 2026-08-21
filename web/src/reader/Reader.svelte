@@ -22,7 +22,13 @@
   import { onDestroy, onMount, untrack } from 'svelte'
   import { ChevronLeft, ChevronRight, List, Settings, SlidersHorizontal } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
-  import { listPages, pageUrl, readMediaItem, readNeighbour } from '../lib/api/catalog.js'
+  import {
+    isRetryableDeliveryFailure,
+    listPages,
+    pageUrl,
+    readMediaItem,
+    readNeighbour,
+  } from '../lib/api/catalog.js'
   import { writeProgress, resumePage } from '../lib/api/progress.js'
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
@@ -41,6 +47,7 @@
   let { params } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
+  const ANALYSIS_RETRY_MILLIS = 1_000
   const MODES = ['scroll', 'paged', 'split', 'split-scroll']
   const WIDTHS = ['600', '760', '1000', 'full']
 
@@ -139,6 +146,7 @@
   let chrome = $state(false)
   let settingsOpen = $state(false)
   let error = $state(null)
+  let waitingForAnalysis = $state(false)
   let conflict = $state(null)
   let previousId = $state(null)
   let nextId = $state(null)
@@ -149,6 +157,7 @@
   let restoring = false
   let loadToken = 0
   let saveTimer = null
+  let analysisRetryTimer = null
   let pendingPage = null
 
   const isScroll = $derived(mode === 'scroll' || mode === 'split-scroll')
@@ -186,17 +195,25 @@
 
   async function open(id) {
     const token = ++loadToken
+    const keepKnownItem = waitingForAnalysis && item?.id === id
+    clearTimeout(analysisRetryTimer)
+    analysisRetryTimer = null
     flushProgress()
     loader.reset()
-    loadedId = ''
+    if (!keepKnownItem) loadedId = ''
     pages = []
-    item = null
+    if (!keepKnownItem) item = null
     previousId = null
     nextId = null
     restoring = true
+    error = null
+    waitingForAnalysis = false
 
     try {
-      const [detail, manifest] = await Promise.all([readMediaItem(id), listPages(id)])
+      // The catalog row exists before archive analysis does. Keep its identity visible
+      // while the durable analyzer prepares the page manifest instead of making a
+      // retryable manifest response erase the title and leave a blank reader.
+      const detail = await readMediaItem(id)
       if (token !== loadToken) return
       item = detail
       // Restored before the first view is built: `index` below is derived from
@@ -204,6 +221,22 @@
       // spread on the wrong half and then jump.
       seriesId = detail.seriesId ?? null
       restoreViewPreferences()
+      let manifest
+      try {
+        manifest = await listPages(id)
+      } catch (caught) {
+        if (token === loadToken && isRetryableDeliveryFailure(caught)) {
+          loadedId = id
+          waitingForAnalysis = true
+          restoring = false
+          analysisRetryTimer = setTimeout(() => {
+            if (token === loadToken && params.id === id) open(id)
+          }, ANALYSIS_RETRY_MILLIS)
+          return
+        }
+        throw caught
+      }
+      if (token !== loadToken) return
       pages = manifest
       // `progress`, which is what the media-item route sends. This read was `readProgress` —
       // the name the *domain* type uses on the server, not the one on the wire — so it was
@@ -319,6 +352,7 @@
     // Flushed rather than dropped: leaving the reader is exactly when the last position
     // matters, and a debounce timer would otherwise be discarded with the component.
     flushProgress()
+    clearTimeout(analysisRetryTimer)
     loader.reset()
   })
 
@@ -478,6 +512,15 @@
 {/if}
 
 <ErrorNotice {error} />
+
+{#if waitingForAnalysis && item}
+  <section class="analysis-waiting" data-testid="analysis-waiting" role="status" aria-live="polite">
+    <a href={item.seriesId ? `#/series/${item.seriesId}` : '#/'}>{$_('common.back')}</a>
+    <p>{$_('reader.analysisWaiting')}</p>
+    <h1>{item.title}</h1>
+    <p>{$_('reader.analysisWaitingHint')}</p>
+  </section>
+{/if}
 
 {#key loadedId}
   {#if isScroll}
@@ -668,6 +711,25 @@
     color: var(--text-muted);
     font-size: var(--font-xs);
     font-variant-numeric: tabular-nums;
+  }
+  .analysis-waiting {
+    display: grid;
+    min-height: 100dvh;
+    padding: calc(var(--inset-top) + var(--space-7)) var(--gutter-right)
+      calc(var(--inset-bottom) + var(--space-7)) var(--gutter-left);
+    place-content: center;
+    gap: var(--space-3);
+    text-align: center;
+  }
+  .analysis-waiting a {
+    color: var(--accent);
+  }
+  .analysis-waiting h1,
+  .analysis-waiting p {
+    margin: 0;
+  }
+  .analysis-waiting p {
+    color: var(--text-muted);
   }
   .topbar,
   .bottombar {

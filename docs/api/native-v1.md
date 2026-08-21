@@ -316,6 +316,13 @@ manifest as a JSON list. Each entry contains its one-based `number`,
 `mediaType`, optional `width` and `height`, and optional raw `sizeBytes`.
 Internal archive-entry file names are not exposed.
 
+An item whose media is not ready answers `409 media_not_ready` rather than an
+empty list. The request also raises that item's deterministic analysis task to
+the highest queue priority; analysis remains durable background work and never
+runs in the HTTP handler. If SQLite is temporarily held by a scan, the response
+stays retryable and a later manifest request retries the priority update. An
+unsupported item answers `409 media_unsupported` and is not queued again.
+
 `GET /api/xoboro/v1/media-items/{mediaItemId}/pages/{pageNumber}` returns the
 page bytes. It accepts:
 

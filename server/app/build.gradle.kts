@@ -57,7 +57,7 @@ dependencies {
 
 tasks.test {
   useJUnitPlatform {
-    excludeTags("performance", "largeLibrary")
+    excludeTags("performance", "largeLibrary", "readerReadyThroughput")
   }
 }
 
@@ -119,6 +119,27 @@ tasks.register<Test>("largeLibraryAcceptance") {
   useJUnitPlatform {
     includeTags("largeLibrary")
   }
+  testLogging {
+    showStandardStreams = true
+    events("passed", "skipped", "failed", "standardOut", "standardError")
+  }
+  outputs.upToDateWhen { false }
+}
+
+tasks.register<Test>("readerReadyThroughput") {
+  group = "verification"
+  description =
+    "Measures the production reader-ready CBZ path against 10,000 synthetic 33-page manifests " +
+      "and fails below 10 items per second."
+  testClassesDirs = sourceSets.test.get().output.classesDirs
+  classpath = sourceSets.test.get().runtimeClasspath
+  useJUnitPlatform {
+    includeTags("readerReadyThroughput")
+  }
+  systemProperty(
+    "xoboro.readerReady.itemCount",
+    providers.gradleProperty("xoboro.readerReady.itemCount").orElse("10000").get(),
+  )
   testLogging {
     showStandardStreams = true
     events("passed", "skipped", "failed", "standardOut", "standardError")

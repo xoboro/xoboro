@@ -13,17 +13,23 @@
    * cannot drift into two different searches.
    */
   import { ArrowLeft, Search as SearchIcon } from '@lucide/svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
   import { _ } from '../lib/i18n.js'
+  import { session } from '../lib/session.js'
+  import { readReaderRouteMemory, writeReaderRouteMemory } from '../lib/readerRouteMemory.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
 
   /** Long enough that ordinary typing produces one request, short enough to feel live. */
   const DEBOUNCE_MILLIS = 250
 
+  const readerId = $session.user?.id ?? null
+  const remembered = readReaderRouteMemory('search', readerId)
+
   /** What is in the input. */
-  let text = $state('')
+  let text = $state(remembered?.text ?? '')
   /** What has actually been asked for. Lags {@link text} by the debounce. */
-  let submitted = $state('')
-  let optionsOpen = $state(false)
+  let submitted = $state(remembered?.submitted ?? '')
+  let optionsOpen = $state(remembered?.optionsOpen ?? false)
 
   let debounce = null
 
@@ -53,6 +59,22 @@
     submitted = text
     optionsOpen = true
   }
+
+  onMount(() => {
+    if ((remembered?.scrollY ?? 0) > 0) {
+      tick().then(() => window.scrollTo({ top: remembered.scrollY, behavior: 'instant' }))
+    }
+  })
+
+  onDestroy(() => {
+    clearTimeout(debounce)
+    writeReaderRouteMemory('search', readerId, {
+      text,
+      submitted,
+      optionsOpen,
+      scrollY: window.scrollY,
+    })
+  })
 </script>
 
 <header>
@@ -81,7 +103,12 @@
 </form>
 
 <div class="surface">
-  <AdvancedSearch query={submitted} bind:open={optionsOpen} />
+  <AdvancedSearch
+    query={submitted}
+    bind:open={optionsOpen}
+    memoryKey="search-advanced"
+    userId={readerId}
+  />
 </div>
 
 <style>

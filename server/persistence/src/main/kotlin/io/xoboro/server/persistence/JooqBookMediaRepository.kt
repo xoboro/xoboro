@@ -134,10 +134,42 @@ class JooqBookMediaRepository(
         media.updatedAtMillis,
       )
       transaction.execute("DELETE FROM book_page WHERE book_id = ?", media.bookId.value)
-      media.pages.forEach { page -> transaction.insertPage(media.bookId, page) }
+      if (media.pages.isNotEmpty()) {
+        transaction
+          .batch(
+            INSERT_PAGE_SQL,
+            *media.pages
+              .map { page ->
+                arrayOf<Any?>(
+                  media.bookId.value,
+                  page.number,
+                  page.fileName,
+                  page.mediaType,
+                  page.fileSize,
+                  page.dimension?.width,
+                  page.dimension?.height,
+                  page.fileHash,
+                )
+              }.toTypedArray(),
+          ).execute()
+      }
       transaction.execute("DELETE FROM media_file WHERE book_id = ?", media.bookId.value)
-      media.files.forEachIndexed { index, file ->
-        transaction.insertFile(media.bookId, number = index + 1, file = file)
+      if (media.files.isNotEmpty()) {
+        transaction
+          .batch(
+            INSERT_FILE_SQL,
+            *media.files
+              .mapIndexed { index, file ->
+                arrayOf<Any?>(
+                  media.bookId.value,
+                  index + 1,
+                  file.fileName,
+                  file.mediaType,
+                  file.fileSize,
+                  file.kind.name,
+                )
+              }.toTypedArray(),
+          ).execute()
       }
       transaction.execute("DELETE FROM media_position WHERE book_id = ?", media.bookId.value)
       media.positions.forEach { position -> transaction.insertPosition(media.bookId, position) }
@@ -377,46 +409,6 @@ class JooqBookMediaRepository(
     return descendants(null)
   }
 
-  private fun DSLContext.insertPage(
-    bookId: BookId,
-    page: BookPage,
-  ) {
-    execute(
-      """
-      INSERT INTO book_page (
-        book_id, number, file_name, media_type, file_size, width, height, file_hash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      """.trimIndent(),
-      bookId.value,
-      page.number,
-      page.fileName,
-      page.mediaType,
-      page.fileSize,
-      page.dimension?.width,
-      page.dimension?.height,
-      page.fileHash,
-    )
-  }
-
-  private fun DSLContext.insertFile(
-    bookId: BookId,
-    number: Int,
-    file: MediaFile,
-  ) {
-    execute(
-      """
-      INSERT INTO media_file (book_id, number, file_name, media_type, file_size, kind)
-      VALUES (?, ?, ?, ?, ?, ?)
-      """.trimIndent(),
-      bookId.value,
-      number,
-      file.fileName,
-      file.mediaType,
-      file.fileSize,
-      file.kind.name,
-    )
-  }
-
   private fun DSLContext.insertPosition(
     bookId: BookId,
     position: MediaPosition,
@@ -501,6 +493,17 @@ class JooqBookMediaRepository(
 
   private companion object {
     const val QUERY_BATCH_SIZE = 500
+    val INSERT_PAGE_SQL =
+      """
+      INSERT INTO book_page (
+        book_id, number, file_name, media_type, file_size, width, height, file_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      """.trimIndent()
+    val INSERT_FILE_SQL =
+      """
+      INSERT INTO media_file (book_id, number, file_name, media_type, file_size, kind)
+      VALUES (?, ?, ?, ?, ?, ?)
+      """.trimIndent()
   }
 }
 

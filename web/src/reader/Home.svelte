@@ -13,7 +13,7 @@
    * on a 15,000-item catalog, so "ask again in five seconds and see if the numbers
    * moved" is both expensive and unrelated to when the work actually lands.
    */
-  import { onDestroy, onMount } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
   import {
     Languages,
     Layers3,
@@ -30,6 +30,11 @@
   import { listLibraries } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
+  import {
+    clearReaderRouteMemory,
+    readReaderRouteMemory,
+    writeReaderRouteMemory,
+  } from '../lib/readerRouteMemory.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
@@ -49,11 +54,15 @@
    */
   const SERIES_PAGE_SIZE = 100
 
-  let keepReading = $state([])
-  let onDeck = $state([])
-  let recent = $state([])
-  let updated = $state([])
-  let allSeries = $state(null)
+  const readerId = $session.user?.id ?? null
+  const remembered = readReaderRouteMemory('home', readerId)
+  let preserveOnDestroy = true
+
+  let keepReading = $state(remembered?.keepReading ?? [])
+  let onDeck = $state(remembered?.onDeck ?? [])
+  let recent = $state(remembered?.recent ?? [])
+  let updated = $state(remembered?.updated ?? [])
+  let allSeries = $state(remembered?.allSeries ?? null)
   /**
    * Which page of the whole catalog the grid is showing.
    *
@@ -63,7 +72,7 @@
    * are not paged, so a link to "the home page, page 7" would restore only half of what
    * the reader was looking at.
    */
-  let seriesPage = $state(0)
+  let seriesPage = $state(remembered?.seriesPage ?? 0)
   /** True while a page is in flight, so the pager cannot queue a second request. */
   let seriesBusy = $state(false)
   let error = $state(null)
@@ -72,11 +81,11 @@
   /**
    * Libraries this reader can see, and which one the shelf is narrowed to.
    *
-   * `null` means all of them. The choice is remembered per reader, because a reader
-   * who keeps to one library should not have to narrow the shelf on every visit.
+   * `null` exists only until discovery finishes. Once libraries are known, exactly one
+   * is selected and remembered per reader so separate libraries never collapse into one shelf.
    */
-  let libraries = $state([])
-  let libraryId = $state(null)
+  let libraries = $state(remembered?.libraries ?? [])
+  let libraryId = $state(remembered?.libraryId ?? null)
 
   const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
@@ -92,7 +101,7 @@
   const SEARCH_DEBOUNCE_MILLIS = 300
   const SEARCH_SIZE = 24
 
-  let query = $state('')
+  let query = $state(remembered?.query ?? '')
   /**
    * Series only, and the chapters deliberately left out.
    *
@@ -109,7 +118,7 @@
    * Chapters stay searchable where a reader asks for them on purpose — the `편` scope in the
    * options below, which has the filters, sorts and paging that make a long list usable.
    */
-  let results = $state(null)
+  let results = $state(remembered?.results ?? null)
   let searching = $state(false)
   let searchTimer = null
   /**
@@ -143,14 +152,14 @@
    * Mounted only once asked for: it lists the catalogue when it opens, and a home screen that
    * asked for a page of every series on every visit would pay for a search nobody started.
    */
-  let advancedOpen = $state(false)
+  let advancedOpen = $state(remembered?.advancedOpen ?? false)
   /**
    * The words the advanced surface is searching for: the debounced text, not the live field.
    *
    * The same value the quick search asks with, so opening the options mid-word continues that
    * search instead of restarting it — which is the whole point of opening them in place.
    */
-  let submittedQuery = $state('')
+  let submittedQuery = $state(remembered?.submittedQuery ?? '')
   /** The field itself, so opening the options from elsewhere can put the caret back in it. */
   let searchField = $state(null)
 
@@ -201,7 +210,25 @@
 
   // A reader can navigate away mid-word. Without this the debounce fires into a component
   // that is gone, and its request is one nobody will ever see the answer to.
-  onDestroy(() => clearTimeout(searchTimer))
+  onDestroy(() => {
+    clearTimeout(searchTimer)
+    if (!preserveOnDestroy) return
+    writeReaderRouteMemory('home', readerId, {
+      keepReading,
+      onDeck,
+      recent,
+      updated,
+      allSeries,
+      seriesPage,
+      libraries,
+      libraryId,
+      query,
+      results,
+      advancedOpen,
+      submittedQuery,
+      scrollY: window.scrollY,
+    })
+  })
 
   function onQuery(event) {
     query = event.target.value
@@ -224,10 +251,19 @@
     // Settled with the rest: the switcher not loading must not blank the shelf, it
     // just leaves the reader unable to narrow it.
     try {
-      libraries = (await listLibraries()).items ?? []
+      libraries = (await listLibraries()) ?? []
+      const remembered = readPreference(user?.id ?? null, null, Preference.LIBRARY, '')
+      libraryId = libraries.some((library) => library.id === remembered)
+        ? remembered
+        : (libraries[0]?.id ?? null)
+      if (libraryId !== null) {
+        writePreference(user?.id ?? null, null, Preference.LIBRARY, libraryId)
+        return true
+      }
     } catch {
       libraries = []
     }
+    return false
   }
 
   async function loadShelves() {
@@ -274,7 +310,12 @@
   }
 
   async function refresh() {
-    await Promise.all([loadShelves(), loadSeries()])
+    if (libraryId === null) return
+    // The grid is the catalogue; the shelves are optional discovery shortcuts. Asking for all
+    // four shelves first put the grid fifth in the browser's queue, so one slow feed left a first
+    // visit on "Loading…" even though the catalogue itself was ready to answer.
+    await loadSeries()
+    await loadShelves()
   }
 
   function chooseLibrary(next) {
@@ -282,17 +323,21 @@
     // A different library is a different set, so the page number the reader was on means
     // nothing in it - page 7 of one library is often past the end of another.
     seriesPage = 0
-    writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
+    writePreference(user?.id ?? null, null, Preference.LIBRARY, next)
     refresh()
   }
 
   onMount(() => {
-    // Empty string is a stored "all libraries"; absent means never chosen. Both land on
-    // null here, but only the former survives a reload as a decision.
-    const remembered = readPreference(user?.id ?? null, null, Preference.LIBRARY, '')
-    libraryId = remembered === '' ? null : remembered
-    loadLibraries()
-    refresh()
+    if ((remembered?.scrollY ?? 0) > 0) {
+      tick().then(() => window.scrollTo({ top: remembered.scrollY, behavior: 'instant' }))
+    }
+    // Resolve the library before any catalog request. Starting both calls together briefly
+    // rendered a combined shelf even when the remembered choice arrived a moment later.
+    loadLibraries().then((available) => {
+      if (!available) return
+      refresh()
+      if (query.trim()) runSearch(query)
+    })
     const offCatalog = eventHub.on(
       ['series.added', 'series.changed', 'series.removed', 'media-item.added'],
       refresh,
@@ -314,6 +359,8 @@
 
   async function leave() {
     error = null
+    preserveOnDestroy = false
+    clearReaderRouteMemory(readerId)
     try {
       await signOut()
     } catch (caught) {
@@ -376,7 +423,12 @@
        narrows is what the field asked for, and a reader tabbing out of the field reaches the
        scopes and the facets before anything else. -->
   <div id="home-advanced" class="advanced-surface" data-testid="home-advanced">
-    <AdvancedSearch query={submittedQuery} open={true} />
+    <AdvancedSearch
+      query={submittedQuery}
+      open={true}
+      memoryKey="home-advanced"
+      userId={readerId}
+    />
   </div>
 {/if}
 

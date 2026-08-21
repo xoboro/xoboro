@@ -1,6 +1,6 @@
 import { render, waitFor } from '@testing-library/svelte'
 import { fireEvent } from '@testing-library/dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import Cover from '../src/components/Cover.svelte'
 
 /**
@@ -30,6 +30,26 @@ describe('Cover', () => {
 
     expect(container.querySelector('img').classList.contains('ready')).toBe(true)
     expect(container.querySelector('[data-testid="cover-placeholder"]')).toBeNull()
+  })
+
+  /**
+   * Returning to a catalogue often creates a new component for an image the browser already
+   * has. The cached image can be complete before the new load listener observes an event, so
+   * waiting for that event alone leaves a valid cover behind the placeholder forever.
+   */
+  it('shows a successfully cached image even when no load event is observed', async () => {
+    const complete = vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true)
+    const width = vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(223)
+
+    const { container } = render(Cover, { src: '/artwork/already-cached' })
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-testid="cover-placeholder"]')).toBeNull(),
+    )
+    expect(container.querySelector('img')).toHaveClass('ready')
+
+    complete.mockRestore()
+    width.mockRestore()
   })
 
   it('keeps the placeholder once the retries are exhausted', async () => {

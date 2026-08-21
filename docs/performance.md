@@ -483,14 +483,14 @@ encryption flag. That is the entire page list, for 1/145th of the bytes and one 
 
 `materialize()` could not express it, since it hands an analyzer a local `Path` and
 `java.util.zip.ZipFile` needs a real seekable file. So the trailer is parsed directly
-(`ZipCentralDirectory` over `SourceRandomAccess`), and `AnalyzeBook` takes that path only when
-nothing in the library's settings needs entry bytes:
+(`ZipCentralDirectory` over `SourceRandomAccess`). `ANALYZE_BOOK` now always takes that path first
+for a readable CBZ, even when the library requests dimensions or hashes. It persists the manifest
+needed by the reader, then queues the byte-dependent work as low-priority `ENRICH_BOOK`:
 
-- `analyzeDimensions` off - image dimensions are in the entry data.
-- `hashPages` off - page hashes are the entry data.
-- `hashFiles` / `hashKoreader` satisfied already or off - a whole-file hash needs every byte by
-  definition. Note this is per book, not per library: once a book's hash is recorded, later
-  analyses of it take the cheap path even with the setting on.
+- `analyzeDimensions` reads image entry data during enrichment.
+- `hashPages` reads page entry data during enrichment.
+- `hashFiles` / `hashKoreader` read the whole file during enrichment when the stored hash cannot
+  satisfy the request.
 
 A trailer that does not parse as a ZIP falls back to materializing, which is what a `.cbz` that
 is really a RAR relies on.
@@ -564,3 +564,33 @@ Each was a measurement error, and each is easy to repeat:
   really were writing to that disk throughout. It made no difference, because the serving side
   measures 757 MB/s and the bottleneck is entirely the link. A plausible confound is still worth
   measuring rather than asserting, in either direction.
+
+## Reader-ready throughput gate
+
+The user-visible scan boundary is now the first durable `READY` page manifest, not completion of
+hashing, dimension detection, metadata import, and artwork generation. Those byte-dependent jobs
+remain durable and eventually consistent at low priority, but cannot hold a valid CBZ reader behind
+them. Page and media-file rows are also written as JDBC batches in the existing per-book
+transaction.
+
+The explicit gate exercises the production central-directory parser, local random access, and
+SQLite repository against 10,000 generated CBZ files with 33 image entries each. Fixture creation,
+catalog insertion, and the post-measurement correctness read are deliberately outside the timer;
+the measured boundary is one reader-ready index operation per already-discovered book.
+
+```bash
+./gradlew readerReadyThroughput --rerun --console=plain
+```
+
+Measured on 2026-08-21 with an Apple M4 Pro, 48 GiB memory, arm64 macOS 26.5.1, and Temurin
+OpenJDK 26.0.1:
+
+| items | pages | elapsed | throughput | required |
+|---:|---:|---:|---:|---:|
+| 10,000 | 330,000 | 4,710.8 ms | **2,122.77 items/s** | 10 items/s |
+
+This is a focused local reader-ready measurement, not a prediction that discovery over the
+production NAS or the complete enrichment backlog will run at 2,122 items/s. It proves the Kotlin,
+ZIP parsing, and SQLite manifest path is not the 30-hour floor: production wall time can still be
+bounded by directory discovery, storage latency, queue contention, and explicitly enabled full-file
+enrichment.

@@ -715,6 +715,46 @@ class LibraryMaintenanceTaskTest {
     }
   }
 
+  @Test
+  fun `targeted book analysis jumps ahead of routine maintenance`() {
+    XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("targeted-analysis-priority.sqlite"))).use {
+        database ->
+      insertCatalog(database)
+      val queue = JooqDurableTaskQueue(database)
+      val requester =
+        DurableCatalogMaintenanceRequester(
+          analysis =
+            AnalyzeBookTaskEmitter(
+              JooqBookRepository(database),
+              queue,
+              currentTimeMillis = { 500 },
+            ),
+          metadata =
+            RefreshMetadataTaskEmitter(
+              JooqBookRepository(database),
+              JooqSeriesRepository(database),
+              queue,
+              currentTimeMillis = { 500 },
+            ),
+          queue = queue,
+        )
+
+      assertTrue(requester.analyzeBook(BookId("book-active")))
+      val claimed =
+        requireNotNull(
+          queue.claimNext(
+            workerId = "reader-worker",
+            leaseToken = "reader-lease",
+            nowMillis = 500,
+            leaseDurationMillis = 1_000,
+          ),
+        )
+
+      assertEquals("ANALYZE_BOOK_book-active", claimed.task.id)
+      assertEquals(TaskPriority.HIGHEST, claimed.task.priority)
+    }
+  }
+
   private fun insertCatalog(database: XoboroDatabase) {
     JooqLibraryRepository(database).insert(
       Library(

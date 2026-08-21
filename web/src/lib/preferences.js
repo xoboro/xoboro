@@ -37,11 +37,7 @@ export const Preference = Object.freeze({
   /** Reading direction: 'ltr' or 'rtl'. */
   DIRECTION: 'direction',
   /**
-   * The library the shelf is narrowed to, or `''` for all of them.
-   *
-   * Empty string rather than absent, because "all libraries" is a choice a reader made
-   * and a missing key is a choice they have not. Without the distinction, choosing all
-   * would be indistinguishable from never having chosen, and could not be stored.
+   * The single library the shelf is narrowed to.
    */
   LIBRARY: 'library',
 })

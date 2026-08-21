@@ -12,7 +12,7 @@ class DurableCatalogMaintenanceRequester(
   private val queue: DurableTaskQueue,
 ) : CatalogMaintenanceRequester {
   override fun analyzeBook(id: BookId): Boolean =
-    analysis.analyzeBook(id, TaskPriority.HIGH)
+    analysis.analyzeBook(id, TaskPriority.HIGHEST)
 
   override fun analyzeSeries(id: SeriesId): Int =
     analysis.analyzeSeries(id, TaskPriority.HIGH)

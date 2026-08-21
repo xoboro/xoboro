@@ -6,12 +6,14 @@ import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.LibrarySettings
 import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
 import io.xoboro.server.media.AnalyzeBook
+import io.xoboro.server.media.ReaderReadyBookIndexer
 import io.xoboro.server.media.ZipMediaAnalyzer
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
@@ -21,6 +23,7 @@ import io.xoboro.server.persistence.JooqLibraryRepository
 import io.xoboro.server.persistence.JooqSeriesRepository
 import io.xoboro.server.persistence.XoboroDatabase
 import io.xoboro.server.sources.local.LocalSourceMediaAccess
+import io.xoboro.server.sources.local.LocalSourceRandomAccess
 import java.awt.image.BufferedImage
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,7 +39,7 @@ class AnalyzeBookWorkerIntegrationTest {
   lateinit var tempDirectory: Path
 
   @Test
-  fun `executes a reconciler analysis task through the durable worker`() {
+  fun `makes a book readable before durable enrichment completes`() {
     val archive = createArchive()
     XoboroDatabase.open(DatabaseConfig(tempDirectory.resolve("worker.sqlite"))).use { database ->
       val libraries = JooqLibraryRepository(database)
@@ -48,6 +51,7 @@ class AnalyzeBookWorkerIntegrationTest {
           id = LIBRARY_ID,
           name = "Synthetic library",
           root = SourceLocation("local", tempDirectory.toUri().toString()),
+          settings = LibrarySettings(hashFiles = true, analyzeDimensions = true),
           createdAtMillis = 1,
         ),
       )
@@ -94,10 +98,24 @@ class AnalyzeBookWorkerIntegrationTest {
           zipAnalyzer = ZipMediaAnalyzer(),
           currentTimeMillis = { 100 },
         )
+      val readerReady =
+        ReaderReadyBookIndexer(
+          books = books,
+          libraries = libraries,
+          media = media,
+          randomAccesses = listOf(LocalSourceRandomAccess()),
+          fallback = analyzeBook::execute,
+          currentTimeMillis = { 100 },
+        )
+      val enrichment = EnrichBookTaskEmitter(books, queue, currentTimeMillis = { 100 })
       val worker =
         DurableTaskWorker(
           queue = queue,
-          handlers = listOf(AnalyzeBookTaskHandler(analyzeBook::execute)),
+          handlers =
+            listOf(
+              AnalyzeBookTaskHandler(readerReady::execute, enrichment::enrich),
+              EnrichBookTaskHandler(analyzeBook::execute),
+            ),
           heartbeat = LeaseHeartbeat { _, _ -> AutoCloseable {} },
           currentTimeMillis = { 100 },
           leaseTokenFactory = { "lease-1" },
@@ -109,6 +127,17 @@ class AnalyzeBookWorkerIntegrationTest {
       )
       assertEquals(MediaStatus.READY, media.findByBookIdOrNull(BOOK_ID)?.status)
       assertEquals(1, media.findByBookIdOrNull(BOOK_ID)?.pageCount)
+      assertEquals(null, media.findByBookIdOrNull(BOOK_ID)?.pages?.single()?.dimension)
+      assertEquals("", books.findByIdOrNull(BOOK_ID)?.fileHash)
+      assertEquals(TaskCounts(1, 0, 0), queue.counts())
+
+      assertEquals(
+        TaskRunResult.Completed("ENRICH_BOOK_${BOOK_ID.value}"),
+        worker.runOnce("worker-1"),
+      )
+      assertEquals(10, media.findByBookIdOrNull(BOOK_ID)?.pages?.single()?.dimension?.width)
+      assertEquals(20, media.findByBookIdOrNull(BOOK_ID)?.pages?.single()?.dimension?.height)
+      assertEquals(true, books.findByIdOrNull(BOOK_ID)?.fileHash?.isNotBlank())
       assertEquals(TaskCounts(0, 0, 0), queue.counts())
     }
   }
