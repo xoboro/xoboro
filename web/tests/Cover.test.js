@@ -1,7 +1,35 @@
 import { render, waitFor } from '@testing-library/svelte'
 import { fireEvent } from '@testing-library/dom'
-import { describe, expect, it } from 'vitest'
+import { tick } from 'svelte'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import Cover from '../src/components/Cover.svelte'
+
+function coverVisibility() {
+  let notify
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(callback) {
+        notify = callback
+      }
+
+      observe() {}
+      disconnect() {}
+    },
+  )
+
+  return {
+    async set(isIntersecting) {
+      notify?.([{ isIntersecting }])
+      await tick()
+    },
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 /**
  * A cover while it is still arriving.
@@ -12,6 +40,72 @@ import Cover from '../src/components/Cover.svelte'
  * reader shows a placeholder immediately and fades the image in over it.
  */
 describe('Cover', () => {
+  it('starts shimmer only after a visible cover has waited 250ms', async () => {
+    vi.useFakeTimers()
+    const visibility = coverVisibility()
+    const { container } = render(Cover, { src: '/artwork/s1' })
+    const placeholder = container.querySelector('[data-testid="cover-placeholder"]')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(placeholder.classList.contains('shimmering')).toBe(false)
+
+    await visibility.set(true)
+    await vi.advanceTimersByTimeAsync(249)
+    expect(placeholder.classList.contains('shimmering')).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(placeholder.classList.contains('shimmering')).toBe(true)
+  })
+
+  it('stops shimmer while missing artwork waits to retry', async () => {
+    vi.useFakeTimers()
+    const visibility = coverVisibility()
+    const { container } = render(Cover, { src: '/artwork/s1', retryDelays: [1000] })
+    const placeholder = container.querySelector('[data-testid="cover-placeholder"]')
+
+    await visibility.set(true)
+    await vi.advanceTimersByTimeAsync(250)
+    expect(placeholder.classList.contains('shimmering')).toBe(true)
+
+    await fireEvent.error(container.querySelector('img'))
+
+    expect(placeholder.classList.contains('shimmering')).toBe(false)
+
+    await visibility.set(false)
+    await visibility.set(true)
+    await vi.advanceTimersByTimeAsync(250)
+
+    expect(placeholder.classList.contains('shimmering')).toBe(false)
+  })
+
+  it('stops shimmer when the cover leaves the viewport', async () => {
+    vi.useFakeTimers()
+    const visibility = coverVisibility()
+    const { container } = render(Cover, { src: '/artwork/s1' })
+    const placeholder = container.querySelector('[data-testid="cover-placeholder"]')
+
+    await visibility.set(true)
+    await vi.advanceTimersByTimeAsync(250)
+    expect(placeholder.classList.contains('shimmering')).toBe(true)
+
+    await visibility.set(false)
+
+    expect(placeholder.classList.contains('shimmering')).toBe(false)
+  })
+
+  it('ignores a queued visibility callback after the cover is destroyed', async () => {
+    vi.useFakeTimers()
+    const visibility = coverVisibility()
+    const { unmount } = render(Cover, { src: '/artwork/s1' })
+
+    unmount()
+    expect(vi.getTimerCount()).toBe(0)
+
+    await visibility.set(true)
+
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('shows a placeholder before the image has loaded', () => {
     const { container } = render(Cover, { src: '/artwork/s1' })
 
