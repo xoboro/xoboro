@@ -51,6 +51,8 @@ describe('Cover motion', () => {
   })
 
   it('still drops the motion entirely under prefers-reduced-motion', () => {
-    expect(source).toContain('prefers-reduced-motion')
+    expect(source).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.placeholder\.shimmering\s*\{\s*animation:\s*none;/,
+    )
   })
 })

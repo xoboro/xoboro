@@ -18,7 +18,7 @@
    * The image is decorative: the title sits beside it as text, so announcing the same
    * words again from an `alt` would just repeat them.
    */
-  import { onDestroy } from 'svelte'
+  import { onDestroy, onMount, untrack } from 'svelte'
 
   let {
     src,
@@ -41,6 +41,12 @@
   /** Bumped per retry and appended to the URL, because the browser caches the 404. */
   let attempt = $state(0)
   let retryTimer = null
+  let shimmerTimer = null
+  let coverElement
+  let visible = $state(false)
+  let shimmering = $state(false)
+  let retrying = $state(false)
+  let disposed = false
 
   const url = $derived(
     attempt === 0 ? src : `${src}${src.includes('?') ? '&' : '?'}retry=${attempt}`,
@@ -55,19 +61,63 @@
   $effect(() => {
     src
     clearTimeout(retryTimer)
+    stopShimmer()
     ready = false
     failed = false
     attempt = 0
+    retrying = false
+    untrack(scheduleShimmer)
   })
 
-  onDestroy(() => clearTimeout(retryTimer))
+  onMount(() => {
+    if (typeof IntersectionObserver === 'undefined') return
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (disposed) return
+      visible = entry?.isIntersecting ?? false
+      scheduleShimmer()
+    })
+    observer.observe(coverElement)
+
+    return () => observer.disconnect()
+  })
+
+  onDestroy(() => {
+    disposed = true
+    clearTimeout(retryTimer)
+    clearTimeout(shimmerTimer)
+  })
+
+  function stopShimmer() {
+    clearTimeout(shimmerTimer)
+    shimmerTimer = null
+    shimmering = false
+  }
+
+  function scheduleShimmer() {
+    if (disposed) return
+    stopShimmer()
+    if (!visible || ready || failed || retrying) return
+
+    shimmerTimer = setTimeout(() => {
+      if (visible && !ready && !failed && !retrying) shimmering = true
+    }, 250)
+  }
+
+  function loaded() {
+    stopShimmer()
+    retrying = false
+    ready = true
+  }
 
   function missing() {
+    stopShimmer()
     const delay = retryDelays[attempt]
     if (delay === undefined) {
       failed = true
       return
     }
+    retrying = true
     const next = attempt + 1
     clearTimeout(retryTimer)
     retryTimer = setTimeout(() => (attempt = next), delay)
@@ -75,9 +125,9 @@
 
 </script>
 
-<div class="cover" style={`aspect-ratio:${ratio}`}>
+<div class="cover" style={`aspect-ratio:${ratio}`} bind:this={coverElement}>
   {#if !ready}
-    <span class="placeholder" class:permanent={failed} data-testid="cover-placeholder" aria-hidden="true"></span>
+    <span class="placeholder" class:shimmering class:permanent={failed} data-testid="cover-placeholder" aria-hidden="true"></span>
   {/if}
   {#if !failed}
     <img
@@ -87,7 +137,7 @@
       role="presentation"
       loading="lazy"
       decoding="async"
-      onload={() => (ready = true)}
+      onload={loaded}
       onerror={missing}
     />
   {/if}
@@ -154,21 +204,11 @@
      * resting states identical.
      */
     background-position: -220% 0, 0 0;
-    /*
-     * Bounded, not `infinite`. `loading="lazy"` means an off-screen image fires neither
-     * `load` nor `error`, so its placeholder is the one that never resolves — and a home
-     * grid holds a hundred of them. An unbounded shimmer there is a hundred compositor
-     * animations running for a page nobody has scrolled to.
-     *
-     * Seventeen iterations rather than six, because six ends at 10.8s while `retryDelays`
-     * keeps asking until 30s: a cover still on its way and one that will never arrive
-     * looked identical for the nineteen seconds in between. This covers the whole window.
-     *
-     * `forwards` is required, not decoration. Without it the rest state is the *specified*
-     * position, `0%`, which parks the sheen inside the box on a mid-sweep frame — the
-     * highlight pops back in at the edge and freezes there, which reads as a rendering
-     * fault. At the `to` frame it sits entirely outside.
-     */
+  }
+  /* Motion is feedback for a wait the reader can actually see. The component adds this
+     class only after a visible cover has remained unresolved for 250ms; lazy off-screen
+     covers and retrying 404s keep the same placeholder without spending animation work. */
+  .placeholder.shimmering {
     animation: cover-shimmer 1.8s ease-in-out 17;
     animation-fill-mode: forwards;
   }
@@ -186,7 +226,7 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .placeholder {
+    .placeholder.shimmering {
       animation: none;
     }
     img {
