@@ -78,10 +78,11 @@ describe('signIn', () => {
       reply({ body: { user: { id: 'u1', email: 'a@example.invalid', roles: [] } } }),
     )
     globalThis.fetch = fetchImpl
-    const user = await signIn('a@example.invalid', 'synthetic-password')
+    const user = await signIn('a@example.invalid', 'synthetic-password', true)
 
     const [, init] = fetchImpl.mock.calls[0]
     expect(JSON.parse(init.body).transport).toBe('COOKIE')
+    expect(JSON.parse(init.body).rememberMe).toBe(true)
     // The response for this transport carries no token, and nothing in the store
     // has anywhere to put one.
     expect(user.accessToken).toBeUndefined()
