@@ -17,6 +17,7 @@
 
   let email = $state('')
   let password = $state('')
+  let rememberMe = $state(true)
   let submitting = $state(false)
   let error = $state(null)
   let waitSeconds = $state(0)
@@ -40,7 +41,7 @@
     submitting = true
     error = null
     try {
-      await signIn(email, password)
+      await signIn(email, password, rememberMe)
     } catch (caught) {
       error = caught
       if (caught.treatment === Treatment.THROTTLED && caught.retryAfterSeconds > 0) {
@@ -71,6 +72,11 @@
       bind:value={email}
       required
     />
+
+    <label class="remember" for="signin-remember">
+      <input id="signin-remember" type="checkbox" bind:checked={rememberMe} />
+      <span>{$_('session.rememberMe')}</span>
+    </label>
 
     <label for="signin-password">{$_('session.password')}</label>
     <input
@@ -138,6 +144,19 @@
   }
   input[aria-invalid='true'] {
     border-color: var(--danger);
+  }
+  .remember {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--touch-target);
+  }
+  .remember input {
+    width: 1rem;
+    min-height: auto;
+    margin: 0;
+    padding: 0;
+    accent-color: var(--accent);
   }
   button {
     min-height: var(--touch-target);

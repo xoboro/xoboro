@@ -6,12 +6,16 @@ import io.ktor.server.auth.bearer
 import io.ktor.server.plugins.origin
 import io.ktor.server.plugins.ratelimit.RateLimitConfig
 import io.ktor.server.plugins.ratelimit.RateLimitName
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.User
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
-fun AuthenticationConfig.configureXoboroNativeAuthentication(sessions: UserSessionLifecycle) {
+fun AuthenticationConfig.configureXoboroNativeAuthentication(
+  sessions: UserSessionLifecycle,
+  rememberMe: RememberMeTokenService? = null,
+) {
   bearer(XOBORO_BEARER_AUTHENTICATION) {
     realm = XOBORO_AUTHENTICATION_REALM
     authenticate { credential ->
@@ -22,23 +26,42 @@ fun AuthenticationConfig.configureXoboroNativeAuthentication(sessions: UserSessi
   }
   provider(XOBORO_COOKIE_AUTHENTICATION) {
     authenticate { context ->
-      val token = context.call.request.cookies[XOBORO_SESSION_COOKIE]
-      val user = token?.let(sessions::authenticate)
-      if (token == null) {
-        context.error(
-          XOBORO_COOKIE_AUTHENTICATION,
-          AuthenticationFailedCause.NoCredentials,
-        )
-      } else if (user == null) {
-        context.error(
-          XOBORO_COOKIE_AUTHENTICATION,
-          AuthenticationFailedCause.InvalidCredentials,
-        )
-      } else {
+      val sessionToken = context.call.request.cookies[XOBORO_SESSION_COOKIE]
+      val sessionUser = sessionToken?.let(sessions::authenticate)
+      if (sessionUser != null) {
         context.principal(
           XOBORO_COOKIE_AUTHENTICATION,
-          XoboroPrincipal(user, token, SessionTransport.COOKIE),
+          XoboroPrincipal(sessionUser, requireNotNull(sessionToken), SessionTransport.COOKIE),
         )
+      } else {
+        val rememberedToken = context.call.request.cookies[XOBORO_REMEMBER_ME_COOKIE]
+        val rememberedUser = rememberedToken?.let { rememberMe?.authenticate(it) }
+        val restored =
+          rememberedUser?.let { user ->
+            sessions.create(user)?.also { created ->
+              context.call.appendXoboroSessionCookie(created.plainToken)
+            }
+          }
+        if (rememberedToken != null && rememberedUser == null) {
+          context.call.expireXoboroRememberMeCookie()
+        }
+        when {
+          restored != null ->
+            context.principal(
+              XOBORO_COOKIE_AUTHENTICATION,
+              XoboroPrincipal(rememberedUser, restored.plainToken, SessionTransport.COOKIE),
+            )
+          sessionToken == null && rememberedToken == null ->
+            context.error(
+              XOBORO_COOKIE_AUTHENTICATION,
+              AuthenticationFailedCause.NoCredentials,
+            )
+          else ->
+            context.error(
+              XOBORO_COOKIE_AUTHENTICATION,
+              AuthenticationFailedCause.InvalidCredentials,
+            )
+        }
       }
     }
   }
@@ -64,6 +87,7 @@ data class XoboroPrincipal(
 
 const val XOBORO_API_PREFIX: String = "/api/xoboro/v1"
 const val XOBORO_SESSION_COOKIE: String = "XOBORO-SESSION"
+const val XOBORO_REMEMBER_ME_COOKIE: String = "XOBORO-REMEMBER-ME"
 const val XOBORO_BEARER_AUTHENTICATION: String = "xoboro-bearer"
 const val XOBORO_COOKIE_AUTHENTICATION: String = "xoboro-cookie"
 internal val XOBORO_LOGIN_RATE_LIMIT = RateLimitName("xoboro-login")

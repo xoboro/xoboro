@@ -25,6 +25,7 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.PasswordHasher
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ApiKeyId
@@ -153,6 +154,174 @@ class XoboroNativeAuthenticationTest {
         client.get("$XOBORO_API_PREFIX/session") {
           bearerAuth(accessToken)
         }.status,
+      )
+    }
+
+  @Test
+  fun `issues or clears the native remember-me cookie according to the login request`() =
+    testApplication {
+      installNativeAuthentication()
+      claimAdministrator()
+
+      val login =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          trustedBrowserMutation()
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              rememberMe = true,
+            ),
+          )
+        }
+
+      assertEquals(HttpStatusCode.OK, login.status)
+      val rememberCookie =
+        assertNotNull(login.headers.getAll(HttpHeaders.SetCookie))
+          .single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+      assertTrue(rememberCookie.contains("Max-Age=31536000"))
+      assertTrue(rememberCookie.contains("HttpOnly"))
+      assertTrue(rememberCookie.contains("SameSite=Strict"))
+
+      val ordinaryLogin =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          trustedBrowserMutation()
+          setBody(LoginRequest("admin@example.invalid", "synthetic-password"))
+        }
+      val clearedRememberCookie =
+        assertNotNull(ordinaryLogin.headers.getAll(HttpHeaders.SetCookie))
+          .single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+      assertTrue(clearedRememberCookie.contains("Max-Age=0"))
+    }
+
+  @Test
+  fun `restores a native cookie session from remember-me`() =
+    testApplication {
+      installNativeAuthentication()
+      claimAdministrator()
+
+      val restored =
+        client.get("$XOBORO_API_PREFIX/session") {
+          cookie(XOBORO_REMEMBER_ME_COOKIE, "remember:user-1")
+        }
+
+      assertEquals(HttpStatusCode.OK, restored.status)
+      assertEquals("admin@example.invalid", restored.body<SessionResponse>().user.email)
+      val sessionCookie =
+        assertNotNull(restored.headers.getAll(HttpHeaders.SetCookie))
+          .single { it.startsWith("$XOBORO_SESSION_COOKIE=") }
+      val restoredSession =
+        sessionCookie.substringAfter("$XOBORO_SESSION_COOKIE=").substringBefore(';')
+      assertEquals(
+        HttpStatusCode.OK,
+        client.get("$XOBORO_API_PREFIX/session") {
+          cookie(XOBORO_SESSION_COOKIE, restoredSession)
+        }.status,
+      )
+    }
+
+  @Test
+  fun `does not replace an active native session when remember-me is also present`() =
+    testApplication {
+      val fixture = installNativeAuthentication()
+      claimAdministrator()
+      val login =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          trustedBrowserMutation()
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              rememberMe = true,
+            ),
+          )
+        }
+      val cookies = assertNotNull(login.headers.getAll(HttpHeaders.SetCookie))
+      val sessionToken =
+        cookies.single { it.startsWith("$XOBORO_SESSION_COOKIE=") }
+          .substringAfter("$XOBORO_SESSION_COOKIE=").substringBefore(';')
+      val rememberToken =
+        cookies.single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+          .substringAfter("$XOBORO_REMEMBER_ME_COOKIE=").substringBefore(';')
+
+      val active =
+        client.get("$XOBORO_API_PREFIX/session") {
+          cookie(XOBORO_SESSION_COOKIE, sessionToken)
+          cookie(XOBORO_REMEMBER_ME_COOKIE, rememberToken)
+        }
+
+      assertEquals(HttpStatusCode.OK, active.status)
+      assertEquals(2, fixture.issuedSessionCount)
+      assertTrue(
+        active.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+          .none { it.startsWith("$XOBORO_SESSION_COOKIE=") },
+      )
+    }
+
+  @Test
+  fun `expires an invalid native remember-me cookie`() =
+    testApplication {
+      installNativeAuthentication()
+      claimAdministrator()
+
+      val rejected =
+        client.get("$XOBORO_API_PREFIX/session") {
+          cookie(XOBORO_REMEMBER_ME_COOKIE, "invalid")
+        }
+
+      assertEquals(HttpStatusCode.Unauthorized, rejected.status)
+      val expiredCookie =
+        assertNotNull(rejected.headers.getAll(HttpHeaders.SetCookie))
+          .single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+      assertTrue(expiredCookie.contains("Max-Age=0"))
+    }
+
+  @Test
+  fun `signing out expires the native session and remember-me cookies`() =
+    testApplication {
+      installNativeAuthentication()
+      claimAdministrator()
+      val login =
+        client.post("$XOBORO_API_PREFIX/session") {
+          contentType(ContentType.Application.Json)
+          trustedBrowserMutation()
+          setBody(
+            LoginRequest(
+              email = "admin@example.invalid",
+              password = "synthetic-password",
+              rememberMe = true,
+            ),
+          )
+        }
+      val cookies = assertNotNull(login.headers.getAll(HttpHeaders.SetCookie))
+      val sessionToken =
+        cookies.single { it.startsWith("$XOBORO_SESSION_COOKIE=") }
+          .substringAfter("$XOBORO_SESSION_COOKIE=").substringBefore(';')
+      val rememberToken =
+        cookies.single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+          .substringAfter("$XOBORO_REMEMBER_ME_COOKIE=").substringBefore(';')
+
+      val logout =
+        client.delete("$XOBORO_API_PREFIX/session") {
+          header(
+            HttpHeaders.Cookie,
+            "$XOBORO_SESSION_COOKIE=$sessionToken; $XOBORO_REMEMBER_ME_COOKIE=$rememberToken",
+          )
+          trustedBrowserMutation()
+        }
+
+      assertEquals(HttpStatusCode.NoContent, logout.status)
+      val expiredCookies = assertNotNull(logout.headers.getAll(HttpHeaders.SetCookie))
+      assertTrue(
+        expiredCookies.single { it.startsWith("$XOBORO_SESSION_COOKIE=") }
+          .contains("Max-Age=0"),
+      )
+      assertTrue(
+        expiredCookies.single { it.startsWith("$XOBORO_REMEMBER_ME_COOKIE=") }
+          .contains("Max-Age=0"),
       )
     }
 
@@ -290,7 +459,7 @@ class XoboroNativeAuthenticationTest {
         json()
       }
       install(Authentication) {
-        configureXoboroNativeAuthentication(fixture.sessions)
+        configureXoboroNativeAuthentication(fixture.sessions, fixture.rememberMe)
       }
       install(RateLimit) {
         configureXoboroNativeRateLimits(loginLimit, 1.minutes)
@@ -307,7 +476,12 @@ class XoboroNativeAuthenticationTest {
         }
       }
       routing {
-        xoboroNativeAuthenticationRoutes(fixture.users, fixture.sessions, fixture.activities)
+        xoboroNativeAuthenticationRoutes(
+          fixture.users,
+          fixture.sessions,
+          fixture.rememberMe,
+          fixture.activities,
+        )
       }
     }
     createClient {
@@ -419,6 +593,8 @@ class XoboroNativeAuthenticationTest {
   ) {
     private val repository = InMemoryUserRepository()
     private val tokenSequence = AtomicInteger()
+    val issuedSessionCount: Int
+      get() = tokenSequence.get()
     val recordedActivity = RecordingAuthenticationActivityRepository()
     val activities =
       AuthenticationActivityLifecycle(
@@ -434,6 +610,19 @@ class XoboroNativeAuthenticationTest {
         currentTimeMillis = { 1_000 },
         inactivityTimeoutMillis = 60_000,
       )
+    val rememberMe =
+      object : RememberMeTokenService {
+        override fun issue(user: User): String = "remember:${user.id.value}"
+
+        override fun authenticate(encodedToken: String): User? =
+          encodedToken
+            .takeIf { it.startsWith("remember:") }
+            ?.substringAfter("remember:")
+            ?.let(::UserId)
+            ?.let(repository::findByIdOrNull)
+
+        override fun maxAgeSeconds(): Int = 31_536_000
+      }
     val users =
       UserLifecycle(
         users = repository,
