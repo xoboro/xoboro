@@ -39,6 +39,21 @@ describe('SignIn', () => {
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const [, init] = globalThis.fetch.mock.calls[0]
     expect(JSON.parse(init.body).transport).toBe('COOKIE')
+    expect(JSON.parse(init.body).rememberMe).toBe(true)
+    expect(screen.getByRole('checkbox', { name: '로그인 유지' })).toBeChecked()
+  })
+
+  it('can sign in without remembering this browser', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      reply({ status: 200, body: { user: { id: 'u1', email: 'a@example.invalid', roles: [] } } }),
+    )
+    const { container } = render(SignIn)
+    await fireEvent.click(screen.getByRole('checkbox', { name: '로그인 유지' }))
+    await fillAndSubmit(container)
+
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+    const [, init] = globalThis.fetch.mock.calls[0]
+    expect(JSON.parse(init.body).rememberMe).toBe(false)
   })
 
   it('blocks submission while the server says to wait', async () => {

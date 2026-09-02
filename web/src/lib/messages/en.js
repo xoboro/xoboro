@@ -25,6 +25,7 @@ export default {
     signInTitle: 'Sign in',
     email: 'Email',
     password: 'Password',
+    rememberMe: 'Keep me signed in',
     signIn: 'Sign in',
     signingIn: 'Signing in…',
     checking: 'Checking session…',

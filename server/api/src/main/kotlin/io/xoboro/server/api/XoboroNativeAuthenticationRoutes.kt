@@ -19,6 +19,7 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import io.xoboro.core.application.AuthenticationActivityLifecycle
 import io.xoboro.core.application.AuthenticationRequestDetails
+import io.xoboro.core.application.RememberMeTokenService
 import io.xoboro.core.application.UserLifecycle
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.ServerAlreadyClaimedException
@@ -34,6 +35,7 @@ import kotlinx.serialization.Serializable
 fun Route.xoboroNativeAuthenticationRoutes(
   users: UserLifecycle,
   sessions: UserSessionLifecycle,
+  rememberMe: RememberMeTokenService? = null,
   activities: AuthenticationActivityLifecycle? = null,
 ) {
   route(XOBORO_API_PREFIX) {
@@ -67,7 +69,12 @@ fun Route.xoboroNativeAuthenticationRoutes(
         source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
         details = call.nativeAuthenticationDetails(),
       )
-      call.respondSession(user, request.transport, sessions, HttpStatusCode.Created)
+      call.respondSession(
+        user,
+        request.transport,
+        sessions,
+        status = HttpStatusCode.Created,
+      )
     }
     rateLimit(XOBORO_LOGIN_RATE_LIMIT) {
       post("/session") {
@@ -108,7 +115,13 @@ fun Route.xoboroNativeAuthenticationRoutes(
           source = XOBORO_NATIVE_AUTHENTICATION_SOURCE,
           details = call.nativeAuthenticationDetails(),
         )
-        call.respondSession(user, request.transport, sessions)
+        call.respondSession(
+          user,
+          request.transport,
+          sessions,
+          rememberMe = rememberMe.takeIf { request.rememberMe },
+          clearRememberMe = !request.rememberMe,
+        )
       }
     }
     authenticate(
@@ -124,6 +137,7 @@ fun Route.xoboroNativeAuthenticationRoutes(
         val principal = requireNotNull(call.principal<XoboroPrincipal>())
         sessions.invalidate(principal.plainToken)
         call.expireXoboroSessionCookie()
+        call.expireXoboroRememberMeCookie()
         call.respond(HttpStatusCode.NoContent)
       }
     }
@@ -149,6 +163,8 @@ private suspend fun ApplicationCall.respondSession(
   user: User,
   transport: SessionTransport,
   sessions: UserSessionLifecycle,
+  rememberMe: RememberMeTokenService? = null,
+  clearRememberMe: Boolean = false,
   status: HttpStatusCode = HttpStatusCode.OK,
 ) {
   // A session is the whole point of this request, so contention cannot be absorbed the way the
@@ -162,6 +178,11 @@ private suspend fun ApplicationCall.respondSession(
     )
   if (transport == SessionTransport.COOKIE) {
     appendXoboroSessionCookie(created.plainToken)
+    if (rememberMe != null) {
+      appendXoboroRememberMeCookie(rememberMe.issue(user), rememberMe.maxAgeSeconds())
+    } else if (clearRememberMe) {
+      expireXoboroRememberMeCookie()
+    }
   }
   respond(
     status,
@@ -172,7 +193,7 @@ private suspend fun ApplicationCall.respondSession(
   )
 }
 
-private fun ApplicationCall.appendXoboroSessionCookie(token: String) {
+internal fun ApplicationCall.appendXoboroSessionCookie(token: String) {
   response.cookies.append(
     Cookie(
       name = XOBORO_SESSION_COOKIE,
@@ -185,10 +206,41 @@ private fun ApplicationCall.appendXoboroSessionCookie(token: String) {
   )
 }
 
+private fun ApplicationCall.appendXoboroRememberMeCookie(
+  token: String,
+  maxAgeSeconds: Int,
+) {
+  response.cookies.append(
+    Cookie(
+      name = XOBORO_REMEMBER_ME_COOKIE,
+      value = token,
+      path = "/",
+      maxAge = maxAgeSeconds,
+      httpOnly = true,
+      secure = request.origin.scheme == "https",
+      extensions = mapOf("SameSite" to "Strict"),
+    ),
+  )
+}
+
 private fun ApplicationCall.expireXoboroSessionCookie() {
   response.cookies.append(
     Cookie(
       name = XOBORO_SESSION_COOKIE,
+      value = "",
+      path = "/",
+      maxAge = 0,
+      httpOnly = true,
+      secure = request.origin.scheme == "https",
+      extensions = mapOf("SameSite" to "Strict"),
+    ),
+  )
+}
+
+internal fun ApplicationCall.expireXoboroRememberMeCookie() {
+  response.cookies.append(
+    Cookie(
+      name = XOBORO_REMEMBER_ME_COOKIE,
       value = "",
       path = "/",
       maxAge = 0,
@@ -224,6 +276,7 @@ data class LoginRequest(
   val email: String,
   val password: String,
   val transport: SessionTransport = SessionTransport.COOKIE,
+  val rememberMe: Boolean = false,
 )
 
 @Serializable

@@ -82,11 +82,12 @@ export async function loadSession() {
  *
  * @param {string} email
  * @param {string} password
+ * @param {boolean} rememberMe
  */
-export async function signIn(email, password) {
+export async function signIn(email, password, rememberMe) {
   const body = await request('/session', {
     method: 'POST',
-    body: { email, password, transport: 'COOKIE' },
+    body: { email, password, transport: 'COOKIE', rememberMe },
   })
   return authenticated(body.user)
 }

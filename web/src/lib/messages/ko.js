@@ -31,6 +31,7 @@ export default {
     signInTitle: '로그인',
     email: '이메일',
     password: '비밀번호',
+    rememberMe: '로그인 유지',
     signIn: '로그인',
     signingIn: '로그인 중…',
     checking: '세션 확인 중…',

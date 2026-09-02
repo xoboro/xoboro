@@ -86,11 +86,21 @@ The first successful request creates an administrator and returns
 {
   "email": "reader@example.invalid",
   "password": "a-long-unique-password",
-  "transport": "BEARER"
+  "transport": "COOKIE",
+  "rememberMe": true
 }
 ```
 
-A successful bearer response is:
+`transport` defaults to `COOKIE` when omitted. For cookie sessions,
+`rememberMe: true` also issues an HttpOnly `XOBORO-REMEMBER-ME` cookie. When the
+short-lived `XOBORO-SESSION` cookie is missing or expired, a valid remember-me
+cookie transparently opens a new session. Its lifetime follows the server's
+`rememberMeDurationDays` setting. `rememberMe` defaults to `false` for API
+clients; the Xoboro web sign-in form selects it by default. Bearer sessions
+ignore this field. A cookie login with `rememberMe: false` expires any existing
+native remember-me cookie in that browser.
+
+A successful bearer request (`transport: "BEARER"`) returns:
 
 ```json
 {
@@ -106,7 +116,6 @@ A successful bearer response is:
 `roles` carries `UserRole` names: `ADMIN`, `FILE_DOWNLOAD`, `PAGE_STREAMING`,
 `KOBO_SYNC`, `KOREADER_SYNC`. There is no `USER` role — a plain reader holds only
 the capability roles it was granted, and an account with none has an empty list.
-`transport` defaults to `COOKIE` when omitted.
 
 Password attempts are limited to ten per minute for each verified client IP by
 default. Rejected attempts consume the same budget as successful attempts.
@@ -123,7 +132,8 @@ the current user and omits the access token.
 `DELETE /api/xoboro/v1/session`
 
 The server immediately revokes the presented session. Cookie responses also
-expire `XOBORO-SESSION`. Successful logout returns `204 No Content`.
+expire `XOBORO-SESSION` and `XOBORO-REMEMBER-ME`. Successful logout returns
+`204 No Content`.
 
 ## Machine-readable description
 

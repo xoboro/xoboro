@@ -361,7 +361,9 @@ fun Application.xoboroModule(
       sessions = userSessionLifecycle,
       rememberMe = rememberMeTokenService,
       additionalConfiguration = {
-        nativeSessions?.let(::configureXoboroNativeAuthentication)
+        nativeSessions?.let { sessions ->
+          configureXoboroNativeAuthentication(sessions, rememberMeTokenService)
+        }
       },
     )
   }
@@ -514,7 +516,12 @@ fun Application.xoboroModule(
       }
       userLifecycle?.let {
         nativeSessions?.let { sessions ->
-          xoboroNativeAuthenticationRoutes(it, sessions, authenticationActivityLifecycle)
+          xoboroNativeAuthenticationRoutes(
+            users = it,
+            sessions = sessions,
+            rememberMe = rememberMeTokenService,
+            activities = authenticationActivityLifecycle,
+          )
           xoboroNativeUserAdminRoutes(it)
           if (apiKeyLifecycle == null) {
             xoboroNativeSelfServiceRoutes(it)
