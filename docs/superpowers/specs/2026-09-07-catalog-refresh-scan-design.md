@@ -128,18 +128,20 @@ continue to read the table; downgrade still follows the documented backup/restor
 
 ### Fingerprint contents
 
-Local inventory computes a SHA-256 Merkle fingerprint while walking. Each regular,
-non-hidden file contributes:
+Local inventory computes an order-independent SHA-256 metadata fingerprint while
+walking. Each regular, non-hidden file contributes a length-prefixed digest of:
 
 - portable relative path;
 - source identity when available;
 - byte size;
 - modification timestamp.
 
-Directory nodes combine their immediate file and child-directory hashes after sorting
-by portable entry name. Memory is bounded by the current directory entries and traversal
-depth, not total library size. Excluded and hidden subtrees contribute no file metadata,
-matching the inventory presented to reconciliation.
+The per-file digests are combined commutatively and the emitted-file count is included
+in the final digest, so filesystem iteration order cannot create a false change. Memory
+is constant with catalog size. Excluded and hidden subtrees contribute no file metadata,
+matching the inventory presented to reconciliation. This is a change detector for a
+trusted media source, not a content-authentication primitive; archive contents remain
+outside inventory exactly as they are today.
 
 The checkpoint also carries the source ID, root item ID, and the candidate-affecting
 library settings: CBX/PDF/EPUB enablement, one-shots marker, and directory exclusions.
