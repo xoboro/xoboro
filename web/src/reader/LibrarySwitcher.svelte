@@ -25,6 +25,8 @@
     selected,
     /** Called with the chosen library id, or null. */
     onchange,
+    /** Locks the scope while an operation is using it. */
+    disabled = false,
   } = $props()
 </script>
 
@@ -35,6 +37,7 @@
       class:on={selected === null}
       data-testid="library-all"
       aria-current={selected === null ? 'true' : undefined}
+      {disabled}
       onclick={() => onchange(null)}
     >
       {$_('catalog.library.all')}
@@ -45,6 +48,7 @@
         class:on={selected === library.id}
         data-testid={`library-${library.id}`}
         aria-current={selected === library.id ? 'true' : undefined}
+        {disabled}
         onclick={() => onchange(library.id)}
       >
         {library.name}
@@ -84,5 +88,9 @@
     background: var(--accent-quiet);
     color: var(--accent-text);
     font-weight: 600;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 </style>

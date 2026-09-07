@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { describe, expect, it, vi } from 'vitest'
+import { compile } from 'svelte/compiler'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import Home from '../src/reader/Home.svelte'
+import { SessionStatus, session } from '../src/lib/session.js'
 
 /**
  * The reader's home page, and what it says when a shelf cannot be read.
@@ -164,7 +168,8 @@ describe('Reader home', () => {
 
 /** Answers `/libraries` with the given libraries and everything else with an empty page. */
 function serverWithLibraries(libraries) {
-  return vi.fn(async (url) => {
+  return vi.fn(async (url, init = {}) => {
+    if (init.method === 'POST' && url.endsWith('/scan')) return reply(null, 202)
     if (url.includes('/libraries')) return reply(libraries)
     return reply(envelope())
   })
@@ -174,6 +179,11 @@ const TWO_LIBRARIES = [
   { id: 'lib-comics', name: 'comics' },
   { id: 'lib-webtoon', name: 'webtoon' },
 ]
+
+afterEach(() => {
+  session.set({ status: SessionStatus.UNKNOWN, user: null })
+  globalThis.localStorage?.clear()
+})
 
 describe('library switcher', () => {
   it('offers every library plus all of them', async () => {
@@ -240,6 +250,132 @@ describe('library switcher', () => {
   })
 })
 
+describe('manual library sync', () => {
+  const ADMINISTRATOR = { id: 'admin-1', roles: ['ADMIN'] }
+
+  it('queues a scan only for the selected library', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: ADMINISTRATOR })
+    const fetchImpl = serverWithLibraries(TWO_LIBRARIES)
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-lib-webtoon'))
+    await waitFor(() =>
+      expect(
+        fetchImpl.mock.calls.some(([url]) =>
+          url.includes('/series?') && url.includes('libraryId=lib-webtoon'),
+        ),
+      ).toBe(true),
+    )
+    fetchImpl.mockClear()
+
+    await fireEvent.click(screen.getByTestId('sync-libraries'))
+
+    await waitFor(() => {
+      const scans = fetchImpl.mock.calls.filter(
+        ([url, init = {}]) =>
+          url.includes('/libraries/') && url.endsWith('/scan') && init.method === 'POST',
+      )
+      expect(scans).toHaveLength(1)
+      expect(scans[0][0]).toContain('/libraries/lib-webtoon/scan')
+    })
+    expect(screen.getByTestId('sync-notice')).toHaveAttribute('role', 'status')
+  })
+
+  it('queues one scan per library when all libraries are selected', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: ADMINISTRATOR })
+    const fetchImpl = serverWithLibraries(TWO_LIBRARIES)
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await screen.findByTestId('library-all')
+    fetchImpl.mockClear()
+    await fireEvent.click(screen.getByTestId('sync-libraries'))
+
+    await waitFor(() => {
+      const scanUrls = fetchImpl.mock.calls
+        .filter(([, init = {}]) => init.method === 'POST')
+        .map(([url]) => url)
+      expect(scanUrls).toEqual([
+        expect.stringContaining('/libraries/lib-comics/scan'),
+        expect.stringContaining('/libraries/lib-webtoon/scan'),
+      ])
+    })
+  })
+
+  it('locks the chosen scope while scan requests are pending', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: ADMINISTRATOR })
+    let finishScans
+    const scansPending = new Promise((resolve) => {
+      finishScans = () => resolve(reply(null, 202))
+    })
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST' && url.endsWith('/scan')) return scansPending
+      if (url.includes('/libraries')) return reply(TWO_LIBRARIES)
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await screen.findByTestId('library-all')
+    await fireEvent.click(screen.getByTestId('sync-libraries'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sync-libraries')).toHaveAttribute('aria-busy', 'true')
+      expect(screen.getByTestId('sync-libraries')).toBeDisabled()
+      expect(screen.getByTestId('library-all')).toBeDisabled()
+      expect(screen.getByTestId('library-lib-webtoon')).toBeDisabled()
+    })
+
+    finishScans()
+    await waitFor(() => expect(screen.getByTestId('sync-libraries')).not.toBeDisabled())
+  })
+
+  it('retries only the libraries whose scan request failed', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: ADMINISTRATOR })
+    let webtoonFailed = false
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST' && url.endsWith('/scan')) {
+        if (url.includes('/lib-webtoon/') && !webtoonFailed) {
+          webtoonFailed = true
+          return reply({ code: 'internal_error', message: 'Synthetic failure' }, 500)
+        }
+        return reply(null, 202)
+      }
+      if (url.includes('/libraries')) return reply(TWO_LIBRARIES)
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await screen.findByTestId('library-all')
+    await fireEvent.click(screen.getByTestId('sync-libraries'))
+    const alert = await screen.findByRole('alert')
+
+    fetchImpl.mockClear()
+    await fireEvent.click(alert.querySelector('button'))
+
+    await waitFor(() => {
+      const retryScans = fetchImpl.mock.calls
+        .filter(([, init = {}]) => init.method === 'POST')
+        .map(([url]) => url)
+      expect(retryScans).toEqual([expect.stringContaining('/libraries/lib-webtoon/scan')])
+    })
+  })
+
+  it('does not offer library maintenance to a reader', async () => {
+    session.set({
+      status: SessionStatus.AUTHENTICATED,
+      user: { id: 'reader-1', roles: ['PAGE_STREAMING'] },
+    })
+    globalThis.fetch = serverWithLibraries(TWO_LIBRARIES)
+    render(Home)
+
+    await screen.findByTestId('library-all')
+    expect(screen.queryByTestId('sync-libraries')).toBeNull()
+  })
+})
+
 /**
  * Searching without leaving home.
  *
@@ -270,6 +406,20 @@ describe('home search', () => {
     await fireEvent.input(field, { target: { value } })
     return field
   }
+
+  it('keeps the focused search input at the iOS 16px floor', async () => {
+    // jsdom does not apply Svelte's injected scoped CSS, so inspect the CSS the Svelte
+    // compiler actually sends to a browser, then resolve its design token independently.
+    // Using --font-md here resolves to 15px and reproduces the iOS viewport zoom.
+    const source = readFileSync(join(process.cwd(), 'src/reader/Home.svelte'), 'utf8')
+    const compiled = compile(source, { filename: 'src/reader/Home.svelte' }).css.code
+    const rule = compiled.match(/\.searchbar[^{}]*input[^{}]*\{([^}]*)\}/)?.[1] ?? ''
+    const tokenName = rule.match(/font-size:\s*var\((--[a-z0-9-]+)\)/i)?.[1]
+    const tokens = readFileSync(join(process.cwd(), 'src/styles/tokens.css'), 'utf8')
+    const pixels = Number(tokens.match(new RegExp(`${tokenName}:\\s*(\\d+)px`))?.[1] ?? 0)
+
+    expect(pixels).toBeGreaterThanOrEqual(16)
+  })
 
   /**
    * Works, and not their chapters.

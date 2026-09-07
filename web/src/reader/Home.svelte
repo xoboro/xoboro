@@ -19,6 +19,7 @@
     Layers3,
     BookOpen,
     LogOut,
+    RefreshCw,
     Search,
     Settings,
     SlidersHorizontal,
@@ -27,7 +28,7 @@
   import { isAdministrator, session, signOut } from '../lib/session.js'
   import { artworkUrl, listSeries, readFeed } from '../lib/api/catalog.js'
   import { searchCatalog } from '../lib/api/catalogSearch.js'
-  import { listLibraries } from '../lib/api/libraries.js'
+  import { listLibraries, triggerLibraryTask } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
@@ -77,9 +78,17 @@
    */
   let libraries = $state([])
   let libraryId = $state(null)
+  let syncing = $state(false)
+  let syncError = $state(null)
+  let syncNotice = $state(null)
+  /** Libraries whose most recent manual scan request failed, kept for a precise retry. */
+  let retryTargets = $state([])
 
   const user = $derived($session.user)
   const administrator = $derived(isAdministrator(user))
+  const selectedSyncTargets = $derived(
+    libraryId ? libraries.filter((library) => library.id === libraryId) : libraries,
+  )
 
   /**
    * Searching without leaving home.
@@ -277,8 +286,40 @@
     await Promise.all([loadShelves(), loadSeries()])
   }
 
+  async function syncLibraries(targets) {
+    const operationTargets = [...targets]
+    if (!administrator || syncing || operationTargets.length === 0) return
+    syncing = true
+    syncError = null
+    syncNotice = null
+    retryTargets = []
+    try {
+      const outcomes = await Promise.allSettled(
+        operationTargets.map((library) => triggerLibraryTask(library.id, 'scan')),
+      )
+      const accepted = outcomes.filter((outcome) => outcome.status === 'fulfilled').length
+      const failed = outcomes.find((outcome) => outcome.status === 'rejected')
+      retryTargets = operationTargets.filter((_, index) => outcomes[index].status === 'rejected')
+      if (accepted > 0) {
+        // A scan trigger answers 202: say that it was queued, never that the files are
+        // already synchronized. Catalogue events refresh the screen as durable work lands.
+        syncNotice = $_('reader.syncAccepted', { values: { count: accepted } })
+      }
+      if (failed) syncError = failed.reason
+    } finally {
+      syncing = false
+    }
+  }
+
+  function retrySync() {
+    return syncLibraries(retryTargets)
+  }
+
   function chooseLibrary(next) {
     libraryId = next
+    syncError = null
+    syncNotice = null
+    retryTargets = []
     // A different library is a different set, so the page number the reader was on means
     // nothing in it - page 7 of one library is often past the end of another.
     seriesPage = 0
@@ -343,7 +384,29 @@
   </div>
 </header>
 
-<LibrarySwitcher {libraries} selected={libraryId} onchange={chooseLibrary} />
+<LibrarySwitcher {libraries} selected={libraryId} onchange={chooseLibrary} disabled={syncing} />
+
+{#if administrator}
+  <div class="sync-controls">
+    <button
+      class="sync"
+      type="button"
+      data-testid="sync-libraries"
+      disabled={syncing || selectedSyncTargets.length === 0}
+      aria-busy={syncing}
+      onclick={() => syncLibraries(selectedSyncTargets)}
+    >
+      <RefreshCw size={18} aria-hidden="true" />
+      <span>{syncing ? $_('reader.syncing') : $_('reader.sync')}</span>
+    </button>
+    <ErrorNotice error={syncError} onretry={retrySync} />
+    {#if syncNotice}
+      <p class="sync-notice" role="status" aria-live="polite" data-testid="sync-notice">
+        {syncNotice}
+      </p>
+    {/if}
+  </div>
+{/if}
 
 <div class="searchbar">
   <label class="visually-hidden" for="home-search">{$_('search.queryLabel')}</label>
@@ -515,6 +578,37 @@
     color: var(--text);
     cursor: pointer;
   }
+  .sync-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--gutter-right) var(--space-3) var(--gutter-left);
+  }
+  .sync {
+    display: flex;
+    min-height: var(--touch-target);
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-4);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-pill);
+    background: var(--surface-control);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--font-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .sync:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+  .sync-notice {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+  }
   .searchbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--touch-target);
@@ -532,7 +626,7 @@
     color: var(--text);
     font: inherit;
     /* 16px or iOS zooms the page on focus, which then never zooms back out. */
-    font-size: var(--font-md);
+    font-size: var(--font-input);
   }
   .searchbar input:focus {
     outline: none;

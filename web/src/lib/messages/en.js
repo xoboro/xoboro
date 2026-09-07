@@ -330,6 +330,10 @@ export default {
     recentlyAdded: 'Recently added',
     recentlyUpdated: 'Recently updated',
     allSeries: 'All series',
+    sync: 'Sync',
+    syncing: 'Requesting sync…',
+    syncAccepted:
+      '{count, plural, one {Queued sync for one library} other {Queued sync for # libraries}}',
     noSeries: 'Nothing here yet',
     shelvesFailed:
       '{count, plural, one {One shelf could not be loaded} other {# shelves could not be loaded}}. They are not empty \u2014 they are unknown.',

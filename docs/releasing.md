@@ -100,20 +100,13 @@ upgrading**, and treat a downgrade as a restore rather than as a version change.
   is a human decision about whether a moment is a good one to ship, which no commit message expresses.
 - **No changelog file.** The commit range is the changelog, and a tracked `CHANGELOG.md` would be a
   second thing to keep in agreement with it. Release notes are generated per release from the range.
-- **CI is currently paused.** `.github/workflows/{ci,container,differential}.yml` have their triggers
-  commented out and run only on `workflow_dispatch`, because GitHub Actions is unavailable on this
-  account (#128). Until that is resolved, "confirm `main` is green" means a local `./gradlew check` **and
-  a local `npm test && npm run build` in `web/`**, and the container image has to be built by hand or by a
-  manual workflow run. This is a real gap in the release process, recorded rather than glossed over.
+- **CI runs automatically.** `ci.yml` verifies the backend and web UI on every pull request and on
+  pushes to `main`. `container.yml` runs its confined-image acceptance gate for pull requests that
+  affect the packaged image, then publishes multi-architecture images after a `main` or version-tag
+  push. `differential.yml` runs for relevant compatibility changes and on its weekly schedule. All
+  three workflows retain `workflow_dispatch` for an operator who needs an explicit run.
 
-  The container half of that gap is narrowed rather than closed: `scripts/container-acceptance.sh` is
-  the same gate the workflow runs, so an operator can execute it locally and get the identical result.
-  That is deliberate — while the triggers are off, a check that exists only inside a workflow nobody
-  runs is not a check at all.
-
-  The web job exists in `ci.yml` and is paused by the same missing trigger block as the backend one, so
-  the UI's tests and build do not run anywhere automatic today either. Two things make the local run
-  non-optional: `npm test` once reported "224 passed" while exiting `1` on unhandled errors, so the exit
-  code is what has to be checked rather than the summary line; and the production build catches what the
-  tests structurally cannot, because a bad import resolves under Vitest and fails only when the bundle is
-  linked.
+  `scripts/container-acceptance.sh` remains the local form of the container gate, so a release can be
+  checked before it is pushed and CI checks exactly the same behavior. Local web verification still
+  requires both `npm test` and `npm run build`: the test runner's exit code catches unhandled failures,
+  while the production build catches linking failures that Vitest cannot.
