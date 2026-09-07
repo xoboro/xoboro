@@ -10,6 +10,7 @@ import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -96,6 +97,36 @@ class LocalSourceInventoryTest {
     assertFailsWith<IllegalArgumentException> {
       inventory.inventory(tempDirectory.uri(), directoryExclusions = setOf(""), onFile = {})
     }
+  }
+
+  @Test
+  fun `fingerprint ignores hidden and excluded entries but changes with visible metadata`() {
+    val visible = tempDirectory.resolve("Visible").createDirectory().resolve("book.cbz")
+    visible.writeText("first")
+    Files.setLastModifiedTime(visible, FileTime.fromMillis(1_000L))
+    val hidden = tempDirectory.resolve(".hidden").createDirectory().resolve("ignored.cbz")
+    hidden.writeText("hidden")
+    val excluded = tempDirectory.resolve("Cache").createDirectory().resolve("ignored.cbz")
+    excluded.writeText("cached")
+
+    val baseline = inventory.fingerprint(tempDirectory.uri(), setOf("cache"))
+
+    hidden.writeText("hidden changed")
+    excluded.writeText("cached changed")
+    assertEquals(baseline, inventory.fingerprint(tempDirectory.uri(), setOf("cache")))
+
+    visible.writeText("visible changed")
+    Files.setLastModifiedTime(visible, FileTime.fromMillis(2_000L))
+    assertNotEquals(baseline, inventory.fingerprint(tempDirectory.uri(), setOf("cache")))
+  }
+
+  @Test
+  fun `inventory summary carries the fingerprint from the same walk`() {
+    tempDirectory.resolve("book.cbz").writeText("synthetic")
+
+    val summary = inventory.inventory(tempDirectory.uri(), onFile = {})
+
+    assertEquals(inventory.fingerprint(tempDirectory.uri()).value, summary.fingerprint)
   }
 
   private fun Path.uri(): String = toUri().toString()

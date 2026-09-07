@@ -44,12 +44,16 @@ data class SourceInventorySummary(
   val emittedFiles: Long,
   val skippedDirectories: Long,
   val failedEntries: Long,
+  val fingerprint: String? = null,
 ) {
   init {
     require(visitedDirectories >= 0) { "Visited directory count must not be negative" }
     require(emittedFiles >= 0) { "Emitted file count must not be negative" }
     require(skippedDirectories >= 0) { "Skipped directory count must not be negative" }
     require(failedEntries >= 0) { "Failed entry count must not be negative" }
+    require(fingerprint == null || fingerprint.isNotBlank()) {
+      "Inventory fingerprint must be null or non-blank"
+    }
   }
 }
 
