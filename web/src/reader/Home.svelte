@@ -229,6 +229,9 @@
   // component owns is cancelled together, so none of it can deliver into the next screen.
   onDestroy(() => {
     clearTimeout(searchTimer)
+    searchSerial += 1
+    shelvesSerial += 1
+    seriesSerial += 1
     searchController?.abort()
     shelvesController?.abort()
     seriesController?.abort()
