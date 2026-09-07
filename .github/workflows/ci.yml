@@ -1,26 +1,10 @@
 name: CI
 
-# Automatic triggers are paused: this is a private repository, so every Actions minute is
-# billed, and the account hit its Actions spending limit. GitHub refuses to start the jobs at
-# all in that state, which turns every check into a red cross that says nothing about the code.
-#
-# The workflow is unchanged otherwise and still runs on demand:
-#
-#   gh workflow run "CI" --ref <branch>
-#
-# To restore automatic runs, put the trigger block below back (see git history for this file):
-#
-#   push:
-#     branches:
-#       - main
-#   pull_request:
-#
-# Both jobs below - backend and web - are paused by the same missing trigger block. The
-# web project's tests and build do not run anywhere automatic today, which is a real gap
-# rather than an oversight, and it is recorded in docs/releasing.md alongside the same
-# gap for the backend.
-
 on:
+  push:
+    branches:
+      - main
+  pull_request:
   workflow_dispatch:
 
 permissions:

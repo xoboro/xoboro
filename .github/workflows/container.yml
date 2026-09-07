@@ -1,24 +1,28 @@
 name: Container
 
-# Automatic triggers are paused: this is a private repository, so every Actions minute is
-# billed, and the account hit its Actions spending limit. GitHub refuses to start the jobs at
-# all in that state, which turns every check into a red cross that says nothing about the code.
-#
-# The workflow is unchanged otherwise and still runs on demand:
-#
-#   gh workflow run "Container" --ref <branch>
-#
-# To restore automatic runs, put the trigger block below back (see git history for this file):
-#
-#   push:
-#     branches:
-#       - main
-#     tags:
-#       - "v*"
-#   pull_request:
-#     paths: <see git history>
-
 on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - ".github/workflows/container.yml"
+      - ".dockerignore"
+      - ".env.example"
+      - "Dockerfile"
+      - "compose.yaml"
+      - "scripts/container-acceptance.sh"
+      - "gradle/**"
+      - "gradlew"
+      - "gradle.properties"
+      - "settings.gradle.kts"
+      - "**/*.gradle.kts"
+      - "core/**"
+      - "compatibility/komga-api/**"
+      - "server/**"
+      - "web/**"
   workflow_dispatch:
 
 permissions:
@@ -57,8 +61,7 @@ jobs:
           cache-from: type=gha,scope=xoboro-container
           cache-to: type=gha,mode=max,scope=xoboro-container
 
-      # Delegated to a script so this gate is runnable by hand, which matters while automatic
-      # triggers are paused: a check that only exists inside a workflow nobody runs is not a check.
+      # Delegated to a script so the same release gate is runnable both locally and in CI.
       # It replaces an inline `docker run` that waited for the healthcheck and stopped there. That
       # proved the server starts and nothing about the release - the web UI is a separate build
       # stage copied in, so an image shipping no user interface reported healthy - and it dropped no
