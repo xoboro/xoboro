@@ -179,6 +179,14 @@ jobs:
                 .oneshot == true and
                 .seriesTitle == "Synthetic Standalone")
             then "READY" else "" end'
+          series_ready_filter='if (.content | length) == 2 and
+              all(.content[];
+                any(.booksMetadata.authors[]?;
+                  .name == "Synthetic Author" and .role == "writer") and
+                .booksMetadata.releaseDate != null and
+                .booksMetadata.summary != "" and
+                (.booksMetadata.tags | length) > 0)
+            then "READY" else "" end'
 
           catalog_ready=false
           for attempt in $(seq 1 300); do
@@ -192,6 +200,16 @@ jobs:
                 --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
                 "http://127.0.0.1:25611/api/v1/books?page=0&size=20"
             )"
+            reference_series="$(
+              curl --silent --show-error \
+                --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                "http://127.0.0.1:25610/api/v1/series?page=0&size=20"
+            )"
+            candidate_series="$(
+              curl --silent --show-error \
+                --user "${SYNTHETIC_EMAIL}:${SYNTHETIC_PASSWORD}" \
+                "http://127.0.0.1:25611/api/v1/series?page=0&size=20"
+            )"
             reference_status="$(
               printf '%s' "${reference_books}" |
                 jq --raw-output "${catalog_ready_filter}" 2>/dev/null || true
@@ -200,8 +218,18 @@ jobs:
               printf '%s' "${candidate_books}" |
                 jq --raw-output "${catalog_ready_filter}" 2>/dev/null || true
             )"
+            reference_series_status="$(
+              printf '%s' "${reference_series}" |
+                jq --raw-output "${series_ready_filter}" 2>/dev/null || true
+            )"
+            candidate_series_status="$(
+              printf '%s' "${candidate_series}" |
+                jq --raw-output "${series_ready_filter}" 2>/dev/null || true
+            )"
             if [ "${reference_status}" = "READY" ] &&
-              [ "${candidate_status}" = "READY" ]; then
+              [ "${candidate_status}" = "READY" ] &&
+              [ "${reference_series_status}" = "READY" ] &&
+              [ "${candidate_series_status}" = "READY" ]; then
               catalog_ready=true
               break
             fi
@@ -212,10 +240,16 @@ jobs:
               echo "Synthetic catalog was not ready after ${attempt} attempts."
               echo "reference status: '${reference_status}' (empty means the filter did not match)"
               echo "candidate status: '${candidate_status}'"
+              echo "reference series status: '${reference_series_status}'"
+              echo "candidate series status: '${candidate_series_status}'"
               echo "--- reference 127.0.0.1:25610 /api/v1/books ---"
               printf '%s\n' "${reference_books}" | jq . || printf '%s\n' "${reference_books}"
               echo "--- candidate 127.0.0.1:25611 /api/v1/books ---"
               printf '%s\n' "${candidate_books}" | jq . || printf '%s\n' "${candidate_books}"
+              echo "--- reference 127.0.0.1:25610 /api/v1/series ---"
+              printf '%s\n' "${reference_series}" | jq . || printf '%s\n' "${reference_series}"
+              echo "--- candidate 127.0.0.1:25611 /api/v1/series ---"
+              printf '%s\n' "${candidate_series}" | jq . || printf '%s\n' "${candidate_series}"
               # The readiness predicate above asserts a one-shot's seriesTitle, which is only
               # correct once REFRESH_SERIES_METADATA has run for that series. When it does not
               # match, the open question is always "did that task run, die, or never get
