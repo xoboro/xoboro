@@ -31,6 +31,7 @@
   import { listLibraries, triggerLibraryTask } from '../lib/api/libraries.js'
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
+  import { createHomeRefreshCoordinator } from './homeRefreshCoordinator.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
@@ -129,6 +130,7 @@
    * already replaced.
    */
   let searchSerial = 0
+  let searchController = null
   /**
    * Held apart from `error`.
    *
@@ -175,12 +177,18 @@
     if (!trimmed) {
       // Bumped so an in-flight request cannot deliver into an empty field.
       searchSerial += 1
+      searchController?.abort()
+      searchController = null
       results = null
       searchError = null
       searching = false
       return
     }
     const serial = ++searchSerial
+    searchController?.abort()
+    const controller = new AbortController()
+    searchController = controller
+    const requestedLibraryId = libraryId
     searching = true
     // Cleared as the new request goes out, not when it comes back. Left until then, a
     // failed search's alert sits beside "Loading…" for the whole of the next attempt and
@@ -192,9 +200,9 @@
       // before any request went out, so the field simply did nothing.
       const found = await searchCatalog('series', {
         query: trimmed,
-        libraryId: libraryId ? [libraryId] : [],
+        libraryId: requestedLibraryId ? [requestedLibraryId] : [],
         size: SEARCH_SIZE,
-      })
+      }, { signal: controller.signal })
       if (serial !== searchSerial) return
       results = found.items ?? []
       // Deliberately not clearing `error`. It may belong to the grid or the shelves, which
@@ -202,15 +210,30 @@
       // screen it belongs to stranded on "Loading…" with no notice and no retry.
       searchError = null
     } catch (caught) {
-      if (serial === searchSerial) searchError = caught
+      if (serial === searchSerial && caught?.name !== 'AbortError') searchError = caught
     } finally {
-      if (serial === searchSerial) searching = false
+      if (serial === searchSerial) {
+        searching = false
+        searchController = null
+      }
     }
   }
 
-  // A reader can navigate away mid-word. Without this the debounce fires into a component
-  // that is gone, and its request is one nobody will ever see the answer to.
-  onDestroy(() => clearTimeout(searchTimer))
+  let shelvesSerial = 0
+  let shelvesController = null
+  let seriesSerial = 0
+  let seriesController = null
+  let refreshCoordinator = null
+
+  // A reader can navigate away mid-word or with a request in flight. Everything this
+  // component owns is cancelled together, so none of it can deliver into the next screen.
+  onDestroy(() => {
+    clearTimeout(searchTimer)
+    searchController?.abort()
+    shelvesController?.abort()
+    seriesController?.abort()
+    refreshCoordinator?.dispose()
+  })
 
   function onQuery(event) {
     query = event.target.value
@@ -240,14 +263,20 @@
   }
 
   async function loadShelves() {
+    const serial = ++shelvesSerial
+    shelvesController?.abort()
+    const controller = new AbortController()
+    shelvesController = controller
+    const requestedLibraryId = libraryId
     // Settled rather than all-or-nothing: a reader with no progress yet gets nothing
     // useful from keep-reading, and that must not blank the rest of the page.
     const [keep, deck, added, changed] = await Promise.allSettled([
-      readFeed('media-items', 'keep-reading', { libraryId }),
-      readFeed('media-items', 'on-deck', { libraryId }),
-      readFeed('series', 'new', { libraryId }),
-      readFeed('series', 'updated', { libraryId }),
+      readFeed('media-items', 'keep-reading', { libraryId: requestedLibraryId, signal: controller.signal }),
+      readFeed('media-items', 'on-deck', { libraryId: requestedLibraryId, signal: controller.signal }),
+      readFeed('series', 'new', { libraryId: requestedLibraryId, signal: controller.signal }),
+      readFeed('series', 'updated', { libraryId: requestedLibraryId, signal: controller.signal }),
     ])
+    if (serial !== shelvesSerial) return
     if (keep.status === 'fulfilled') keepReading = keep.value.items ?? []
     if (deck.status === 'fulfilled') onDeck = deck.value.items ?? []
     if (added.status === 'fulfilled') recent = added.value.items ?? []
@@ -257,28 +286,48 @@
     // symptom was four permanently empty shelves - which reads as an empty library.
     // A shelf that could not be read is not a shelf with nothing on it.
     shelvesFailed = [keep, deck, added, changed].filter((r) => r.status === 'rejected').length
+    shelvesController = null
   }
 
   async function loadSeries(page = seriesPage) {
+    const serial = ++seriesSerial
+    seriesController?.abort()
+    const controller = new AbortController()
+    seriesController = controller
+    const requestedLibraryId = libraryId
     seriesBusy = true
     try {
-      const answer = await listSeries({ page, size: SERIES_PAGE_SIZE, libraryId })
+      const answer = await listSeries({
+        page,
+        size: SERIES_PAGE_SIZE,
+        libraryId: requestedLibraryId,
+        signal: controller.signal,
+      })
+      if (serial !== seriesSerial) return
       // A page can fall off the end while the reader is on it: series get removed, and a
       // library event refreshes in place. Landing on an empty grid would read as an empty
       // library, so the request is retried against the last page that still exists.
       const lastPage = Math.max(0, (answer.totalPages ?? 1) - 1)
       if (page > lastPage && (answer.items?.length ?? 0) === 0) {
         seriesPage = lastPage
-        allSeries = await listSeries({ page: lastPage, size: SERIES_PAGE_SIZE, libraryId })
+        allSeries = await listSeries({
+          page: lastPage,
+          size: SERIES_PAGE_SIZE,
+          libraryId: requestedLibraryId,
+          signal: controller.signal,
+        })
       } else {
         seriesPage = page
         allSeries = answer
       }
       error = null
     } catch (caught) {
-      error = caught
+      if (serial === seriesSerial && caught?.name !== 'AbortError') error = caught
     } finally {
-      seriesBusy = false
+      if (serial === seriesSerial) {
+        seriesBusy = false
+        seriesController = null
+      }
     }
   }
 
@@ -294,9 +343,17 @@
     syncNotice = null
     retryTargets = []
     try {
-      const outcomes = await Promise.allSettled(
-        operationTargets.map((library) => triggerLibraryTask(library.id, 'scan')),
-      )
+      const outcomes = []
+      for (const library of operationTargets) {
+        try {
+          outcomes.push({
+            status: 'fulfilled',
+            value: await triggerLibraryTask(library.id, 'scan'),
+          })
+        } catch (reason) {
+          outcomes.push({ status: 'rejected', reason })
+        }
+      }
       const accepted = outcomes.filter((outcome) => outcome.status === 'fulfilled').length
       const failed = outcomes.find((outcome) => outcome.status === 'rejected')
       retryTargets = operationTargets.filter((_, index) => outcomes[index].status === 'rejected')
@@ -316,6 +373,8 @@
   }
 
   function chooseLibrary(next) {
+    if (next === libraryId) return
+    clearTimeout(searchTimer)
     libraryId = next
     syncError = null
     syncNotice = null
@@ -325,6 +384,10 @@
     seriesPage = 0
     writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
     refresh()
+    if (query.trim()) {
+      submittedQuery = query
+      runSearch(query)
+    }
   }
 
   onMount(() => {
@@ -334,14 +397,25 @@
     libraryId = remembered === '' ? null : remembered
     loadLibraries()
     refresh()
+    refreshCoordinator =
+      createHomeRefreshCoordinator({
+        selectedLibrary: () => libraryId,
+        searchActive: () => query.trim().length > 0,
+        refreshCatalog: refresh,
+        refreshShelves: loadShelves,
+        refreshSearch: () => runSearch(query),
+      })
     const offCatalog = eventHub.on(
       ['series.added', 'series.changed', 'series.removed', 'media-item.added'],
-      refresh,
+      refreshCoordinator.onCatalog,
     )
     // Progress moves what keep-reading and on-deck contain, and only for this reader.
-    const offProgress = eventHub.on(['read-progress.changed', 'series-progress.changed'], loadShelves)
+    const offProgress = eventHub.on(
+      ['read-progress.changed', 'series-progress.changed'],
+      refreshCoordinator.onProgress,
+    )
     // The only trustworthy staleness signal.
-    const offResync = eventHub.onResync(refresh)
+    const offResync = eventHub.onResync(refreshCoordinator.onResync)
     return () => {
       offCatalog()
       offProgress()

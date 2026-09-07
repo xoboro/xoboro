@@ -30,7 +30,7 @@ export const FEEDS = Object.freeze({
  * @param {keyof FEEDS} feed
  * @param {{size?: number}} [options] paging only — a feed owns its order.
  */
-export function readFeed(collection, feed, { size = 20, libraryId = null } = {}) {
+export function readFeed(collection, feed, { size = 20, libraryId = null, signal } = {}) {
   const definition = FEEDS[feed]
   if (!definition) throw new Error(`unknown feed: ${feed}`)
   if (!definition.collections.includes(collection)) {
@@ -42,11 +42,11 @@ export function readFeed(collection, feed, { size = 20, libraryId = null } = {})
   // A feed refuses `sort` — its ordering is part of its definition — but it does take
   // the library filter, and it has to: a reader who has narrowed the shelf to one
   // library would otherwise still be offered chapters from the other one.
-  return request(`/${collection}/feeds/${feed}`, { query: { size, libraryId } })
+  return request(`/${collection}/feeds/${feed}`, { query: { size, libraryId }, signal })
 }
 
-export function listSeries({ page = 0, size = 50, libraryId = null, query = null } = {}) {
-  return request('/series', { query: { page, size, libraryId, query } })
+export function listSeries({ page = 0, size = 50, libraryId = null, query = null, signal } = {}) {
+  return request('/series', { query: { page, size, libraryId, query }, signal })
 }
 
 export function readSeries(seriesId) {

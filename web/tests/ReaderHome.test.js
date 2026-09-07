@@ -248,6 +248,36 @@ describe('library switcher', () => {
       expect(localStorage.getItem('xoboro.pref.anonymous.global.library')).toBe(''),
     )
   })
+
+  it('does not let a previous library series response overwrite the selected library', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply(TWO_LIBRARIES))
+      if (url.includes('/feeds/')) return Promise.resolve(reply(envelope()))
+      if (url.includes('/series?') && url.includes('libraryId=')) {
+        return new Promise((resolve) => pending.push({ url, init, resolve }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-lib-comics'))
+    await waitFor(() => expect(pending.some(({ url }) => url.includes('lib-comics'))).toBe(true))
+    await fireEvent.click(screen.getByTestId('library-lib-webtoon'))
+    await waitFor(() => expect(pending.some(({ url }) => url.includes('lib-webtoon'))).toBe(true))
+
+    const comics = pending.find(({ url }) => url.includes('lib-comics'))
+    const webtoon = pending.find(({ url }) => url.includes('lib-webtoon'))
+    expect(comics.init.signal).toBeDefined()
+    expect(comics.init.signal.aborted).toBe(true)
+
+    webtoon.resolve(reply(envelope([{ id: 'webtoon-1', title: 'Webtoon Answer' }])))
+    await waitFor(() => expect(screen.getByText('Webtoon Answer')).toBeInTheDocument())
+    comics.resolve(reply(envelope([{ id: 'comics-1', title: 'Comics Answer' }])))
+
+    await waitFor(() => expect(screen.getByText('Webtoon Answer')).toBeInTheDocument())
+    expect(screen.queryByText('Comics Answer')).toBeNull()
+  })
 })
 
 describe('manual library sync', () => {
@@ -284,7 +314,18 @@ describe('manual library sync', () => {
 
   it('queues one scan per library when all libraries are selected', async () => {
     session.set({ status: SessionStatus.AUTHENTICATED, user: ADMINISTRATOR })
-    const fetchImpl = serverWithLibraries(TWO_LIBRARIES)
+    let finishFirstScan
+    const firstScanPending = new Promise((resolve) => {
+      finishFirstScan = () => resolve(reply(null, 202))
+    })
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST' && url.includes('/lib-comics/') && url.endsWith('/scan')) {
+        return firstScanPending
+      }
+      if (init.method === 'POST' && url.endsWith('/scan')) return reply(null, 202)
+      if (url.includes('/libraries')) return reply(TWO_LIBRARIES)
+      return reply(envelope())
+    })
     globalThis.fetch = fetchImpl
     render(Home)
 
@@ -292,6 +333,14 @@ describe('manual library sync', () => {
     fetchImpl.mockClear()
     await fireEvent.click(screen.getByTestId('sync-libraries'))
 
+    await waitFor(() => {
+      const scanUrls = fetchImpl.mock.calls
+        .filter(([, init = {}]) => init.method === 'POST')
+        .map(([url]) => url)
+      expect(scanUrls).toEqual([expect.stringContaining('/libraries/lib-comics/scan')])
+    })
+
+    finishFirstScan()
     await waitFor(() => {
       const scanUrls = fetchImpl.mock.calls
         .filter(([, init = {}]) => init.method === 'POST')
@@ -515,6 +564,63 @@ describe('home search', () => {
       expect(screen.getByTestId('home-search-results').textContent).toContain('Later Answer'),
     )
     expect(screen.getByTestId('home-search-results').textContent).not.toContain('Earlier Answer')
+  })
+
+  it('aborts the previous library search and immediately searches the selected library', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply(TWO_LIBRARIES))
+      if (url.includes('/feeds/')) return Promise.resolve(reply(envelope()))
+      if (url.includes('query=')) {
+        return new Promise((resolve) => pending.push({ url, init, resolve }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('library-lib-comics'))
+    await typeQuery('조선')
+    await waitFor(() => expect(pending.some(({ url }) => url.includes('lib-comics'))).toBe(true))
+
+    await fireEvent.click(screen.getByTestId('library-lib-webtoon'))
+    await waitFor(() => expect(pending.some(({ url }) => url.includes('lib-webtoon'))).toBe(true))
+
+    const comics = pending.find(({ url }) => url.includes('lib-comics'))
+    const webtoon = pending.find(({ url }) => url.includes('lib-webtoon'))
+    expect(comics.init.signal).toBeDefined()
+    expect(comics.init.signal.aborted).toBe(true)
+
+    webtoon.resolve(reply(envelope([{ id: 'webtoon-1', title: '블랙기업조선' }])))
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results')).toHaveTextContent('블랙기업조선'),
+    )
+    comics.resolve(reply(envelope([{ id: 'comics-1', title: 'Stale Comics Answer' }])))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('home-search-results')).toHaveTextContent('블랙기업조선'),
+    )
+    expect(screen.getByTestId('home-search-results')).not.toHaveTextContent('Stale Comics Answer')
+  })
+
+  it('aborts its visible requests when the home screen is unmounted', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
+      if (url.includes('/feeds/')) return Promise.resolve(reply(envelope()))
+      if (url.includes('query=')) {
+        return new Promise((resolve) => pending.push({ init, resolve }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    const view = render(Home)
+
+    await typeQuery('조선')
+    await waitFor(() => expect(pending).toHaveLength(1))
+    expect(pending[0].init.signal).toBeDefined()
+
+    view.unmount()
+
+    expect(pending[0].init.signal.aborted).toBe(true)
   })
 
   /**
