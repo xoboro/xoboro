@@ -155,6 +155,36 @@ class JooqDurableTaskQueueTest {
   }
 
   @Test
+  fun `excludes matching work globally while unrelated tasks remain claimable`() {
+    withQueue("exclusions") { queue, _ ->
+      queue.enqueue(
+        taskFixture(id = "scan-a", groupId = "lib-a", exclusionKey = "library-scan"),
+        nowMillis = 1L,
+      )
+      queue.enqueue(
+        taskFixture(id = "scan-b", groupId = "lib-b", exclusionKey = "library-scan"),
+        nowMillis = 2L,
+      )
+      queue.enqueue(taskFixture(id = "independent"), nowMillis = 3L)
+
+      val first = queue.claim("worker-1", "lease-1", nowMillis = 10L)
+      assertEquals("scan-a", first?.task?.id)
+      assertEquals("library-scan", first?.task?.exclusionKey)
+
+      val independent = queue.claim("worker-2", "lease-2", nowMillis = 10L)
+      assertEquals("independent", independent?.task?.id)
+      assertNull(queue.claim("worker-3", "lease-3", nowMillis = 10L))
+
+      assertTrue(queue.complete("independent", "lease-2"))
+      assertTrue(queue.complete("scan-a", "lease-1"))
+      assertEquals(
+        "scan-b",
+        queue.claim("worker-3", "lease-4", nowMillis = 10L)?.task?.id,
+      )
+    }
+  }
+
+  @Test
   fun `deduplicates pending and running task IDs without mutating a running lease`() {
     withQueue("deduplicate") { queue, _ ->
       assertQueued(queue.enqueue(taskFixture(payload = """{"version":1}"""), nowMillis = 1L))
@@ -694,6 +724,7 @@ class JooqDurableTaskQueueTest {
     payload: String = "{}",
     priority: Int = TaskPriority.DEFAULT,
     groupId: String? = null,
+    exclusionKey: String? = null,
     maxAttempts: Int = 3,
     availableAtMillis: Long = 1L,
   ): DurableTask =
@@ -703,6 +734,7 @@ class JooqDurableTaskQueueTest {
       payloadJson = payload,
       priority = priority,
       groupId = groupId,
+      exclusionKey = exclusionKey,
       availableAtMillis = availableAtMillis,
       maxAttempts = maxAttempts,
     )

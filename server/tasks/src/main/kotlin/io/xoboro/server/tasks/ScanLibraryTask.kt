@@ -76,6 +76,7 @@ class ScanLibraryTaskEmitter(
           // candidates. The group also serialises a scan against that library's metadata fan-out,
           // which share it - the two competing for the write lock is what this group is for.
           groupId = libraryId.value,
+          exclusionKey = SCAN_EXCLUSION_KEY,
           availableAtMillis = nowMillis,
         ),
       nowMillis = nowMillis,
@@ -98,6 +99,9 @@ class ScanLibraryTaskEmitter(
 
     /** Distinguishes the pass queued *behind* a running scan from the running scan itself. */
     internal const val FOLLOW_UP_SUFFIX: String = "_AGAIN"
+
+    /** Prevents different library roots from competing for filesystem and SQLite resources. */
+    internal const val SCAN_EXCLUSION_KEY: String = "LIBRARY_SCAN"
 
     fun taskId(
       libraryId: LibraryId,

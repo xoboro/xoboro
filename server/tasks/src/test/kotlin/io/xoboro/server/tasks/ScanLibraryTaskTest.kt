@@ -77,6 +77,7 @@ class ScanLibraryTaskTest {
       // time. Ungrouped, two scans of one library could run at once - and `begin` retires every
       // other STAGING session for the library, so each would discard the other's staged candidates.
       assertEquals(LIBRARY_ID.value, claim.task.groupId)
+      assertEquals(ScanLibraryTaskEmitter.SCAN_EXCLUSION_KEY, claim.task.exclusionKey)
     }
   }
 
