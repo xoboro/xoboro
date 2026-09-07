@@ -112,6 +112,171 @@ class CatalogScannerTest {
   }
 
   @Test
+  fun `skips reconciliation when a regular fingerprint exactly matches its checkpoint`() {
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("same", failedEntries = 0),
+      )
+    val store = RecordingStore()
+    val checkpoints = RecordingCheckpointStore(matches = true)
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = { 10L },
+      )
+
+    val result = scanner.scan(libraryFixture(), deep = false)
+
+    assertEquals(reconciliationResult(), result)
+    assertEquals(1, inventory.fingerprintCalls)
+    assertEquals(0, inventory.inventoryCalls)
+    assertEquals(null, store.startedAtMillis)
+    assertEquals(emptyList(), checkpoints.replacements)
+  }
+
+  @Test
+  fun `first regular scan inventories once and checkpoints the inventory fingerprint`() {
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("probe", failedEntries = 0),
+        summary =
+          SourceInventorySummary(
+            visitedDirectories = 1,
+            emittedFiles = 1,
+            skippedDirectories = 0,
+            failedEntries = 0,
+            fingerprint = "inventory",
+          ),
+      )
+    val store = RecordingStore()
+    val checkpoints = RecordingCheckpointStore(matches = false, exists = false)
+    val times = ArrayDeque(listOf(10L, 20L))
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = times::removeFirst,
+      )
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    assertEquals(0, inventory.fingerprintCalls)
+    assertEquals(1, inventory.inventoryCalls)
+    assertEquals(listOf("inventory" to 20L), checkpoints.replacements)
+  }
+
+  @Test
+  fun `reconciles a changed fingerprint and checkpoints it after completion`() {
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("changed", failedEntries = 0),
+      )
+    val store = RecordingStore()
+    val checkpoints = RecordingCheckpointStore(matches = false)
+    val times = ArrayDeque(listOf(10L, 20L))
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = times::removeFirst,
+      )
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    assertEquals(1, inventory.fingerprintCalls)
+    assertEquals(1, inventory.inventoryCalls)
+    assertEquals(listOf("changed" to 20L), checkpoints.replacements)
+  }
+
+  @Test
+  fun `deep scans never probe or replace a fingerprint checkpoint`() {
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("same", failedEntries = 0),
+      )
+    val store = RecordingStore()
+    val checkpoints = RecordingCheckpointStore(matches = true)
+    val times = ArrayDeque(listOf(10L, 20L))
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = times::removeFirst,
+      )
+
+    scanner.scan(libraryFixture(), deep = true)
+
+    assertEquals(0, inventory.fingerprintCalls)
+    assertEquals(1, inventory.inventoryCalls)
+    assertEquals(emptyList(), checkpoints.replacements)
+  }
+
+  @Test
+  fun `a fingerprint probe with failed entries never skips or replaces`() {
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("partial-probe", failedEntries = 1),
+      )
+    val store = RecordingStore()
+    val checkpoints = RecordingCheckpointStore(matches = true)
+    val times = ArrayDeque(listOf(10L, 20L))
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = times::removeFirst,
+      )
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    assertEquals(1, inventory.inventoryCalls)
+    assertEquals(null, checkpoints.matchChecks)
+    assertEquals(emptyList(), checkpoints.replacements)
+  }
+
+  @Test
+  fun `a partial reconciliation never replaces a successful probe checkpoint`() {
+    val partial =
+      SourceInventorySummary(
+        visitedDirectories = 1,
+        emittedFiles = 1,
+        skippedDirectories = 0,
+        failedEntries = 1,
+      )
+    val inventory =
+      FakeFingerprintInventory(
+        files = listOf(sourceFile("Series/book.cbz")),
+        fingerprint = SourceInventoryFingerprint("changed", failedEntries = 0),
+        summary = partial,
+      )
+    val store = RecordingStore(result = reconciliationResult(failedEntries = 1, partial = true))
+    val checkpoints = RecordingCheckpointStore(matches = false)
+    val times = ArrayDeque(listOf(10L, 20L))
+    val scanner =
+      CatalogScanner(
+        inventories = listOf(inventory),
+        reconciliationStore = store,
+        checkpointStore = checkpoints,
+        currentTimeMillis = times::removeFirst,
+      )
+
+    scanner.scan(libraryFixture(), deep = false)
+
+    assertEquals(emptyList(), checkpoints.replacements)
+  }
+
+  @Test
   fun `rejects unknown and duplicate inventories`() {
     val store = RecordingStore()
     val scanner =
@@ -156,6 +321,67 @@ class CatalogScannerTest {
       failure?.let { throw it }
       files.forEach(onFile)
       return summary
+    }
+  }
+
+  private class FakeFingerprintInventory(
+    private val files: List<SourceFile>,
+    private val fingerprint: SourceInventoryFingerprint,
+    private val summary: SourceInventorySummary =
+      SourceInventorySummary(
+        visitedDirectories = 1,
+        emittedFiles = files.size.toLong(),
+        skippedDirectories = 0,
+        failedEntries = 0,
+      ),
+    override val sourceId: String = "local",
+  ) : FingerprintingSourceInventory {
+    var fingerprintCalls = 0
+    var inventoryCalls = 0
+
+    override fun fingerprint(
+      rootItemId: String,
+      directoryExclusions: Set<String>,
+    ): SourceInventoryFingerprint {
+      fingerprintCalls += 1
+      return fingerprint
+    }
+
+    override fun inventory(
+      rootItemId: String,
+      directoryExclusions: Set<String>,
+      onFile: (SourceFile) -> Unit,
+      onFailure: (SourceInventoryFailure) -> Unit,
+    ): SourceInventorySummary {
+      inventoryCalls += 1
+      files.forEach(onFile)
+      return summary
+    }
+  }
+
+  private class RecordingCheckpointStore(
+    private val matches: Boolean,
+    private val exists: Boolean = true,
+  ) : CatalogScanCheckpointStore {
+    var matchChecks: String? = null
+    val replacements = mutableListOf<Pair<String, Long>>()
+
+    override fun exists(library: Library): Boolean = exists
+
+    override fun matches(
+      library: Library,
+      sourceFingerprint: String,
+    ): Boolean {
+      matchChecks = sourceFingerprint
+      return matches
+    }
+
+    override fun replace(
+      library: Library,
+      sourceFingerprint: String,
+      completedAtMillis: Long,
+    ) {
+      replacements += sourceFingerprint to completedAtMillis
     }
   }
 

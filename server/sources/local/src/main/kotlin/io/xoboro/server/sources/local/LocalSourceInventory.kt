@@ -1,8 +1,9 @@
 package io.xoboro.server.sources.local
 
 import io.xoboro.core.application.SourceFile
-import io.xoboro.core.application.SourceInventory
+import io.xoboro.core.application.FingerprintingSourceInventory
 import io.xoboro.core.application.SourceInventoryFailure
+import io.xoboro.core.application.SourceInventoryFingerprint
 import io.xoboro.core.application.SourceInventorySummary
 import io.xoboro.core.application.SourceInventoryUnavailableException
 import java.io.IOException
@@ -23,7 +24,7 @@ class LocalInventoryUnavailableException(
 
 class LocalSourceInventory(
   override val sourceId: String = LocalLibraryRootInspector.SOURCE_ID,
-) : SourceInventory {
+) : FingerprintingSourceInventory {
   init {
     require(sourceId.isNotBlank()) { "Local source ID must not be blank" }
   }
@@ -46,6 +47,7 @@ class LocalSourceInventory(
     var emittedFiles = 0L
     var skippedDirectories = 0L
     var failedEntries = 0L
+    val fingerprint = SourceFingerprintAccumulator()
     Files.walkFileTree(
       root,
       setOf(FileVisitOption.FOLLOW_LINKS),
@@ -79,7 +81,7 @@ class LocalSourceInventory(
           if (attrs.isRegularFile && !file.fileName.toString().startsWith(".")) {
             val relativePath = root.relativize(file).portablePath()
             val name = file.fileName.toString()
-            onFile(
+            val sourceFile =
               SourceFile(
                 itemId = file.toAbsolutePath().normalize().toUri().toString(),
                 parentItemId = file.parent.toAbsolutePath().normalize().toUri().toString(),
@@ -89,8 +91,9 @@ class LocalSourceInventory(
                 extension = name.substringAfterLast('.', missingDelimiterValue = "").lowercase(),
                 size = attrs.size(),
                 modifiedAtMillis = attrs.lastModifiedTime().toMillis(),
-              ),
-            )
+              )
+            fingerprint.add(sourceFile)
+            onFile(sourceFile)
             emittedFiles += 1
           }
           return FileVisitResult.CONTINUE
@@ -117,6 +120,23 @@ class LocalSourceInventory(
       emittedFiles = emittedFiles,
       skippedDirectories = skippedDirectories,
       failedEntries = failedEntries,
+      fingerprint = fingerprint.finish(),
+    )
+  }
+
+  override fun fingerprint(
+    rootItemId: String,
+    directoryExclusions: Set<String>,
+  ): SourceInventoryFingerprint {
+    val summary =
+      inventory(
+        rootItemId = rootItemId,
+        directoryExclusions = directoryExclusions,
+        onFile = {},
+      )
+    return SourceInventoryFingerprint(
+      value = requireNotNull(summary.fingerprint),
+      failedEntries = summary.failedEntries,
     )
   }
 

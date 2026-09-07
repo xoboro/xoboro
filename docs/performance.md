@@ -14,6 +14,25 @@ Run the harness with:
 It is excluded from `check` and never runs in CI. Output is emitted twice: stable
 `xoboro.perf.<key>=<value>` lines for diffing, and a markdown table.
 
+## Settled: unchanged local scans stop before reconciliation
+
+A regular local scan now persists a successful metadata fingerprint per library.
+The first scan computes it during the existing inventory walk. Later scans perform a
+constant-memory, metadata-only probe over relative path, source identity, size, and
+modification time. When the fingerprint and candidate-affecting library settings match,
+the scan returns before opening a reconciliation session, staging candidates, or
+touching catalog rows.
+
+This removes the database half of an unchanged scan; it does not pretend that a local
+filesystem can be checked safely without walking it. A changed library pays for a
+second walk because reconciliation still needs each candidate. Deep scans, unsupported
+sources such as WebDAV, partial walks, and failed probes retain the complete path.
+
+Scan tasks also share a durable exclusion key. Two libraries therefore cannot run
+filesystem/catalog scans concurrently, while analysis, metadata, and artwork tasks can
+still use the remaining workers. This targets the observed scan contention without
+serializing the whole background queue.
+
 ## Reading the numbers
 
 Two rules, both learned by getting them wrong first.

@@ -15,18 +15,23 @@ class TaskQueueTest {
     assertFailsWith<IllegalArgumentException> {
       taskFixture(maxAttempts = 0)
     }
+    assertFailsWith<IllegalArgumentException> {
+      taskFixture(exclusionKey = "")
+    }
   }
 
   private fun taskFixture(
     id: String = "task-1",
     priority: Int = TaskPriority.DEFAULT,
     maxAttempts: Int = 3,
+    exclusionKey: String? = null,
   ): DurableTask =
     DurableTask(
       id = id,
       type = "SYNTHETIC",
       payloadJson = "{}",
       priority = priority,
+      exclusionKey = exclusionKey,
       availableAtMillis = 1L,
       maxAttempts = maxAttempts,
     )

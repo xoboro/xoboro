@@ -58,14 +58,15 @@ class JooqDurableTaskQueue(
         database.dsl.execute(
           """
           INSERT INTO task (
-            id, task_type, payload_json, priority, group_id, state, attempt_count,
+            id, task_type, payload_json, priority, group_id, exclusion_key, state, attempt_count,
             max_attempts, available_at_ms, created_at_ms, updated_at_ms
-          ) VALUES (?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             task_type = excluded.task_type,
             payload_json = excluded.payload_json,
             priority = max(task.priority, excluded.priority),
             group_id = excluded.group_id,
+            exclusion_key = excluded.exclusion_key,
             max_attempts = excluded.max_attempts,
             state = 'PENDING',
             available_at_ms =
@@ -81,6 +82,7 @@ class JooqDurableTaskQueue(
           task.payloadJson,
           task.priority,
           task.groupId,
+          task.exclusionKey,
           task.maxAttempts,
           task.availableAtMillis,
           nowMillis,
@@ -159,6 +161,16 @@ class JooqDurableTaskQueue(
                     AND active.lease_expires_at_ms > ?
                 )
               )
+              AND (
+                candidate.exclusion_key IS NULL
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM task active
+                  WHERE active.state = 'RUNNING'
+                    AND active.exclusion_key = candidate.exclusion_key
+                    AND active.lease_expires_at_ms > ?
+                )
+              )
             ORDER BY candidate.priority DESC, candidate.created_at_ms, candidate.id
             LIMIT 1
           ),
@@ -177,6 +189,16 @@ class JooqDurableTaskQueue(
                   FROM task active
                   WHERE active.state = 'RUNNING'
                     AND active.group_id = candidate.group_id
+                    AND active.lease_expires_at_ms > ?
+                )
+              )
+              AND (
+                candidate.exclusion_key IS NULL
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM task active
+                  WHERE active.state = 'RUNNING'
+                    AND active.exclusion_key = candidate.exclusion_key
                     AND active.lease_expires_at_ms > ?
                 )
               )
@@ -203,14 +225,16 @@ class JooqDurableTaskQueue(
           WHERE id = (SELECT id FROM chosen_candidate)
           AND state = 'PENDING'
           RETURNING
-            id, task_type, payload_json, priority, group_id, max_attempts,
+            id, task_type, payload_json, priority, group_id, exclusion_key, max_attempts,
             attempt_count, lease_owner, lease_token,
             CAST(available_at_ms AS TEXT) AS available_at_ms_64,
             CAST(lease_expires_at_ms AS TEXT) AS lease_expires_at_ms_64
           """.trimIndent(),
           nowMillis,
           nowMillis,
+          nowMillis,
           nowMillis - BACKGROUND_STARVATION_LIMIT_MILLIS,
+          nowMillis,
           nowMillis,
           nowMillis,
           workerId,
@@ -460,6 +484,7 @@ class JooqDurableTaskQueue(
           payloadJson = requiredString("payload_json"),
           priority = requiredInt("priority"),
           groupId = get("group_id", String::class.java),
+          exclusionKey = get("exclusion_key", String::class.java),
           availableAtMillis = requiredLongText("available_at_ms_64"),
           maxAttempts = requiredInt("max_attempts"),
         ),

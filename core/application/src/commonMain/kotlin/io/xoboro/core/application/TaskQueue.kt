@@ -14,6 +14,7 @@ data class DurableTask(
   val payloadJson: String,
   val priority: Int = TaskPriority.DEFAULT,
   val groupId: String? = null,
+  val exclusionKey: String? = null,
   val availableAtMillis: Long,
   val maxAttempts: Int = 3,
 ) {
@@ -25,6 +26,9 @@ data class DurableTask(
       "Task priority must be between ${TaskPriority.LOWEST} and ${TaskPriority.HIGHEST}"
     }
     require(groupId == null || groupId.isNotBlank()) { "Task group ID must be null or non-blank" }
+    require(exclusionKey == null || exclusionKey.isNotBlank()) {
+      "Task exclusion key must be null or non-blank"
+    }
     require(availableAtMillis >= 0) { "Task availability timestamp must not be negative" }
     require(maxAttempts > 0) { "Task max attempts must be positive" }
   }

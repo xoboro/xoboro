@@ -170,6 +170,7 @@ class UnknownSourceInventoryException(
 class CatalogScanner(
   inventories: Collection<SourceInventory>,
   private val reconciliationStore: CatalogReconciliationStore,
+  private val checkpointStore: CatalogScanCheckpointStore? = null,
   private val currentTimeMillis: () -> Long,
   private val batchSize: Int = 500,
 ) {
@@ -189,11 +190,20 @@ class CatalogScanner(
     library: Library,
     deep: Boolean,
   ): CatalogReconciliationResult {
-    val startedAtMillis = currentTimeMillis()
-    require(startedAtMillis >= 0) { "Scan timestamp must not be negative" }
     val inventory =
       inventoriesBySourceId[library.root.sourceId]
         ?: throw UnknownSourceInventoryException(library.root.sourceId)
+    val sourceFingerprint = inventory.fingerprintOrNull(library, deep)
+    if (
+      sourceFingerprint != null &&
+        sourceFingerprint.failedEntries == 0L &&
+        checkpointStore.matchesSafely(library, sourceFingerprint.value)
+    ) {
+      return unchangedResult()
+    }
+
+    val startedAtMillis = currentTimeMillis()
+    require(startedAtMillis >= 0) { "Scan timestamp must not be negative" }
     val session = reconciliationStore.begin(library.id, deep, startedAtMillis)
     val batch = ArrayList<CatalogCandidate>(batchSize)
     var ignoredFiles = 0L
@@ -222,12 +232,28 @@ class CatalogScanner(
       // volume is only recognisable as one when its first volume is present beside it. Doing this in
       // the streaming callback would mean buffering the entire library in memory.
       ignoredFiles += suppressContinuationVolumes(session)
-      reconciliationStore.complete(
+      val completedAtMillis = currentTimeMillis()
+      val result = reconciliationStore.complete(
         sessionId = session,
         failedEntries = summary.failedEntries,
         ignoredFiles = ignoredFiles,
-        completedAtMillis = currentTimeMillis(),
+        completedAtMillis = completedAtMillis,
       )
+      if (
+        !deep &&
+          !result.partial &&
+          summary.failedEntries == 0L &&
+          (summary.fingerprint != null || sourceFingerprint?.failedEntries == 0L)
+      ) {
+        runCatching {
+          checkpointStore?.replace(
+            library,
+            summary.fingerprint ?: sourceFingerprint!!.value,
+            completedAtMillis,
+          )
+        }
+      }
+      result
     } catch (failure: Throwable) {
       runCatching {
         reconciliationStore.abort(session, currentTimeMillis())
@@ -235,6 +261,36 @@ class CatalogScanner(
       throw failure
     }
   }
+
+  private fun SourceInventory.fingerprintOrNull(
+    library: Library,
+    deep: Boolean,
+  ): SourceInventoryFingerprint? {
+    if (
+      deep ||
+        checkpointStore == null ||
+        this !is FingerprintingSourceInventory
+    ) return null
+    if (!checkpointStore.existsSafely(library)) return null
+    return try {
+      fingerprint(
+        rootItemId = library.root.itemId,
+        directoryExclusions = library.settings.scanDirectoryExclusions,
+      )
+    } catch (failure: SourceInventoryUnavailableException) {
+      throw failure
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun CatalogScanCheckpointStore?.matchesSafely(
+    library: Library,
+    fingerprint: String,
+  ): Boolean = runCatching { this?.matches(library, fingerprint) == true }.getOrDefault(false)
+
+  private fun CatalogScanCheckpointStore?.existsSafely(library: Library): Boolean =
+    runCatching { this?.exists(library) == true }.getOrDefault(false)
 
   /**
    * Drops staged candidates that are continuation volumes of a multi-volume archive whose first volume
@@ -321,5 +377,20 @@ class CatalogScanner(
 
   companion object {
     const val ROOT_SERIES_PATH: String = "."
+
+    private fun unchangedResult(): CatalogReconciliationResult =
+      CatalogReconciliationResult(
+        addedBooks = 0,
+        changedBooks = 0,
+        movedBooks = 0,
+        restoredBooks = 0,
+        deletedBooks = 0,
+        addedSeries = 0,
+        restoredSeries = 0,
+        deletedSeries = 0,
+        ignoredFiles = 0,
+        failedEntries = 0,
+        partial = false,
+      )
   }
 }

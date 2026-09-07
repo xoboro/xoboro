@@ -101,6 +101,7 @@ import io.xoboro.server.persistence.JooqBookMetadataRepository
 import io.xoboro.server.persistence.JooqBookRepository
 import io.xoboro.server.persistence.JooqCatalogReadRepository
 import io.xoboro.server.persistence.JooqCatalogReconciliationStore
+import io.xoboro.server.persistence.JooqCatalogScanCheckpointStore
 import io.xoboro.server.persistence.JooqClientSettingsRepository
 import io.xoboro.server.persistence.JooqDurableTaskQueue
 import io.xoboro.server.persistence.JooqHistoricalEventRepository
@@ -600,6 +601,7 @@ class XoboroRuntime private constructor(
           CatalogScanner(
             inventories = listOf(LocalSourceInventory(), WebDavSourceInventory()),
             reconciliationStore = reconciliationStore,
+            checkpointStore = JooqCatalogScanCheckpointStore(database),
             currentTimeMillis = System::currentTimeMillis,
           )
         val libraryAvailabilityLifecycle =
