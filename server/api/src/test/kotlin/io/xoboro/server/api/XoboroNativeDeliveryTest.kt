@@ -21,6 +21,7 @@ import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.BookContentAccess
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
+import io.xoboro.core.application.CatalogBookReaderContext
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
@@ -58,8 +59,81 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class XoboroNativeDeliveryTest {
+  @Test
+  fun `reader context returns the comic item adjacent ids and page manifest only`() =
+    testApplication {
+      val fixture = Fixture.nonEpub()
+      installDelivery(fixture)
+
+      val response = client.get(READER_CONTEXT_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val context = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+      assertEquals(setOf("item", "previousId", "nextId", "pages", "positions"), context.keys)
+      assertEquals("media-delivery", context.getValue("item").jsonObject.getValue("id").jsonPrimitive.content)
+      assertEquals("COMIC", context.getValue("item").jsonObject.getValue("type").jsonPrimitive.content)
+      assertEquals("previous-delivery", context.getValue("previousId").jsonPrimitive.content)
+      assertEquals("next-delivery", context.getValue("nextId").jsonPrimitive.content)
+      assertEquals(
+        """[{"number":1,"mediaType":"image/jpeg","width":800,"height":1200,"sizeBytes":12345},{"number":2,"mediaType":"image/png","width":1000,"height":1500,"sizeBytes":23456}]""",
+        context.getValue("pages").jsonArray.toString(),
+      )
+      assertEquals("[]", context.getValue("positions").jsonArray.toString())
+    }
+
+  @Test
+  fun `reader context returns the epub item adjacent ids and position manifest only`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response = client.get(READER_CONTEXT_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val context = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+      assertEquals(setOf("item", "previousId", "nextId", "pages", "positions"), context.keys)
+      assertEquals("media-delivery", context.getValue("item").jsonObject.getValue("id").jsonPrimitive.content)
+      assertEquals("NOVEL", context.getValue("item").jsonObject.getValue("type").jsonPrimitive.content)
+      assertEquals("previous-delivery", context.getValue("previousId").jsonPrimitive.content)
+      assertEquals("next-delivery", context.getValue("nextId").jsonPrimitive.content)
+      assertEquals("[]", context.getValue("pages").jsonArray.toString())
+      assertEquals(
+        """[{"position":1,"href":"OEBPS/text/chapter-1.xhtml","mediaType":"application/xhtml+xml","progression":0.0,"totalProgression":0.0,"koboSpan":null},{"position":2,"href":"OEBPS/text/aaa-out-of-lexical-order.xhtml","mediaType":"application/xhtml+xml","progression":0.0,"totalProgression":0.5,"koboSpan":null}]""",
+        context.getValue("positions").jsonArray.toString(),
+      )
+    }
+
+  @Test
+  fun `reader context makes missing and unauthorized items indistinguishable`() =
+    testApplication {
+      val fixture = Fixture.restricted()
+      installDelivery(fixture)
+
+      for (path in listOf(READER_CONTEXT_PATH, "$XOBORO_API_PREFIX/media-items/missing-media/reader-context")) {
+        val response = client.get(path) { bearerAuth(fixture.token) }
+
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertEquals("media_item_not_found", response.body<XoboroApiError>().code)
+      }
+    }
+
+  @Test
+  fun `reader context refuses unready media with the delivery conflict`() =
+    testApplication {
+      val fixture = Fixture.visible(MediaStatus.ERROR)
+      installDelivery(fixture)
+
+      val response = client.get(READER_CONTEXT_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.Conflict, response.status)
+      assertEquals("media_not_ready", response.body<XoboroApiError>().code)
+    }
+
   @Test
   fun `page manifest projects indexed page metadata without internal fields or content access`() =
     testApplication {
@@ -248,6 +322,50 @@ class XoboroNativeDeliveryTest {
         PageImageRequest(maximumDimension = 4_096),
         fixture.content.lastRequest,
       )
+    }
+
+  @Test
+  fun `maximum width is forwarded and changes the native page entity tag`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val source = client.get("$PAGE_PATH?format=source") { bearerAuth(fixture.token) }
+      val resized = client.get("$PAGE_PATH?maxWidth=800") { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, resized.status)
+      assertEquals(PageImageRequest(maximumWidth = 800), fixture.content.lastRequest)
+      assertTrue(source.headers[HttpHeaders.ETag] != resized.headers[HttpHeaders.ETag])
+    }
+
+  @Test
+  fun `maximum width and maximum dimension are mutually exclusive`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response =
+        client.get("$PAGE_PATH?maxWidth=800&maxDimension=300") {
+          bearerAuth(fixture.token)
+        }
+
+      assertInvalidQuery(response.status, response.body())
+      assertEquals(0, fixture.content.openPageCallCount)
+    }
+
+  @Test
+  fun `source format with maximum width is invalid before content access`() =
+    testApplication {
+      val fixture = Fixture.visible()
+      installDelivery(fixture)
+
+      val response =
+        client.get("$PAGE_PATH?format=source&maxWidth=800") {
+          bearerAuth(fixture.token)
+        }
+
+      assertInvalidQuery(response.status, response.body())
+      assertEquals(0, fixture.content.openPageCallCount)
     }
 
   @Test
@@ -935,6 +1053,18 @@ class XoboroNativeDeliveryTest {
       }
     }
 
+    override fun findBookReaderContextByIdOrNull(
+      id: BookId,
+      access: CatalogAccess,
+    ): CatalogBookReaderContext? {
+      val item = findBookByIdOrNull(id, access) ?: return null
+      return CatalogBookReaderContext(
+        item = item,
+        previousId = BookId("previous-delivery"),
+        nextId = BookId("next-delivery"),
+      )
+    }
+
     override fun findPreviousBookOrNull(
       id: BookId,
       access: CatalogAccess,
@@ -1228,6 +1358,8 @@ class XoboroNativeDeliveryTest {
     private const val RESOURCE_PATH = "$RESOURCES_PATH/$RESOURCE_ARCHIVE_PATH"
     private const val POSITIONS_PATH =
       "$XOBORO_API_PREFIX/media-items/media-delivery/positions"
+    private const val READER_CONTEXT_PATH =
+      "$XOBORO_API_PREFIX/media-items/media-delivery/reader-context"
     private const val FILE_PATH = "$XOBORO_API_PREFIX/media-items/media-delivery/file"
 
     private fun syntheticUser(

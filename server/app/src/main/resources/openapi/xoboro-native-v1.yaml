@@ -2240,6 +2240,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/reader-context:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_reader_context
+      description: >-
+        Returns one hydrated media item, adjacent visible item identifiers, and only
+        the bounded manifest appropriate to its media kind. Comic and PDF items carry
+        pages; EPUB items carry spine-derived positions. No media bytes or series list
+        are included.
+      responses:
+        "200":
+          description: Reader context is ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroMediaItemReaderContext" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Page streaming permission is required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "409":
+          description: The media item is not ready or cannot be read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/media-items/{mediaItemId}/pages:
     parameters:
       - name: mediaItemId
@@ -2296,6 +2340,32 @@ paths:
     get:
       tags: [Media items]
       operationId: get_media_items_mediaItemId_pages_pageNumber
+      description: >-
+        Returns one page. `maxDimension` and `maxWidth` are mutually exclusive,
+        and neither resize option can be combined with `format=source`.
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [jpeg, png, source]
+        - name: maxDimension
+          in: query
+          required: false
+          description: Positive maximum width or height, capped at 4096.
+          schema:
+            type: integer
+            minimum: 1
+        - name: maxWidth
+          in: query
+          required: false
+          description: >-
+            Positive maximum width, capped at 4096. Preserves the full aspect ratio
+            and does not upscale a narrower source.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
           description: Binary content.
@@ -4146,6 +4216,39 @@ components:
       name: X-API-Key
       description: API key issued through the self-service endpoints.
   schemas:
+    XoboroMediaPage:
+      type: object
+      required: [number, mediaType]
+      properties:
+        number: { type: integer, minimum: 1 }
+        mediaType: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+    XoboroMediaItemReaderContext:
+      type: object
+      required: [item, pages, positions]
+      properties:
+        item:
+          type: object
+          additionalProperties: true
+          description: The existing native media-item response.
+        previousId:
+          type: string
+          nullable: true
+          description: Previous visible sibling in stable catalogue order.
+        nextId:
+          type: string
+          nullable: true
+          description: Next visible sibling in stable catalogue order.
+        pages:
+          type: array
+          description: Populated for comic and PDF items; empty for EPUB.
+          items: { $ref: "#/components/schemas/XoboroMediaPage" }
+        positions:
+          type: array
+          description: Populated for EPUB; empty for comic and PDF items.
+          items: { $ref: "#/components/schemas/XoboroMediaPosition" }
     XoboroMediaProgressRequest:
       type: object
       required: [page, deviceId, deviceName, modifiedAtMillis]

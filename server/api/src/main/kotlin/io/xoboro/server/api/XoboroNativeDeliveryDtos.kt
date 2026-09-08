@@ -1,5 +1,7 @@
 package io.xoboro.server.api
 
+import io.xoboro.core.domain.BookPage
+import io.xoboro.core.domain.MediaPosition
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -53,3 +55,22 @@ data class XoboroMediaPositionResponse(
   val totalProgression: Float,
   val koboSpan: String? = null,
 )
+
+internal fun BookPage.toNativeResponse(): XoboroMediaPageResponse =
+  XoboroMediaPageResponse(
+    number = number,
+    mediaType = mediaType,
+    width = dimension?.width,
+    height = dimension?.height,
+    sizeBytes = fileSize,
+  )
+
+internal fun MediaPosition.toNativeResponse(): XoboroMediaPositionResponse =
+  XoboroMediaPositionResponse(
+    position = position,
+    href = href,
+    mediaType = mediaType,
+    progression = progression,
+    totalProgression = totalProgression,
+    koboSpan = koboSpan,
+  )

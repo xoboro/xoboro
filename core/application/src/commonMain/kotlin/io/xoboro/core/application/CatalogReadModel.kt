@@ -199,6 +199,12 @@ data class CatalogBookDelivery(
   val mediaUpdatedAtMillis: Long?,
 )
 
+data class CatalogBookReaderContext(
+  val item: CatalogBook,
+  val previousId: BookId?,
+  val nextId: BookId?,
+)
+
 data class BookMetadataAggregation(
   val authors: List<io.xoboro.core.domain.Author> = emptyList(),
   val tags: Set<String> = emptySet(),
@@ -248,6 +254,18 @@ interface CatalogReadRepository {
         mediaUpdatedAtMillis = item.media?.updatedAtMillis,
       )
     }
+
+  fun findBookReaderContextByIdOrNull(
+    id: BookId,
+    access: CatalogAccess,
+  ): CatalogBookReaderContext? {
+    val item = findBookByIdOrNull(id, access) ?: return null
+    return CatalogBookReaderContext(
+      item = item,
+      previousId = findPreviousBookOrNull(id, access)?.book?.id,
+      nextId = findNextBookOrNull(id, access)?.book?.id,
+    )
+  }
 
   fun canReadBook(
     id: BookId,

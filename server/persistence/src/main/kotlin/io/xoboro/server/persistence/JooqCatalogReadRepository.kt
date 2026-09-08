@@ -5,6 +5,7 @@ import io.xoboro.core.application.BookMetadataAggregation
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogBookDelivery
+import io.xoboro.core.application.CatalogBookReaderContext
 import io.xoboro.core.application.CatalogGroupCount
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
@@ -135,6 +136,79 @@ class JooqCatalogReadRepository(
       pageCount = record.get("page_count", Int::class.java) ?: 0,
       mediaUpdatedAtMillis =
         record.get("media_updated_at_ms_64", String::class.java)?.toLong(),
+    )
+  }
+
+  override fun findBookReaderContextByIdOrNull(
+    id: BookId,
+    access: CatalogAccess,
+  ): CatalogBookReaderContext? {
+    val filter = bookFilter(BookCatalogQuery(deleted = null), access)
+    val record =
+      database.dsl.fetchOne(
+        """
+        WITH visible_book AS (
+          SELECT b.id, b.series_id, b.relative_uri, b.deleted_at_ms, bm.number_sort
+          FROM book b
+          JOIN series s ON s.id = b.series_id
+          JOIN book_metadata bm ON bm.book_id = b.id
+          JOIN series_metadata sm ON sm.series_id = s.id
+          WHERE ${filter.sql}
+        )
+        SELECT
+          current.id,
+          (
+            SELECT sibling.id
+            FROM visible_book sibling
+            WHERE sibling.series_id = current.series_id
+              AND sibling.deleted_at_ms IS NULL
+              AND (
+                sibling.number_sort < current.number_sort
+                OR (
+                  sibling.number_sort = current.number_sort
+                  AND (
+                    sibling.relative_uri < current.relative_uri
+                    OR (
+                      sibling.relative_uri = current.relative_uri
+                      AND sibling.id < current.id
+                    )
+                  )
+                )
+              )
+            ORDER BY sibling.number_sort DESC, sibling.relative_uri DESC, sibling.id DESC
+            LIMIT 1
+          ) AS previous_id,
+          (
+            SELECT sibling.id
+            FROM visible_book sibling
+            WHERE sibling.series_id = current.series_id
+              AND sibling.deleted_at_ms IS NULL
+              AND (
+                sibling.number_sort > current.number_sort
+                OR (
+                  sibling.number_sort = current.number_sort
+                  AND (
+                    sibling.relative_uri > current.relative_uri
+                    OR (
+                      sibling.relative_uri = current.relative_uri
+                      AND sibling.id > current.id
+                    )
+                  )
+                )
+              )
+            ORDER BY sibling.number_sort, sibling.relative_uri, sibling.id
+            LIMIT 1
+          ) AS next_id
+        FROM visible_book current
+        WHERE current.id = ?
+        """.trimIndent(),
+        *(filter.bindings + id.value).toTypedArray(),
+      ) ?: return null
+    val itemId = BookId(requireNotNull(record.get("id", String::class.java)))
+    return CatalogBookReaderContext(
+      item = hydrateBook(itemId, access.userId) ?: return null,
+      previousId = record.get("previous_id", String::class.java)?.let(::BookId),
+      nextId = record.get("next_id", String::class.java)?.let(::BookId),
     )
   }
 

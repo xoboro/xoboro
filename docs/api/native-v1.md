@@ -327,6 +327,68 @@ delivery require the `PAGE_STREAMING` role; original file download requires
 `FILE_DOWNLOAD`. Page numbers are one-based. There is no `zero_based` query
 parameter on the native surface.
 
+`GET /api/xoboro/v1/media-items/{mediaItemId}/reader-context` returns the
+hydrated current item, nullable adjacent item identifiers, and one bounded
+manifest. Comic and PDF responses populate `pages` and return empty
+`positions`; EPUB responses populate `positions` and return empty `pages`.
+Adjacent values are identifiers rather than embedded media items, and the
+response includes no page bytes, EPUB resource bytes, artwork, or series list.
+
+For example:
+
+```http
+GET /api/xoboro/v1/media-items/item-1/reader-context
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "item": {
+    "id": "item-1",
+    "libraryId": "library-1",
+    "seriesId": "series-1",
+    "type": "COMIC",
+    "title": "Synthetic chapter 1",
+    "seriesTitle": "Synthetic series",
+    "summary": "",
+    "number": "1",
+    "sortNumber": 1.0,
+    "authors": [],
+    "tags": [],
+    "isbn": "",
+    "links": [],
+    "media": {
+      "status": "READY",
+      "mediaType": "application/zip",
+      "profile": "DIVINA",
+      "pageCount": 2
+    },
+    "fileSize": 123456,
+    "oneShot": false,
+    "deleted": false,
+    "createdAtMillis": 1,
+    "updatedAtMillis": 1,
+    "sourceModifiedAtMillis": 1
+  },
+  "previousId": "item-0",
+  "nextId": "item-2",
+  "pages": [
+    {
+      "number": 1,
+      "mediaType": "image/jpeg",
+      "width": 1600,
+      "height": 6000,
+      "sizeBytes": 345678
+    }
+  ],
+  "positions": []
+}
+```
+
+A missing or unauthorized item returns `404 media_item_not_found`. An item
+whose analyzed media is not ready returns `409 media_not_ready`; unsupported
+media returns `409 media_unsupported`.
+
 `GET /api/xoboro/v1/media-items/{mediaItemId}/pages` returns the indexed page
 manifest as a JSON list. Each entry contains its one-based `number`,
 `mediaType`, optional `width` and `height`, and optional raw `sizeBytes`.
@@ -339,10 +401,16 @@ page bytes. It accepts:
   kind and returns the stored or embedded page bytes without re-encoding.
 - `maxDimension=<positive integer>`, capped at 4096. It can be used without an
   explicit format, or with `jpeg` or `png`.
+- `maxWidth=<positive integer>`, capped at 4096. It preserves the complete
+  height-to-width ratio and never upscales a source that is already narrower.
+  For example, requesting
+  `/api/xoboro/v1/media-items/item-1/pages/1?maxWidth=800` for a `1600x6000`
+  page returns an `800x3000` image.
 
-`format=source` cannot be combined with `maxDimension`. The endpoint does not
-perform `Accept`-header format negotiation and deliberately has no
-`contentNegotiation` query parameter.
+`maxWidth` and `maxDimension` are mutually exclusive. `format=source` cannot
+be combined with either resize option. The endpoint does not perform
+`Accept`-header format negotiation and deliberately has no `contentNegotiation`
+query parameter.
 
 Successful page responses include a weak metadata-derived `ETag`,
 `Last-Modified` from the indexed media update timestamp, and
