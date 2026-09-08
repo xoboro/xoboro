@@ -35,6 +35,8 @@ export function bindEpubFrame(node, initialOptions) {
   let boundDocument = null
   let scrolling = null
   let restoreKey = null
+  let hasRestored = false
+  let lastProgression = bounded(initialOptions.progression, 0, 1, 0)
   let suppressProgress = false
 
   function detachDocument() {
@@ -63,11 +65,12 @@ export function bindEpubFrame(node, initialOptions) {
     if (!scrolling || suppressProgress) return
     const range = Math.max(0, scrolling.scrollHeight - scrolling.clientHeight)
     const progression = range > 0 ? Math.min(1, Math.max(0, scrolling.scrollTop / range)) : 1
+    lastProgression = progression
     options.onProgress?.({ progression, atBottom: range === 0 || scrolling.scrollTop >= range - 1 })
   }
 
   function measuredProgression() {
-    if (!scrolling) return 0
+    if (!scrolling) return lastProgression
     const range = Math.max(0, scrolling.scrollHeight - scrolling.clientHeight)
     return range > 0 ? Math.min(1, Math.max(0, scrolling.scrollTop / range)) : 1
   }
@@ -108,6 +111,7 @@ export function bindEpubFrame(node, initialOptions) {
     const progression =
       fragmentProgression(options.fragment) ?? bounded(options.progression, 0, 1, 0)
     restoreKey = options.restoreKey
+    hasRestored = true
     restoreTo(progression)
   }
 
@@ -128,6 +132,10 @@ export function bindEpubFrame(node, initialOptions) {
   }
 
   function bindDocument() {
+    // The old document's DOM metrics may already be reset by the time load fires.
+    // Keep the last scroll event's logical position rather than re-measuring a dead tree.
+    const progression = lastProgression
+    const isReload = hasRestored && options.restoreKey === restoreKey
     detachDocument()
     boundDocument = node.contentDocument
     if (!boundDocument) return
@@ -136,7 +144,10 @@ export function bindEpubFrame(node, initialOptions) {
     boundDocument.addEventListener('scroll', reportProgress, true)
     boundDocument.addEventListener('click', handleClick)
     boundDocument.addEventListener('keydown', forwardKeydown)
-    restore()
+    // A browser may reload an iframe without moving to another spine location. Replaying
+    // the component's initial locator here would silently rewind what the reader just read.
+    if (isReload) restoreTo(progression)
+    else restore()
   }
 
   node.addEventListener('load', bindDocument)

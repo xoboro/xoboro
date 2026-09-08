@@ -273,7 +273,12 @@ describe('EPUB frame binding', () => {
     expect(style).toContain('padding: 32px')
     expect(style).toContain('color-scheme: light')
 
+    // By the time a real iframe emits load, the browser may already expose the new
+    // document's zeroed scroll metrics through the old element reference.
+    scrolling.scrollTop = 0
     frame.dispatchEvent(new Event('load'))
+    expect(scrolling.scrollTop).toBe(750)
+    expect(onProgress).toHaveBeenLastCalledWith({ progression: 0.75, atBottom: false })
     frameDocument.dispatchEvent(new MouseEvent('click'))
     frameDocument.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
     expect(onToggleChrome).toHaveBeenCalledTimes(1)
@@ -676,6 +681,46 @@ describe('EpubReader', () => {
     frame.dispatchEvent(new Event('load'))
     scrolling.scrollTop = 750
     frameDocument.dispatchEvent(new Event('scroll'))
+    window.dispatchEvent(new Event('pagehide'))
+
+    await waitFor(() =>
+      expect(fetchImpl.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true),
+    )
+    const write = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)
+    expect(write[1].keepalive).toBe(true)
+    expect(JSON.parse(write[1].body).locator.locations.progression).toBe(0.75)
+  })
+
+  it('keeps the latest frame position when the same EPUB document reloads before exit', async () => {
+    const context = {
+      item: NOVEL,
+      previousId: null,
+      nextId: null,
+      pages: [],
+      positions: POSITIONS,
+    }
+    const fetchImpl = routes([['/media-items/n1/progress', reply(null, 204)]])
+    globalThis.fetch = fetchImpl
+    render(EpubReader, { params: { id: 'n1' }, initialContext: context })
+
+    const frame = await screen.findByTestId('chapter-frame')
+    const frameDocument = installFrameDocument(frame)
+    const scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    frame.dispatchEvent(new Event('load'))
+    scrolling.scrollTop = 750
+    frameDocument.dispatchEvent(new Event('scroll'))
+
+    // Safari and Chromium can reload the same iframe without changing the spine
+    // location. That lifecycle event must preserve the live position, not replay the
+    // locator from when the component first opened.
+    scrolling.scrollTop = 0
+    frame.dispatchEvent(new Event('load'))
+    expect(scrolling.scrollTop).toBe(750)
     window.dispatchEvent(new Event('pagehide'))
 
     await waitFor(() =>
