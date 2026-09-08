@@ -8,9 +8,8 @@
    *
    * What changed, and why each was a real defect rather than a nicety:
    *
-   * - The chrome was toggled by an `onclick` on a `div`, so there was **no keyboard
-   *   path to it at all**: arrow keys paged, but nothing opened the bar. There is now a
-   *   real button, always reachable, with the tap-to-toggle kept for pointer users.
+   * - The chrome keeps the source reader's page-tap interaction. Its keyboard path is
+   *   visually hidden so it does not put a permanent control over the comic.
    * - The settings panel was a plain fixed `div` with no role, no `aria-modal` and no
    *   Escape, while `FilterSheet` in the same codebase did all of it. It now uses the
    *   one shared Dialog.
@@ -20,7 +19,7 @@
    * - Progress was written with `.catch(() => {})`. A conflict now asks.
    */
   import { onDestroy, onMount, untrack } from 'svelte'
-  import { ChevronLeft, ChevronRight, List, Settings, SlidersHorizontal } from '@lucide/svelte'
+  import { ChevronLeft, ChevronRight, List, Settings } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import { listPages, pageUrl, readMediaItem, readNeighbour } from '../lib/api/catalog.js'
   import { writeProgress, resumePage } from '../lib/api/progress.js'
@@ -418,24 +417,22 @@
   }
 </script>
 
-<!-- Always reachable, so the chrome has a keyboard path. The base had none: arrow keys
-     paged but nothing opened the bar. -->
 <button
-  class="chrome-toggle"
+  class="visually-hidden"
   type="button"
-  data-testid="toggle-chrome"
+  data-testid="keyboard-chrome-toggle"
   aria-expanded={chrome}
   aria-label={$_('reader.controls')}
   onclick={toggleChrome}
 >
-  <SlidersHorizontal size={18} aria-hidden="true" />
+  {$_('reader.controls')}
 </button>
 
 <!-- The position, announced once where it is useful, instead of repeated in every
      image's alt text. Held back until the page count is known: "page 1 of 0" is not a
      position, and announcing it would say so out loud. -->
 {#if pageCount > 0}
-  <p class="position" role="status" aria-live="polite" data-testid="position">
+  <p class="visually-hidden" role="status" aria-live="polite" data-testid="position">
     {$_('reader.position', { values: { page: current, total: pageCount } })}
   </p>
 {/if}
@@ -655,34 +652,6 @@
 {/if}
 
 <style>
-  .chrome-toggle {
-    position: fixed;
-    top: max(var(--space-2), var(--inset-top));
-    right: max(var(--space-2), var(--inset-right));
-    z-index: 22;
-    display: grid;
-    width: var(--touch-target);
-    height: var(--touch-target);
-    place-items: center;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-overlay);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .position {
-    position: fixed;
-    top: max(var(--space-2), var(--inset-top));
-    left: max(var(--space-2), var(--inset-left));
-    z-index: 22;
-    margin: 0;
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-pill);
-    background: var(--surface-overlay);
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    font-variant-numeric: tabular-nums;
-  }
   .topbar,
   .bottombar {
     position: fixed;
@@ -698,24 +667,8 @@
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
-    /*
-     * Room for `.chrome-toggle`, which is fixed in this same corner and always rendered so the
-     * chrome keeps a keyboard path. It carries `z-index: 22` against this bar's `21`, so without
-     * this padding it sits *on top of* the settings button at the bar's right edge: both are
-     * painted, both look clickable, and every click lands on the toggle. Measured in a real
-     * browser, `document.elementFromPoint` at the settings button's own centre returned a `<path>`
-     * belonging to the toggle — their centres were four pixels apart.
-     *
-     * Reserving space rather than hiding the toggle while the bar is open, because the toggle is
-     * the only always-reachable way in and its `aria-expanded` is what announces the bar's state.
-     *
-     * Not covered by the suite, and cannot be: this is hit-testing over real layout, which jsdom
-     * does not have. Verified by measuring reachability of every control in a browser — see the
-     * "Checking the web UI against a real server" section of `docs/testing.md`.
-     */
-    padding-right: calc(
-      var(--touch-target) + max(var(--space-2), var(--inset-right)) + var(--space-2)
-    );
+    padding-right: max(var(--space-3), var(--inset-right));
+    padding-left: max(var(--space-3), var(--inset-left));
     border-bottom: 1px solid var(--line-subtle);
   }
   .bottombar {

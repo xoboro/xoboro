@@ -71,6 +71,21 @@ beforeEach(() => {
 })
 
 describe('Reader', () => {
+  it('shows only the page until the reader surface is tapped', async () => {
+    // A permanently visible chrome toggle was added on top of the source reader. On a
+    // phone it occupied the top-right corner even while the bars were closed, and when
+    // the bars opened it became a second settings-shaped control over the toolbar.
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' } })
+
+    await waitFor(() => expect(container.querySelector('.scroll')).toBeInTheDocument())
+
+    expect(screen.queryByTestId('toggle-chrome')).not.toBeInTheDocument()
+    expect(screen.getByTestId('keyboard-chrome-toggle')).toHaveClass('visually-hidden')
+    expect(container.querySelector('.topbar')).not.toBeInTheDocument()
+    expect(container.querySelector('.bottombar')).not.toBeInTheDocument()
+  })
+
   it('announces the position once, as live text', async () => {
     // The base put the page number in every image's alt attribute — a position rather
     // than a description, and noise repeated on every page for a screen reader.
@@ -81,6 +96,16 @@ describe('Reader', () => {
     const position = await screen.findByTestId('position')
     expect(position).toHaveAttribute('aria-live', 'polite')
     expect(position.textContent).toContain('3')
+  })
+
+  it('keeps the live position out of the visual reading surface', async () => {
+    // The live region is useful to assistive technology, but rendering it as a fixed
+    // pill put a permanent page counter over the comic. The visible counter belongs
+    // in the bottom bar and therefore appears only after a tap.
+    globalThis.fetch = standardRoutes()
+    render(Reader, { params: { id: 'm1' } })
+
+    expect(await screen.findByTestId('position')).toHaveClass('visually-hidden')
   })
 
   it('takes the total from the analyzed count, not from how many pages were delivered', async () => {
@@ -121,7 +146,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    const toggle = await screen.findByTestId('toggle-chrome')
+    const toggle = await screen.findByTestId('keyboard-chrome-toggle')
     expect(toggle.tagName).toBe('BUTTON')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
@@ -134,7 +159,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    const toggle = await screen.findByTestId('toggle-chrome')
+    const toggle = await screen.findByTestId('keyboard-chrome-toggle')
     await fireEvent.click(toggle)
     await fireEvent.keyDown(window, { key: 'Escape' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -146,7 +171,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
 
     const dialog = await screen.findByRole('dialog')
@@ -157,7 +182,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     const { container } = render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
     // split-scroll, not split: `split` is one-page-at-a-time with spreads cut, so it
     // renders a single slot. Only a scrolling mode lays every slot out at once.
@@ -192,7 +217,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
     await fireEvent.click(screen.getByTestId('mode-paged'))
 
@@ -210,7 +235,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
 
     await waitFor(() =>
@@ -227,7 +252,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
 
     expect(screen.getByTestId('mode-paged').getAttribute('aria-pressed')).toBe('true')
@@ -239,7 +264,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     render(Reader, { params: { id: 'm1' } })
 
-    await fireEvent.click(await screen.findByTestId('toggle-chrome'))
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
     await fireEvent.click(screen.getByTestId('open-settings'))
     await fireEvent.click(screen.getByTestId('preset-manga'))
 
@@ -255,7 +280,7 @@ describe('Reader', () => {
     render(Reader, { params: { id: 'm1' } })
 
     await screen.findByTestId('position')
-    await fireEvent.click(screen.getByTestId('toggle-chrome'))
+    await fireEvent.click(screen.getByTestId('keyboard-chrome-toggle'))
     // No previous item: the route answered 404, which means the start of the series.
     await waitFor(() => expect(screen.getByTestId('previous-item')).toBeDisabled())
     await waitFor(() => expect(screen.getByTestId('next-item')).not.toBeDisabled(), {
@@ -325,7 +350,7 @@ describe('Reader', () => {
     // the item still arriving.
     const position = await screen.findByTestId('position')
     const before = position.textContent
-    await fireEvent.keyDown(screen.getByTestId('toggle-chrome'), { key: 'ArrowRight' })
+    await fireEvent.keyDown(screen.getByTestId('keyboard-chrome-toggle'), { key: 'ArrowRight' })
     expect(screen.getByTestId('position').textContent).toBe(before)
   })
 
@@ -461,7 +486,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     const { container } = render(Reader, { params: { id: 'm1' } })
 
-    const toggle = await screen.findByTestId('toggle-chrome')
+    const toggle = await screen.findByTestId('keyboard-chrome-toggle')
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
 
     await tap(await loadedScrollSurface(container))
@@ -474,7 +499,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     const { container } = render(Reader, { params: { id: 'm1' } })
 
-    const toggle = await screen.findByTestId('toggle-chrome')
+    const toggle = await screen.findByTestId('keyboard-chrome-toggle')
     const surface = await loadedScrollSurface(container)
     await tap(surface)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
@@ -491,7 +516,7 @@ describe('Reader', () => {
     globalThis.fetch = standardRoutes()
     const { container } = render(Reader, { params: { id: 'm1' } })
 
-    const toggle = await screen.findByTestId('toggle-chrome')
+    const toggle = await screen.findByTestId('keyboard-chrome-toggle')
     await tap(await loadedScrollSurface(container), { moveY: 120 })
 
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
@@ -511,6 +536,6 @@ describe('Reader', () => {
     await tap(surface, { x: 10 })
 
     expect(screen.getByTestId('position').textContent).toBe(before)
-    expect(screen.getByTestId('toggle-chrome')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('keyboard-chrome-toggle')).toHaveAttribute('aria-expanded', 'true')
   })
 })
