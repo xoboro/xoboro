@@ -45,6 +45,10 @@ function router(routes) {
 const signedIn = (container) => container.querySelector('a[href="#/collections"]')
 /** Only an administrator is offered the console. */
 const consoleLink = (container) => container.querySelector('a[href="#/admin"]')
+// Signed-in routes are separate production chunks. Vite transforms the first one lazily in this
+// test environment, so assertions behind the session gate must wait for that import as well as the
+// session request instead of using Testing Library's one-second default.
+const ROUTE_CHUNK_WAIT = { timeout: 10_000 }
 
 beforeEach(() => {
   session.set({ status: SessionStatus.UNKNOWN, user: null })
@@ -97,8 +101,8 @@ describe('session gate', () => {
     expect(screen.getByRole('status')).toBeInTheDocument()
 
     resolveSession(reply({ body: { user: { id: 'u1', email: 'a@example.invalid', roles: [] } } }))
-    await waitFor(() => expect(signedIn(container)).toBeTruthy())
-  })
+    await waitFor(() => expect(signedIn(container)).toBeTruthy(), ROUTE_CHUNK_WAIT)
+  }, 15_000)
 
   it('never asks for the setup state once a session exists', async () => {
     // The answer could not change anything on screen, and /setup is
@@ -109,7 +113,7 @@ describe('session gate', () => {
     globalThis.fetch = fetchImpl
     const { container } = render(App)
 
-    await waitFor(() => expect(signedIn(container)).toBeTruthy())
+    await waitFor(() => expect(signedIn(container)).toBeTruthy(), ROUTE_CHUNK_WAIT)
     const asked = fetchImpl.mock.calls.map(([url]) => url)
     expect(asked.some((url) => url.includes('/setup'))).toBe(false)
   })
@@ -121,7 +125,7 @@ describe('session gate', () => {
       }),
     })
     const { container } = render(App)
-    await waitFor(() => expect(consoleLink(container)).toBeTruthy())
+    await waitFor(() => expect(consoleLink(container)).toBeTruthy(), ROUTE_CHUNK_WAIT)
   })
 
   it('does not offer the console to a reader', async () => {
@@ -133,7 +137,7 @@ describe('session gate', () => {
       }),
     })
     const { container } = render(App)
-    await waitFor(() => expect(signedIn(container)).toBeTruthy())
+    await waitFor(() => expect(signedIn(container)).toBeTruthy(), ROUTE_CHUNK_WAIT)
     expect(consoleLink(container)).toBeNull()
   })
 })

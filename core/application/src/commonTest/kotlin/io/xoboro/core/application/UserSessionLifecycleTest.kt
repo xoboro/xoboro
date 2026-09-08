@@ -15,6 +15,62 @@ import kotlin.test.assertNull
 
 class UserSessionLifecycleTest {
   @Test
+  fun `does not touch a recently accessed active session`() {
+    val user = syntheticUser()
+    val sessions = InMemorySessionRepository()
+    sessions.insertIfAbsent(
+      session(
+        "hash:token",
+        user.id,
+        lastAccessedAtMillis = 90,
+        expiresAtMillis = 1_000,
+      ),
+    )
+    val lifecycle =
+      UserSessionLifecycle(
+        users = SingleUserRepository(user),
+        sessions = sessions,
+        tokenEncoder = TokenEncoder { "hash:$it" },
+        plainTokenFactory = { "unused" },
+        currentTimeMillis = { 100 },
+        inactivityTimeoutMillis = 500,
+        sessionTouchIntervalMillis = 60,
+      )
+
+    assertEquals(user, lifecycle.authenticate("token"))
+    assertEquals(0, sessions.touchCallCount)
+    assertEquals(1_000, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
+  }
+
+  @Test
+  fun `touches an active session at the refresh interval boundary`() {
+    val user = syntheticUser()
+    val sessions = InMemorySessionRepository()
+    sessions.insertIfAbsent(
+      session(
+        "hash:token",
+        user.id,
+        lastAccessedAtMillis = 40,
+        expiresAtMillis = 1_000,
+      ),
+    )
+    val lifecycle =
+      UserSessionLifecycle(
+        users = SingleUserRepository(user),
+        sessions = sessions,
+        tokenEncoder = TokenEncoder { "hash:$it" },
+        plainTokenFactory = { "unused" },
+        currentTimeMillis = { 100 },
+        inactivityTimeoutMillis = 500,
+        sessionTouchIntervalMillis = 60,
+      )
+
+    assertEquals(user, lifecycle.authenticate("token"))
+    assertEquals(1, sessions.touchCallCount)
+    assertEquals(100, sessions.findByTokenDigestOrNull("hash:token")?.lastAccessedAtMillis)
+  }
+
+  @Test
   fun `creates touches expires invalidates and handles token collisions`() {
     val user = syntheticUser()
     val users = SingleUserRepository(user)
@@ -66,9 +122,11 @@ class UserSessionLifecycleTest {
         plainTokenFactory = { "unused" },
         currentTimeMillis = { 100 },
         inactivityTimeoutMillis = 500,
+        sessionTouchIntervalMillis = 60,
       )
 
     assertEquals(user, lifecycle.authenticate("token"))
+    assertEquals(1, sessions.touchCallCount)
     assertEquals(600, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
   }
 
@@ -95,9 +153,11 @@ class UserSessionLifecycleTest {
         plainTokenFactory = { "unused" },
         currentTimeMillis = { 100 },
         inactivityTimeoutMillis = 500,
+        sessionTouchIntervalMillis = 60,
       )
 
     assertEquals(user, lifecycle.authenticate("token"))
+    assertEquals(1, sessions.touchCallCount)
     // The session survives: an unavailable store must not read as a revocation.
     assertEquals(1_000, sessions.findByTokenDigestOrNull("hash:token")?.expiresAtMillis)
   }
@@ -144,12 +204,14 @@ class UserSessionLifecycleTest {
   private fun session(
     digest: String,
     userId: UserId,
+    lastAccessedAtMillis: Long = 0,
     expiresAtMillis: Long,
   ): UserSession =
     UserSession(
       tokenDigest = digest,
       userId = userId,
       createdAtMillis = 0,
+      lastAccessedAtMillis = lastAccessedAtMillis,
       expiresAtMillis = expiresAtMillis,
     )
 
@@ -211,12 +273,14 @@ class UserSessionLifecycleTest {
 
     /** Makes the store report that it could not record the access, as a busy database does. */
     var touchUnavailable = false
+    var touchCallCount = 0
 
     override fun touchIfActive(
       tokenDigest: String,
       accessedAtMillis: Long,
       expiresAtMillis: Long,
     ): SessionTouch {
+      touchCallCount += 1
       if (touchUnavailable) return SessionTouch.UNAVAILABLE
       val current = sessions[tokenDigest] ?: return SessionTouch.EXPIRED
       if (current.expiresAtMillis <= accessedAtMillis) return SessionTouch.EXPIRED

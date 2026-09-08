@@ -53,6 +53,10 @@ export function readSeries(seriesId) {
   return request(`/series/${seriesId}`)
 }
 
+export function readSeriesReaderContext(seriesId, { signal } = {}) {
+  return request(`/series/${seriesId}/reader-context`, { signal })
+}
+
 /** Series listing orders, as the `sort` parameter spells them. */
 export const SeriesOrder = Object.freeze({
   NEWEST: 'number,desc',
@@ -72,33 +76,13 @@ export const SeriesOrder = Object.freeze({
  */
 export function listSeriesMediaItems(
   seriesId,
-  { page = 0, size = 100, sort = SeriesOrder.NEWEST } = {},
+  { page = 0, size = 100, sort = SeriesOrder.NEWEST, signal } = {},
 ) {
-  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort } })
+  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort }, signal })
 }
 
-/**
- * The item a reader would resume, or `null` when they have not started the series.
- *
- * Asked of the server in two steps because "resume" means two different things: an
- * item left part-read is where the reader actually stopped, and once none is
- * part-read the next unread one is where they are going. Both filters are resolved
- * in SQL over the whole series, so neither depends on how the listing happens to be
- * paged.
- */
-export async function readResumePoint(seriesId) {
-  for (const filter of [{ keepReading: true }, { onDeck: true }]) {
-    const page = await request(`/series/${seriesId}/media-items`, {
-      query: { page: 0, size: 1, sort: SeriesOrder.OLDEST, ...filter },
-    })
-    const [item] = page.items ?? []
-    if (item) return item
-  }
-  return null
-}
-
-export function readMediaItem(mediaItemId) {
-  return request(`/media-items/${mediaItemId}`)
+export function readMediaItem(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}`, { signal })
 }
 
 /**
@@ -109,12 +93,12 @@ export function readMediaItem(mediaItemId) {
  *
  * @returns the neighbouring item, or `null` at the end of the series.
  */
-export async function readNeighbour(mediaItemId, direction) {
+export async function readNeighbour(mediaItemId, direction, { signal } = {}) {
   if (direction !== 'previous' && direction !== 'next') {
     throw new Error(`unknown direction: ${direction}`)
   }
   try {
-    return await request(`/media-items/${mediaItemId}/${direction}`)
+    return await request(`/media-items/${mediaItemId}/${direction}`, { signal })
   } catch (error) {
     if (error.code === 'media_item_not_found' || error.code === 'not_found') return null
     throw error
@@ -163,8 +147,8 @@ export function pageUrl(mediaItemId, pageNumber, { format = null, maxDimension =
 }
 
 /** The page manifest: one-based `number`, `mediaType`, and optional dimensions. */
-export function listPages(mediaItemId) {
-  return request(`/media-items/${mediaItemId}/pages`)
+export function listPages(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}/pages`, { signal })
 }
 
 /**
@@ -177,8 +161,8 @@ export function listPages(mediaItemId) {
  *
  * A non-EPUB item answers with an empty list: it has pages, not positions.
  */
-export function listPositions(mediaItemId) {
-  return request(`/media-items/${mediaItemId}/positions`)
+export function listPositions(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}/positions`, { signal })
 }
 
 /**

@@ -120,7 +120,7 @@ class XoboroNativeDeliveryTest {
       assertEquals(PAGE_BYTES.decodeToString(), response.bodyAsText())
       assertEquals("image/png", response.headers[HttpHeaders.ContentType])
       val entityTag = assertNotNull(response.headers[HttpHeaders.ETag])
-      assertTrue(entityTag.matches(Regex("\"[0-9a-f]{32}\"")))
+      assertTrue(entityTag.matches(Regex("W/\"[0-9a-f]{32}\"")))
       assertEquals(
         "max-age=0, must-revalidate, private",
         response.headers[HttpHeaders.CacheControl],
@@ -131,7 +131,7 @@ class XoboroNativeDeliveryTest {
     }
 
   @Test
-  fun `matching comma separated weak entity tag returns not modified after opening content`() =
+  fun `matching comma separated weak entity tag returns not modified without opening content`() =
     testApplication {
       val fixture = Fixture.visible()
       installDelivery(fixture)
@@ -141,12 +141,12 @@ class XoboroNativeDeliveryTest {
       val response =
         client.get(PAGE_PATH) {
           bearerAuth(fixture.token)
-          header(HttpHeaders.IfNoneMatch, "\"stale\", W/$entityTag")
+          header(HttpHeaders.IfNoneMatch, "\"stale\", $entityTag")
         }
 
       assertEquals(HttpStatusCode.NotModified, response.status)
       assertEquals("", response.bodyAsText())
-      assertEquals(2, fixture.content.openPageCallCount)
+      assertEquals(1, fixture.content.openPageCallCount)
       assertTrue(assertNotNull(fixture.content.lastStream).closed)
     }
 
@@ -164,8 +164,8 @@ class XoboroNativeDeliveryTest {
 
       assertEquals(HttpStatusCode.NotModified, response.status)
       assertEquals("", response.bodyAsText())
-      assertEquals(1, fixture.content.openPageCallCount)
-      assertTrue(assertNotNull(fixture.content.lastStream).closed)
+      assertEquals(0, fixture.content.openPageCallCount)
+      assertNull(fixture.content.lastStream)
     }
 
   @Test
@@ -201,7 +201,7 @@ class XoboroNativeDeliveryTest {
 
       assertEquals(HttpStatusCode.NotModified, response.status)
       assertEquals("", response.bodyAsText())
-      assertEquals(2, fixture.content.openPageCallCount)
+      assertEquals(1, fixture.content.openPageCallCount)
       assertTrue(assertNotNull(fixture.content.lastStream).closed)
     }
 
@@ -540,7 +540,7 @@ class XoboroNativeDeliveryTest {
       assertEquals("", matching.bodyAsText())
       assertEquals(HttpStatusCode.OK, stale.status)
       assertEquals(RESOURCE_BYTES.decodeToString(), stale.bodyAsText())
-      assertEquals(3, fixture.content.openResourceCallCount)
+      assertEquals(2, fixture.content.openResourceCallCount)
       assertTrue(assertNotNull(fixture.content.lastResourceStream).closed)
     }
 

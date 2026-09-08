@@ -26,6 +26,15 @@ describe('shell split', () => {
     expect(shell).not.toMatch(/^\s*import\s+\w+\s+from\s+['"]\.\/admin\//m)
   })
 
+  it('loads each reader screen as a route chunk', () => {
+    for (const component of ['Home', 'Search', 'SeriesScreen', 'ReaderRoute']) {
+      expect(shell).toMatch(
+        new RegExp(`import\\(['\"]\\.\\/reader\\/${component}\\.svelte['\"]\\)`),
+      )
+    }
+    expect(shell).not.toMatch(/^\s*import\s+\w+\s+from\s+['"]\.\/reader\//m)
+  })
+
   it('keeps the reader path free of admin imports', () => {
     // A shared component pulled from admin/ into the reader would drag the chunk back
     // into the entry bundle just as effectively as a static route import.

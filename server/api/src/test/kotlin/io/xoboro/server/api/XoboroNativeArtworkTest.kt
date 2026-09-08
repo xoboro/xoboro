@@ -87,7 +87,7 @@ class XoboroNativeArtworkTest {
       assertContentEquals(ARTWORK_BYTES, initial.body())
       assertEquals("image/png", initial.headers[HttpHeaders.ContentType])
       val entityTag = assertNotNull(initial.headers[HttpHeaders.ETag])
-      assertTrue(entityTag.matches(Regex("\"[0-9a-f]{32}\"")))
+      assertTrue(entityTag.matches(Regex("W/\"[0-9a-f]{32}\"")))
       assertNotNull(initial.headers[HttpHeaders.LastModified])
       // A short reuse window rather than `max-age=0`. At zero every cover on a grid was a conditional
       // request, so returning to a screen of a hundred cost a hundred round trips to be told nothing
@@ -108,7 +108,7 @@ class XoboroNativeArtworkTest {
 
       assertEquals(HttpStatusCode.NotModified, revalidated.status)
       assertEquals(2, fixture.artworks.findSelectedOrNullCallCount)
-      assertEquals(2, fixture.artworks.contentCallCount)
+      assertEquals(1, fixture.artworks.contentCallCount)
     }
 
   @Test

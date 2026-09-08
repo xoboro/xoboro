@@ -38,7 +38,7 @@
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
 
-  let { params } = $props()
+  let { params, initialItem = null } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
   const MODES = ['scroll', 'paged', 'split', 'split-scroll']
@@ -148,6 +148,7 @@
   const loader = createPriorityLoader()
   let restoring = false
   let loadToken = 0
+  let openController = null
   let saveTimer = null
   let pendingPage = null
 
@@ -186,6 +187,9 @@
 
   async function open(id) {
     const token = ++loadToken
+    openController?.abort()
+    const controller = new AbortController()
+    openController = controller
     flushProgress()
     loader.reset()
     loadedId = ''
@@ -196,7 +200,14 @@
     restoring = true
 
     try {
-      const [detail, manifest] = await Promise.all([readMediaItem(id), listPages(id)])
+      const detailRequest =
+        initialItem?.id === id
+          ? Promise.resolve(initialItem)
+          : readMediaItem(id, { signal: controller.signal })
+      const [detail, manifest] = await Promise.all([
+        detailRequest,
+        listPages(id, { signal: controller.signal }),
+      ])
       if (token !== loadToken) return
       item = detail
       // Restored before the first view is built: `index` below is derived from
@@ -220,12 +231,12 @@
       // awaited from inside an effect's own async continuation does not resolve here,
       // and everything after it was silently skipped, so previous/next stayed disabled
       // for every item.
-      readNeighbour(id, 'previous')
+      readNeighbour(id, 'previous', { signal: controller.signal })
         .then((found) => {
           if (token === loadToken) previousId = found?.id ?? null
         })
         .catch(() => {})
-      readNeighbour(id, 'next')
+      readNeighbour(id, 'next', { signal: controller.signal })
         .then((found) => {
           if (token === loadToken) nextId = found?.id ?? null
         })
@@ -241,10 +252,12 @@
         })
       })
     } catch (caught) {
-      if (token === loadToken) {
+      if (token === loadToken && caught?.name !== 'AbortError') {
         error = caught
         restoring = false
       }
+    } finally {
+      if (openController === controller) openController = null
     }
   }
 
@@ -319,6 +332,7 @@
     // Flushed rather than dropped: leaving the reader is exactly when the last position
     // matters, and a debounce timer would otherwise be discarded with the component.
     flushProgress()
+    openController?.abort()
     loader.reset()
   })
 

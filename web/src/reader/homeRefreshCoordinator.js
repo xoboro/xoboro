@@ -18,25 +18,45 @@ export function createHomeRefreshCoordinator({
 }) {
   let pending = 'none'
   let handle = null
+  let running = false
   let disposed = false
+
+  function start(callback) {
+    try {
+      return Promise.resolve(callback())
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
 
   function arm(scope) {
     if (disposed) return
     if (scope === 'full' || pending === 'none') pending = scope
+    if (running) return
     if (handle !== null) cancel(handle)
     handle = schedule(flush, delay)
   }
 
-  function flush() {
+  async function flush() {
     handle = null
-    if (disposed) return
+    if (disposed || running) return
     const scope = pending
     pending = 'none'
-    if (scope === 'full') {
-      refreshCatalog()
-      if (searchActive()) refreshSearch()
-    } else if (scope === 'shelves') {
-      refreshShelves()
+    if (scope === 'none') return
+    running = true
+    try {
+      if (scope === 'full') {
+        const work = [start(refreshCatalog)]
+        if (searchActive()) work.push(start(refreshSearch))
+        await Promise.allSettled(work)
+      } else {
+        await start(refreshShelves).catch(() => {})
+      }
+    } finally {
+      running = false
+      if (!disposed && pending !== 'none') {
+        handle = schedule(flush, delay)
+      }
     }
   }
 

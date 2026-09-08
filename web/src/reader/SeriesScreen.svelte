@@ -24,8 +24,7 @@
     SeriesOrder,
     artworkUrl,
     listSeriesMediaItems,
-    readResumePoint,
-    readSeries,
+    readSeriesReaderContext,
   } from '../lib/api/catalog.js'
   import { eventHub } from '../lib/eventHub.js'
   import {
@@ -66,37 +65,31 @@
    * Marking read has the same shape: the reload it triggers races the one an event triggered.
    */
   let loadSequence = 0
+  let loadController = null
 
   async function load() {
     const mine = ++loadSequence
+    loadController?.abort()
+    const controller = new AbortController()
+    loadController = controller
     try {
-      const [detail, page, resumePoint] = await Promise.all([
-        readSeries(params.id),
-        listSeriesMediaItems(params.id, { sort: order }),
-        readResumePoint(params.id),
+      const [context, page] = await Promise.all([
+        readSeriesReaderContext(params.id, { signal: controller.signal }),
+        listSeriesMediaItems(params.id, { sort: order, signal: controller.signal }),
       ])
       if (mine !== loadSequence) return
-      series = detail
+      series = context.series
       items = page
-      resume = resumePoint
-      // The earliest chapter is only the head of the listing when the listing runs
-      // that way; under newest-first it is on the last page, so it is asked for
-      // directly rather than guessed at from whichever page arrived.
-      const earliest =
-        order === SeriesOrder.OLDEST
-          ? (page.items[0] ?? null)
-          : ((await listSeriesMediaItems(params.id, { size: 1, sort: SeriesOrder.OLDEST }))
-              .items[0] ?? null)
-      // Checked again: the line above can await a second request, and a newer read may have
-      // finished entirely while it was outstanding.
-      if (mine !== loadSequence) return
-      first = earliest
+      resume = context.resume
+      first = context.first
       error = null
     } catch (caught) {
       // A superseded read's failure is not this screen's state either. Reporting it would put an
       // error over results that loaded perfectly.
-      if (mine !== loadSequence) return
+      if (mine !== loadSequence || caught?.name === 'AbortError') return
       error = caught
+    } finally {
+      if (mine === loadSequence) loadController = null
     }
   }
 
@@ -124,6 +117,8 @@
     // sitting on a series page kept whatever it had loaded for as long as they stayed.
     const offResync = eventHub.onResync(() => reloadSoon())
     return () => {
+      loadSequence += 1
+      loadController?.abort()
       offCatalog()
       offResync()
       clearTimeout(reloadTimer)

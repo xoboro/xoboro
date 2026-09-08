@@ -126,7 +126,9 @@ function server(overrides = []) {
       if (url.includes(match)) return answer
     }
     if (url.includes('/series/s1/media-items')) return reply(envelope(ITEMS))
-    if (url.includes('/series/s1/resume')) return reply(null, 404)
+    if (url.includes('/series/s1/reader-context')) {
+      return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+    }
     if (url.includes('/series/s1/metadata')) return reply({})
     if (url.includes('/series/s1')) return reply(SERIES)
     return reply(envelope())
@@ -237,17 +239,26 @@ describe('series screen refreshes', () => {
     })
     globalThis.fetch = vi.fn(async (url) => {
       if (url.includes('/series/s1/media-items')) return reply(envelope(ITEMS))
-      if (url.includes('/series/s1/resume')) return reply(null, 404)
-      if (url.includes('/series/s1')) {
+      if (url.includes('/series/s1/reader-context')) {
         seriesRequests += 1
         if (seriesRequests === 2) {
           // The first read is released only once the second has been asked for, so the order the
           // answers arrive in is the order under test rather than a matter of timing.
           await held
-          return reply({ ...SERIES, title: 'Stale Answer' })
+          return reply({
+            series: { ...SERIES, title: 'Stale Answer' },
+            first: ITEMS[1],
+            resume: ITEMS[1],
+          })
         }
-        if (seriesRequests === 3) return reply({ ...SERIES, title: 'Fresh Answer' })
-        return reply(SERIES)
+        if (seriesRequests === 3) {
+          return reply({
+            series: { ...SERIES, title: 'Fresh Answer' },
+            first: ITEMS[1],
+            resume: ITEMS[1],
+          })
+        }
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
       }
       return reply(envelope())
     })
@@ -263,6 +274,36 @@ describe('series screen refreshes', () => {
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toContain('Fresh Answer'))
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(screen.getByRole('heading', { level: 1 }).textContent).not.toContain('Stale Answer')
+  })
+
+  it('aborts the requests a newer series load supersedes', async () => {
+    let contextRequests = 0
+    let supersededSignal = null
+    const fetchImpl = vi.fn(async (url, options) => {
+      if (url.includes('/series/s1/media-items')) return reply(envelope(ITEMS))
+      if (url.includes('/series/s1/reader-context')) {
+        contextRequests += 1
+        if (contextRequests === 2) {
+          supersededSignal = options.signal
+          return new Promise((_, reject) => {
+            options.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'))
+            })
+          })
+        }
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+
+    emit('series.changed', { ids: ['s1'] })
+    await waitFor(() => expect(supersededSignal).not.toBeNull())
+    emit('series.changed', { ids: ['s1'] })
+
+    await waitFor(() => expect(supersededSignal.aborted).toBe(true))
   })
 
   /**

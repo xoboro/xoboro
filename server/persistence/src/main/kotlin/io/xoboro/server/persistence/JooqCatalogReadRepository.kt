@@ -4,6 +4,7 @@ import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.BookMetadataAggregation
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
+import io.xoboro.core.application.CatalogBookDelivery
 import io.xoboro.core.application.CatalogGroupCount
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
@@ -22,6 +23,8 @@ import io.xoboro.core.domain.BookMetadataRepository
 import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.RestrictionMode
 import io.xoboro.core.domain.ReadProgressRepository
 import io.xoboro.core.domain.Series
@@ -89,6 +92,76 @@ class JooqCatalogReadRepository(
     access: CatalogAccess,
   ): CatalogBook? =
     findSingleBook(id, access)
+
+  override fun findBookDeliveryByIdOrNull(
+    id: BookId,
+    access: CatalogAccess,
+  ): CatalogBookDelivery? {
+    val filter =
+      bookFilter(
+        BookCatalogQuery(deleted = null),
+        access,
+        extraSql = "b.id = ?",
+        extraBindings = listOf(id.value),
+      )
+    val record =
+      database.dsl.fetchOne(
+        """
+        SELECT
+          b.id,
+          b.media_kind,
+          CAST(b.file_size AS TEXT) AS file_size_64,
+          CAST(b.file_modified_ms AS TEXT) AS file_modified_ms_64,
+          media.status AS media_status,
+          media.page_count,
+          CAST(media.updated_at_ms AS TEXT) AS media_updated_at_ms_64
+        FROM book b
+        JOIN series s ON s.id = b.series_id
+        JOIN book_metadata bm ON bm.book_id = b.id
+        JOIN series_metadata sm ON sm.series_id = s.id
+        LEFT JOIN media ON media.book_id = b.id
+        WHERE ${filter.sql}
+        """.trimIndent(),
+        *filter.bindings.toTypedArray(),
+      ) ?: return null
+    return CatalogBookDelivery(
+      bookId = BookId(requireNotNull(record.get("id", String::class.java))),
+      mediaKind = MediaKind.valueOf(requireNotNull(record.get("media_kind", String::class.java))),
+      fileSize = requireNotNull(record.get("file_size_64", String::class.java)).toLong(),
+      fileModifiedAtMillis =
+        requireNotNull(record.get("file_modified_ms_64", String::class.java)).toLong(),
+      mediaStatus =
+        record.get("media_status", String::class.java)?.let(MediaStatus::valueOf),
+      pageCount = record.get("page_count", Int::class.java) ?: 0,
+      mediaUpdatedAtMillis =
+        record.get("media_updated_at_ms_64", String::class.java)?.toLong(),
+    )
+  }
+
+  override fun canReadBook(
+    id: BookId,
+    access: CatalogAccess,
+  ): Boolean {
+    val filter =
+      bookFilter(
+        BookCatalogQuery(deleted = null),
+        access,
+        extraSql = "b.id = ?",
+        extraBindings = listOf(id.value),
+      )
+    return database.dsl.fetchOne(
+      """
+      SELECT 1
+      FROM book b
+      JOIN series s ON s.id = b.series_id
+      JOIN book_metadata bm ON bm.book_id = b.id
+      JOIN series_metadata sm ON sm.series_id = s.id
+      WHERE ${filter.sql}
+      LIMIT 1
+      """.trimIndent(),
+      *filter.bindings.toTypedArray(),
+    ) != null
+  }
 
   override fun findPreviousBookOrNull(
     id: BookId,
@@ -171,6 +244,29 @@ class JooqCatalogReadRepository(
       listOf(SeriesId(requireNotNull(found.get("id", String::class.java)))),
       access.userId,
     ).singleOrNull()
+  }
+
+  override fun canReadSeries(
+    id: SeriesId,
+    access: CatalogAccess,
+  ): Boolean {
+    val filter =
+      seriesFilter(
+        SeriesCatalogQuery(deleted = null),
+        access,
+        extraSql = "s.id = ?",
+        extraBindings = listOf(id.value),
+      )
+    return database.dsl.fetchOne(
+      """
+      SELECT 1
+      FROM series s
+      JOIN series_metadata sm ON sm.series_id = s.id
+      WHERE ${filter.sql}
+      LIMIT 1
+      """.trimIndent(),
+      *filter.bindings.toTypedArray(),
+    ) != null
   }
 
   override fun countSeriesByFirstCharacter(

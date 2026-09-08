@@ -8,8 +8,12 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.route
+import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.CatalogAccess
+import io.xoboro.core.application.CatalogPageRequest
 import io.xoboro.core.application.CatalogReadRepository
+import io.xoboro.core.application.CatalogSort
+import io.xoboro.core.application.CatalogSortDirection
 import io.xoboro.core.application.LibraryAdministrationLifecycle
 import io.xoboro.core.application.catalogAccess
 import io.xoboro.core.domain.BookId
@@ -96,6 +100,40 @@ fun Route.xoboroNativeCatalogRoutes(
           } else {
             call.respond(series.toNativeResponse())
           }
+        }
+        get("/{seriesId}/reader-context") {
+          val user = call.nativeUser()
+          val seriesId = SeriesId(call.requiredParameter("seriesId"))
+          val access = user.catalogAccess()
+          val series = catalog.findSeriesByIdOrNull(seriesId, access)
+          if (series == null) {
+            call.respondNativeNotFound("series_not_found", "Series was not found")
+            return@get
+          }
+          val oldest =
+            CatalogPageRequest(
+              size = 1,
+              sorts = listOf(CatalogSort("numberSort", CatalogSortDirection.ASC)),
+            )
+          val first =
+            catalog
+              .findBooks(BookCatalogQuery(seriesId = seriesId), access, oldest)
+              .content
+              .firstOrNull()
+          val resume =
+            sequenceOf(
+              BookCatalogQuery(seriesId = seriesId, keepReading = true),
+              BookCatalogQuery(seriesId = seriesId, onDeck = true),
+            ).mapNotNull { query ->
+              catalog.findBooks(query, access, oldest).content.firstOrNull()
+            }.firstOrNull()
+          call.respond(
+            XoboroSeriesReaderContextResponse(
+              series = series.toNativeResponse(),
+              first = first?.toNativeResponse(),
+              resume = resume?.toNativeResponse(),
+            ),
+          )
         }
         get("/{seriesId}/media-items") {
           val user = call.nativeUser()

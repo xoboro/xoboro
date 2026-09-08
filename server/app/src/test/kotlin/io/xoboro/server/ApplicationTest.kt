@@ -111,6 +111,26 @@ class ApplicationTest {
     }
 
   @Test
+  fun `ordinary requests do not resolve the physical peer`() =
+    testApplication {
+      application {
+        installTrustedProxyHeaders(setOf("127.0.0.1")) {
+          error("ordinary requests must not inspect the physical peer")
+        }
+        routing {
+          get("/ordinary") {
+            call.respondText("ok")
+          }
+        }
+      }
+
+      val response = client.get("/ordinary")
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals("ok", response.bodyAsText())
+    }
+
+  @Test
   fun `preserves the configured CORS rejection body`() =
     testApplication {
       application {
@@ -127,10 +147,14 @@ class ApplicationTest {
     }
 
   @Test
-  fun `uses forwarding headers only when the physical peer is trusted`() =
+  fun `uses forwarding headers only when the physical peer is trusted`() {
+    var peerAddressReads = 0
     testApplication {
       application {
-        installTrustedProxyHeaders(setOf("localhost"))
+        installTrustedProxyHeaders(setOf("127.0.0.1")) {
+          peerAddressReads += 1
+          "127.0.0.1"
+        }
         routing {
           get("/origin") {
             val origin = call.request.origin
@@ -158,7 +182,9 @@ class ApplicationTest {
         }
       assertEquals(HttpStatusCode.OK, xForwardedResponse.status)
       assertEquals("https|reader-x.example|198.51.100.22", xForwardedResponse.bodyAsText())
+      assertEquals(2, peerAddressReads)
     }
+  }
 
   @Test
   fun `protects bounded Prometheus metrics with a dedicated token`() =

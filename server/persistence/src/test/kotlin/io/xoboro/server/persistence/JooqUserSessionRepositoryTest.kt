@@ -53,8 +53,10 @@ class JooqUserSessionRepositoryTest {
     XoboroDatabase.open(DatabaseConfig(path)).use { database ->
       assertEquals(user(), lifecycle(database, now = { now }).authenticate(PLAIN_TOKEN))
       val restored = JooqUserSessionRepository(database).findByTokenDigestOrNull(TOKEN_DIGEST)
-      assertEquals(150, restored?.lastAccessedAtMillis)
-      assertEquals(650, restored?.expiresAtMillis)
+      // Authentication survives the restart without rewriting a recently active row. Session
+      // expiry is still extended once the lifecycle's bounded touch interval elapses.
+      assertEquals(100, restored?.lastAccessedAtMillis)
+      assertEquals(600, restored?.expiresAtMillis)
     }
   }
 

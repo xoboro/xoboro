@@ -19,9 +19,18 @@ class UserSessionLifecycle(
   private val plainTokenFactory: () -> String,
   private val currentTimeMillis: () -> Long,
   val inactivityTimeoutMillis: Long,
+  private val sessionTouchIntervalMillis: Long =
+    minOf(
+      DEFAULT_SESSION_TOUCH_INTERVAL_MILLIS,
+      maxOf(1L, inactivityTimeoutMillis / 2),
+    ),
 ) {
   init {
     require(inactivityTimeoutMillis > 0) { "Session inactivity timeout must be positive" }
+    require(sessionTouchIntervalMillis > 0) { "Session touch interval must be positive" }
+    require(sessionTouchIntervalMillis <= inactivityTimeoutMillis) {
+      "Session touch interval must not exceed the inactivity timeout"
+    }
   }
 
   /**
@@ -69,11 +78,17 @@ class UserSessionLifecycle(
       sessions.deleteByTokenDigest(digest)
       return null
     }
+    if (
+      session.expiresAtMillis > now &&
+        now - session.lastAccessedAtMillis < sessionTouchIntervalMillis
+    ) {
+      return user
+    }
     // The store, not the row read above, decides expiry: a session extended between that read
     // and this call must not be revoked by a stale value. But a store that cannot answer is a
     // third case, and collapsing it into "expired" is what made a busy database log operators
-    // out and fail plain reads - every authenticated request extends the sliding window, so
-    // every read is also a write, and under a large scan that write loses the lock.
+    // out and fail plain reads - extending the sliding window is a write, and under a large scan
+    // that write can lose the lock.
     return when (
       sessions.touchIfActive(
         tokenDigest = digest,
@@ -111,5 +126,6 @@ class UserSessionLifecycle(
 
   companion object {
     const val MAX_GENERATION_ATTEMPTS: Int = 10
+    const val DEFAULT_SESSION_TOUCH_INTERVAL_MILLIS: Long = 60_000
   }
 }

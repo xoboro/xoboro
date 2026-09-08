@@ -214,10 +214,14 @@ describe('EpubReader', () => {
 
 describe('ReaderRoute', () => {
   it('opens a novel in the EPUB reader', async () => {
-    globalThis.fetch = novelRoutes()
+    const fetchImpl = novelRoutes()
+    globalThis.fetch = fetchImpl
     render(ReaderRoute, { params: { id: 'n1' } })
 
     await waitFor(() => expect(screen.getByTestId('chapter-frame')).toBeInTheDocument())
+    expect(
+      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/n1')).length,
+    ).toBe(1)
   })
 
   it('opens a PDF in the image reader, because the server renders its pages', async () => {
@@ -234,15 +238,19 @@ describe('ReaderRoute', () => {
       disconnect() {}
     }
     globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0)
-    globalThis.fetch = routes([
+    const fetchImpl = routes([
       ['/media-items/b1/pages', reply([{ number: 1, mediaType: 'image/jpeg', width: 800, height: 1200 }])],
       ['/media-items/b1/previous', reply({ code: 'media_item_not_found' }, 404)],
       ['/media-items/b1/next', reply({ code: 'media_item_not_found' }, 404)],
       ['/media-items/b1', reply(pdf)],
     ])
+    globalThis.fetch = fetchImpl
     const { container } = render(ReaderRoute, { params: { id: 'b1' } })
 
     await waitFor(() => expect(container.querySelector('.slot img')).toBeTruthy())
     expect(screen.queryByTestId('chapter-frame')).toBeNull()
+    expect(
+      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/b1')).length,
+    ).toBe(1)
   })
 })

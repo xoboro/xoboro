@@ -31,7 +31,7 @@
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
 
-  let { params } = $props()
+  let { params, initialItem = null } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
   // Only settings that actually take effect. `font-size` and `line-height` on the
@@ -77,6 +77,7 @@
 
   let saveTimer = null
   let pending = null
+  let loadController = null
 
   const position = $derived(positions[at] ?? null)
   const total = $derived(positions.length)
@@ -118,10 +119,21 @@
   }
 
   async function load(id) {
+    loadController?.abort()
+    const controller = new AbortController()
+    loadController = controller
     error = null
     retryable = false
     try {
-      const [detail, order] = await Promise.all([readMediaItem(id), listPositions(id)])
+      const detailRequest =
+        initialItem?.id === id
+          ? Promise.resolve(initialItem)
+          : readMediaItem(id, { signal: controller.signal })
+      const [detail, order] = await Promise.all([
+        detailRequest,
+        listPositions(id, { signal: controller.signal }),
+      ])
+      if (controller.signal.aborted) return
       item = detail
       positions = order
       loadedId = id
@@ -129,11 +141,14 @@
       // index. resumePage also handles a finished book and a page past the end.
       at = resumePage(detail.progress, order.length) - 1
     } catch (caught) {
+      if (controller.signal.aborted) return
       error = caught
       // Only one of the three delivery failures is worth retrying, so the offer is made
       // only for that one — a retry button on an encrypted file is a button that will
       // never work.
       retryable = isRetryableDeliveryFailure(caught)
+    } finally {
+      if (loadController === controller) loadController = null
     }
   }
 
@@ -173,7 +188,10 @@
     return () => window.removeEventListener('keydown', onKeydown)
   })
 
-  onDestroy(flushProgress)
+  onDestroy(() => {
+    flushProgress()
+    loadController?.abort()
+  })
 
   function acceptConflict() {
     const page = conflict?.page

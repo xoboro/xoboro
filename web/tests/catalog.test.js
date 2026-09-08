@@ -8,7 +8,7 @@ import {
   pageUrl,
   readFeed,
   readNeighbour,
-  readResumePoint,
+  readSeriesReaderContext,
 } from '../src/lib/api/catalog.js'
 
 function reply(body, status = 200) {
@@ -87,28 +87,19 @@ describe('reading order', () => {
   })
 })
 
-describe('resume point', () => {
-  it('prefers a part-read item and falls back to the next unread one', async () => {
-    // Two steps because "resume" means two things: an item left part-read is where the
-    // reader stopped, and once none is part-read the next unread one is where they are
-    // going. Both filters resolve in SQL over the whole series, so neither depends on
-    // how the listing happens to be paged.
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(reply({ items: [] }))
-      .mockResolvedValueOnce(reply({ items: [{ id: 'b7' }] }))
+describe('series reader context', () => {
+  it('loads the first and resume items in one request', async () => {
+    const expected = {
+      series: { id: 's1' },
+      first: { id: 'b1' },
+      resume: { id: 'b7' },
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(reply(expected))
     globalThis.fetch = fetchImpl
 
-    expect(await readResumePoint('s1')).toEqual({ id: 'b7' })
-    expect(fetchImpl.mock.calls[0][0]).toContain('keepReading=true')
-    expect(fetchImpl.mock.calls[1][0]).toContain('onDeck=true')
-  })
-
-  it('reports nothing to resume for a series the reader has not started', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(reply({ items: [] }))
-    globalThis.fetch = fetchImpl
-
-    expect(await readResumePoint('s1')).toBeNull()
+    expect(await readSeriesReaderContext('s1')).toEqual(expected)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toContain('/series/s1/reader-context')
   })
 })
 

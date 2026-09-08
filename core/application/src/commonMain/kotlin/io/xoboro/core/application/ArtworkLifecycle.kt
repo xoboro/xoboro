@@ -103,6 +103,16 @@ class ArtworkLifecycle(
 ) {
   fun findAll(owner: ArtworkOwner): List<Artwork> = artwork.findAll(owner)
 
+  fun selectedOrNull(owner: ArtworkOwner): Artwork? = artwork.findSelectedOrNull(owner)
+
+  fun findByIdOrNull(
+    owner: ArtworkOwner,
+    id: ArtworkId,
+  ): Artwork? = artwork.findByIdOrNull(owner, id)
+
+  fun contentOrNull(item: Artwork): ArtworkContent? =
+    artwork.content(item.owner, item.id)?.let { bytes -> ArtworkContent(item, bytes) }
+
   fun selectedContentOrNull(owner: ArtworkOwner): ArtworkContent? =
     artwork.findSelectedOrNull(owner)?.let { item ->
       artwork.content(owner, item.id)?.let { ArtworkContent(item, it) }
