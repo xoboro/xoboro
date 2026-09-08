@@ -232,17 +232,65 @@ with a different page source. The EPUB reader is genuinely new work — reflowab
 text, its own typography controls (font size, line height, margin, theme), and
 locator-based rather than page-number-based progress.
 
-### Progress conflict is a user-facing state
+### Reader requests belong to the route
+
+`ReaderRoute` makes one bounded `/media-items/{id}/reader-context` request. The
+response contains the current item, nullable adjacent IDs, and only the page or
+position manifest that reader needs; it never embeds page bytes or an unbounded
+series. Routed children consume that response without repeating item, manifest,
+previous, or next reads. A directly mounted reader keeps the same one-request
+fallback for reuse and component tests.
+
+The route owns the abort controller. Replacing an item aborts its context request,
+clears the active image source and releases the single-flight slot before the next
+item starts. This request lifetime is browser-local; durable scans and other server
+jobs are not cancelled by navigation.
+
+### Navigation and completion are explicit
+
+Previous, next, back, and list transitions replace the reader history entry. They
+do not add one entry per chapter, so Back returns to the catalogue rather than
+walking every item opened in the reader.
+
+Displaying the last page number is not completion. Comic and EPUB progress send an
+explicit `completed` value: the first half of a final split spread, a final scrolling
+page above its bottom, and an EPUB final resource above its bottom remain incomplete.
+Only the final logical view completes the item. Older native/compatibility callers
+that omit the field retain the historical page-derived behavior.
+
+### Progress conflict is a non-blocking status
 
 `simple-komga` writes progress with `.catch(() => {})`. Xoboro answers
 `409 stale_progress` when a newer position already exists, specifically so a
 second device cannot silently rewind the reader's place (ADR 0101). Swallowing
 that error would throw away the entire point of the contract.
 
-**Decision: on `409`, re-read the item's progress and tell the reader.** "You
-read to page 42 on another device. Jump there?" — with staying put as an equally
-available choice. The client never resolves this silently in either direction:
-neither by discarding the local position nor by forcing it over the newer one.
+**Decision: reconcile from the winning progress embedded in the `409`.** The
+reader advances its client clock from that response without a follow-up item GET,
+keeps the current view in place, and reports the write failure in a fixed live
+status region rather than interrupting reading with a popup. A later successful
+write clears that status.
+
+### Search, paging, and catalogue restoration have one owner
+
+Quick search issues typed and event-refresh requests only while advanced search is
+closed. Opening advanced search aborts quick work and transfers the current query;
+advanced search is then the sole owner and cancels superseded result and facet
+requests. Criteria changes normalize the page to zero before the next request.
+
+Series detail sends its selected zero-based page and keeps the shared pager and
+ordering control available through the final page. Home stores only catalogue page
+and scroll offset, scoped by session user and library; it restores the page before
+loading and the scroll offset only after that page renders. Search text and results
+are not persisted.
+
+### Browser acceptance remains a release gate
+
+Automated tests cover request ownership and DOM behavior, but they do not replace a
+real mobile browser. Release acceptance still verifies history replacement, series
+and Home restoration, safe areas, no horizontal page scrolling, minimum touch
+targets, keyboard access, reduced motion, contrast, input focus without viewport
+zoom, image retry, and EPUB publisher styles/reflow on the production build.
 
 ### Reader accessibility
 
@@ -474,6 +522,15 @@ not open eight streams.
 Reconnect uses `Last-Event-ID` for resume. A stream that has been down long
 enough to lose its position triggers a refetch of what is on screen rather than
 silently showing stale rows.
+
+Closing an EventSource during navigation is normal completion. The native route
+recognizes direct `ClosedWriteChannelException` and the engine's
+`ChannelWriteException` variant at its send boundary, closes the subscription via
+`use`, and returns. Production `StatusPages` recognizes the same two narrow types
+before its generic handler, so it neither logs `Unhandled request failure` nor
+attempts a synthetic 500 after the response is committed. Authentication,
+capacity, replay, revocation, reconnect, cancellation, serialization, and event-hub
+failures otherwise retain their existing behavior.
 
 ### Performance budgets
 

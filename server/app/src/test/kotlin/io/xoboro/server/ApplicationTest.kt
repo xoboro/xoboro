@@ -17,7 +17,12 @@ import io.ktor.server.plugins.origin
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
+import io.ktor.server.sse.SSEServerContent
 import io.ktor.server.testing.testApplication
+import io.ktor.sse.ServerSentEvent
+import io.ktor.util.cio.ChannelWriteException
+import io.ktor.utils.io.ByteChannel
+import io.ktor.utils.io.ClosedWriteChannelException
 import io.xoboro.compatibility.komga.api.ClaimStatusDto
 import io.xoboro.compatibility.komga.api.LibraryCreationDto
 import io.xoboro.compatibility.komga.api.LibraryDto
@@ -31,6 +36,7 @@ import io.xoboro.server.api.SetupRequest
 import io.xoboro.server.api.SetupStatusResponse
 import io.xoboro.server.api.XOBORO_API_PREFIX
 import io.xoboro.server.api.XoboroApiError
+import java.lang.reflect.Proxy
 import java.nio.file.Path
 import java.time.OffsetDateTime
 import kotlin.test.Test
@@ -40,6 +46,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.io.TempDir
+import org.slf4j.Logger
 
 class ApplicationTest {
   @TempDir
@@ -238,6 +245,57 @@ class ApplicationTest {
 
     assertEquals(true, stopped)
   }
+
+  @Test
+  fun `production status pages treats a closed SSE response as normal completion`() =
+    testApplication {
+      var unhandledFailures = 0
+      environment {
+        log = recordingLogger { unhandledFailures += 1 }
+      }
+      application {
+        xoboroModule()
+        routing {
+          get("/synthetic-sse-disconnect") {
+            val responseChannel = ByteChannel()
+            responseChannel.close()
+            SSEServerContent(call) {
+              send(ServerSentEvent(data = "too-late"))
+            }.writeTo(responseChannel)
+          }
+        }
+      }
+
+      val response = client.get("/synthetic-sse-disconnect")
+
+      assertFalse(response.bodyAsText().contains("internal_error"))
+      assertEquals(0, unhandledFailures)
+    }
+
+  @Test
+  fun `production status pages treats an engine-wrapped closed response as normal completion`() =
+    testApplication {
+      var unhandledFailures = 0
+      environment {
+        log = recordingLogger { unhandledFailures += 1 }
+      }
+      application {
+        xoboroModule()
+        routing {
+          get("/synthetic-engine-disconnect") {
+            throw ChannelWriteException(
+              "Synthetic client disconnect",
+              ClosedWriteChannelException(),
+            )
+          }
+        }
+      }
+
+      val response = client.get("/synthetic-engine-disconnect")
+
+      assertFalse(response.bodyAsText().contains("internal_error"))
+      assertEquals(0, unhandledFailures)
+    }
 
   @Test
   fun `production module exposes the persistent Komga claim API`() {
@@ -475,4 +533,18 @@ class ApplicationTest {
       assertEquals("/api/v2/users", error.path)
     }
   }
+
+  private fun recordingLogger(onUnhandledFailure: () -> Unit): Logger =
+    Proxy.newProxyInstance(
+      Logger::class.java.classLoader,
+      arrayOf(Logger::class.java),
+    ) { _, method, arguments ->
+      if (
+        method.name == "error" &&
+          arguments?.firstOrNull() == "Unhandled request failure"
+      ) {
+        onUnhandledFailure()
+      }
+      if (method.returnType == Boolean::class.javaPrimitiveType) false else null
+    } as Logger
 }
