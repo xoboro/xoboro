@@ -30,15 +30,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.io.TempDir
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import org.junit.jupiter.api.io.TempDir
 
 /**
  * Drives a real library tree through the native API only, from an unclaimed server to read progress
@@ -207,6 +206,7 @@ class XoboroLocalLibraryAcceptanceTest {
           items.single { it.id == mediaItemIds[1] }.progress
             ?: error("read progress should survive a restart")
         assertEquals(2, restored.page)
+        assertNull(restored.locator, "comic progress must survive without a fabricated locator")
 
         // A rescan of an unchanged tree must not disturb the catalog. This is the deletion-safety
         // property stated positively: nothing is removed or re-created just because a scan ran again.
@@ -546,7 +546,6 @@ class XoboroLocalLibraryAcceptanceTest {
       jsonBody(
         XoboroMediaProgressRequest(
           page = page,
-          locator = JsonObject(mapOf("page" to JsonPrimitive(page))),
           deviceId = "synthetic-device",
           deviceName = "Synthetic device",
           modifiedAtMillis = modifiedAtMillis,

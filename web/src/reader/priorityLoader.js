@@ -57,7 +57,9 @@ export function createPriorityLoader({
   function succeed(task, attempt) {
     if (!isCurrent(task, attempt)) return
     clearAttempt(task, false)
-    release(task)
+    const onSuccess = task.onSuccess
+    const url = task.url
+    if (release(task)) onSuccess?.(url)
   }
 
   function fail(task, attempt) {
@@ -150,7 +152,7 @@ export function createPriorityLoader({
      * A Svelte action that queues one image and updates it without restarting the same URL.
      *
      * @param {HTMLImageElement} node
-     * @param {{url: string, priority: number, onFailure?: (url: string) => void}} initial
+     * @param {{url: string, priority: number, onSuccess?: (url: string) => void, onFailure?: (url: string) => void}} initial
      */
     load(node, initial) {
       let task
@@ -160,6 +162,7 @@ export function createPriorityLoader({
           node,
           url: config.url,
           priority: config.priority,
+          onSuccess: config.onSuccess,
           onFailure: config.onFailure,
           sequence: sequence++,
           generation,
@@ -182,6 +185,7 @@ export function createPriorityLoader({
         update(config) {
           if (task.url === config.url) {
             task.priority = config.priority
+            task.onSuccess = config.onSuccess
             task.onFailure = config.onFailure
             pump()
             return

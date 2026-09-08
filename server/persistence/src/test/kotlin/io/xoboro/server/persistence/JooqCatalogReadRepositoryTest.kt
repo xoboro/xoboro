@@ -174,6 +174,47 @@ class JooqCatalogReadRepositoryTest {
   }
 
   @Test
+  fun `reader context never returns an item moved outside the caller access during hydration`() {
+    withCatalog("reader-context-concurrent-move") { database ->
+      val hiddenLibraryId = LibraryId("library-hidden")
+      JooqLibraryRepository(database).insert(
+        Library(
+          id = hiddenLibraryId,
+          name = "Synthetic hidden library",
+          root = SourceLocation("local", "file:///synthetic-hidden"),
+          createdAtMillis = 1,
+        ),
+      )
+      val storedBooks = JooqBookRepository(database)
+      val movingBooks =
+        object : BookRepository by storedBooks {
+          private var moved = false
+
+          override fun findAllByIds(ids: Collection<BookId>): List<Book> {
+            if (!moved) {
+              moved = true
+              database.dsl.execute(
+                "UPDATE book SET library_id = ? WHERE id = ?",
+                hiddenLibraryId.value,
+                "book-1",
+              )
+            }
+            return storedBooks.findAllByIds(ids)
+          }
+        }
+      val catalog = JooqCatalogReadRepository(database, books = movingBooks)
+
+      val context =
+        catalog.findBookReaderContextByIdOrNull(
+          BookId("book-1"),
+          CatalogAccess(libraryIds = setOf(LibraryId("library-1"))),
+        )
+
+      assertNull(context)
+    }
+  }
+
+  @Test
   fun `supports Komga book and series sort aliases with user progress`() {
     withCatalog("sort-aliases") { database ->
       val userId = UserId("sort-reader")

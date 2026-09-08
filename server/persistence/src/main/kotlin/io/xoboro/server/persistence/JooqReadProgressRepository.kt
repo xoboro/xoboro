@@ -10,14 +10,20 @@ import io.xoboro.core.domain.UserId
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqReadProgressRepository(
+class JooqReadProgressRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : ReadProgressRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqReadProgressRepository =
+    JooqReadProgressRepository(database, readDsl)
+
   override fun findByBookIdAndUserIdOrNull(
     bookId: BookId,
     userId: UserId,
   ): ReadProgress? =
-    database.dsl.findProgressByBookIdAndUserIdOrNull(bookId, userId)
+    readDsl.findProgressByBookIdAndUserIdOrNull(bookId, userId)
 
   override fun findAllByBookIdsAndUserId(
     bookIds: Collection<BookId>,
@@ -25,7 +31,7 @@ class JooqReadProgressRepository(
   ): List<ReadProgress> {
     if (bookIds.isEmpty()) return emptyList()
     val bindings = bookIds.map { it.value } + userId.value
-    return database.dsl
+    return readDsl
       .fetch(
         """
         $SELECT_PROGRESS
@@ -40,7 +46,7 @@ class JooqReadProgressRepository(
     seriesId: SeriesId,
     userId: UserId,
   ): SeriesReadProgress? =
-    database.dsl
+    readDsl
       .fetchOne(
         """
         SELECT read_progress_series.*,
@@ -63,7 +69,7 @@ class JooqReadProgressRepository(
       .chunked(QUERY_BATCH_SIZE)
       .flatMap { batch ->
         val bindings = batch.map { it.value } + userId.value
-        database.dsl
+        readDsl
           .fetch(
             """
             SELECT read_progress_series.*,

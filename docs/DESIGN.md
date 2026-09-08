@@ -19,26 +19,27 @@ stack is adopted wholesale:
 |---|---|---|
 | Framework | Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`) | Already written and working; no runtime VDOM, so the reader's per-page image work stays cheap |
 | Build | Vite | Already configured, including a dev proxy |
-| Routing | `svelte-spa-router` (hash) | Already working; hash routing needs no server rewrite rule, which matters because the server currently serves no static assets at all |
+| Routing | `svelte-spa-router` (hash) | Already working; hash routes stay inside the shell while the server ships the shell and hashed assets at either root or a configured context path |
 | i18n | `svelte-i18n` (`ko`, `en`) | Already has a populated catalog |
 | Icons | `lucide-svelte` | Already used consistently |
-| Tests | Vitest + `@testing-library/svelte` + jsdom | 12 suites already exist |
+| Tests | Vitest + `@testing-library/svelte` + jsdom | Component, transport, race, and lifecycle behavior run without a second browser-test dependency |
 
 No new dependencies are introduced by this design. Anything that would need one
 is called out under [Deliberately not designed](#deliberately-not-designed).
 
 ### What is ported, and what is rewritten
 
-The reader's **hard parts are ported as-is**, because they encode real
-solutions:
+The reader retains the base implementation's **hard-won behaviours**, with the
+geometry and lifecycle defects found during production acceptance corrected:
 
 - the single-flight priority image loader (`priorityLoad` / `schedulePump`),
   which loads the current page first and never lets a prefetch starve it;
 - reserving each slot's `aspect-ratio` from the page manifest *before* the image
   loads, without which collapsed zero-height images defeat lazy loading;
 - landscape-vs-portrait spread splitting with direction-aware half ordering;
-- `IntersectionObserver`-driven progress with a debounced flush and an
-  `onDestroy` flush.
+- visual-viewport-centre progress tracking coalesced into animation frames, with
+  a debounced write, an `onDestroy` flush, and a keepalive retry on page hide or
+  backgrounding until the newest snapshot is acknowledged.
 
 The **data layer is rewritten, not ported.** `simple-komga/src/lib/api.js`
 targets Komga's `/api/v1` and `/api/v2`. ADR 0082 freezes the compatibility
@@ -70,11 +71,10 @@ web/
 
 One Svelte file contains one component, matching the repository's standing rule.
 
-`web/` is a standalone npm project, not a Gradle module. Wiring npm into the
-Gradle build would need a plugin, which is a new dependency, and the server does
-not currently serve static assets anyway. The build boundary is therefore:
-`npm run build` produces `web/dist`, and serving it is a **separate, currently
-unimplemented server change** (see [Serving](#serving)).
+`web/` is a standalone npm project, not a Gradle module. Wiring npm into Gradle
+would need a plugin, so the build boundary stays explicit: `npm run build`
+produces `web/dist`; the Docker build copies that output into the runtime image,
+and the server serves it from `XOBORO_WEB_PATH` (see [Serving](#serving)).
 
 ## Two audiences, one application
 
@@ -215,8 +215,8 @@ unrelated to when the work actually lands.
 
 ### Three readers, not one
 
-The current reader handles paged images only. Xoboro indexes three media kinds,
-and the reader must branch on the item's kind:
+The shipped route branches on the production item's `type` and supports all
+three indexed media kinds:
 
 | Kind | Source format | Reader |
 |---|---|---|
@@ -238,6 +238,12 @@ series. Routed children consume that response without repeating item, manifest,
 previous, or next reads. A directly mounted reader keeps the same one-request
 fallback for reuse and component tests.
 
+The current item carries the complete stored progress, including a Readium
+locator and device fields when present. The authorized item selection and every
+piece of its hydration use one database transaction snapshot, so a concurrent
+catalog move cannot combine access checked in one state with details read from
+another.
+
 The route owns the abort controller. Replacing an item aborts its context request,
 clears the active image source and releases the single-flight slot before the next
 item starts. This request lifetime is browser-local; durable scans and other server
@@ -252,8 +258,18 @@ walking every item opened in the reader.
 Displaying the last page number is not completion. Comic and EPUB progress send an
 explicit `completed` value: the first half of a final split spread, a final scrolling
 page above its bottom, and an EPUB final resource above its bottom remain incomplete.
-Only the final logical view completes the item. Older native/compatibility callers
-that omit the field retain the historical page-derived behavior.
+Only the final logical view completes the item. A paged comic records its initially
+rendered image too, so a one-page work and a resume directly on the final view do not
+require a meaningless page turn. At document bottom the final scrolling view is
+authoritative even when it is shorter than half the viewport. EPUB fragments are
+one-shot navigation targets; once restored, later scrolling and resume use the newer
+numeric progression. Older native/compatibility callers that omit `completed` retain
+the historical page-derived behavior.
+
+The newest unacknowledged comic or EPUB snapshot stays pending while an ordinary
+write is in flight. Hiding, dismissing, changing item, or destroying the reader flushes
+that snapshot (with Fetch `keepalive` for browser lifecycle exits), so navigation does
+not silently discard the last position.
 
 ### Progress conflict is silently reconciled
 
@@ -292,27 +308,17 @@ zoom, image retry, and EPUB publisher styles/reflow on the production build.
 
 ### Reader accessibility
 
-The current reader has real gaps, and they are being fixed in the port rather
-than carried over:
+The reader does not carry the base implementation's accessibility gaps:
 
-1. **No keyboard path to the chrome.** `.scroll` and `.stage` are `div`s with
-   `onclick`. Arrow keys page, but nothing opens the top bar. Fix: a real
-   control for chrome, and `Escape` closes it.
-2. **The settings panel is not a dialog.** It is a plain fixed `div` — no
-   `role`, no `aria-modal`, no `Escape`, no focus handling. `FilterSheet.svelte`
-   in the same codebase does all of this correctly. Fix: the panel adopts
-   `FilterSheet`'s pattern; the pattern itself moves into a shared component so
-   the two cannot diverge again.
-3. **No focus trap or focus restore, even in `FilterSheet`.** It sets
-   `role="dialog"`, `aria-modal="true"`, locks body scroll and handles `Escape`
-   — but never moves focus into the sheet and never restores it on close, so a
-   keyboard user is left where they were, behind a modal. Fix in the shared
-   component: focus the sheet on open, trap `Tab` within it, restore focus to
-   the invoking control on close.
-4. **Page images carry `alt="p12"`.** That is noise for a screen reader — a
-   position, not a description. Fix: page images are decorative
-   (`alt=""`, `role="presentation"`), and the page position is exposed once as
-   live text in the chrome, where it is actually useful.
+1. A visually hidden real button opens the chrome for keyboard and assistive
+   technology users; arrows page and `Escape` closes chrome and settings.
+2. Reader settings and actual modal workflows use the shared `Dialog`, with
+   `role="dialog"`, `aria-modal="true"`, body-scroll locking, and `Escape`
+   handling; inline search filters remain an ordinary disclosure.
+3. The shared dialog moves focus inside, traps `Tab`, and restores focus to the
+   invoking control on close.
+4. Page images are decorative (`alt=""`, `role="presentation"`); one live
+   status announces position without repeating it for every image.
 
 ## Administrator console
 
@@ -578,9 +584,10 @@ Applied to both shells:
 
 ## Serving
 
-The server had no `staticFiles`, no `staticResources` and no
-`singlePageApplication` route, so there was no way to deploy the UI at all. That
-is what the serving change adds.
+The server originally had no `staticFiles`, `staticResources`, or
+`singlePageApplication` route. The serving layer now reads the packaged
+`XOBORO_WEB_PATH`, serves hashed assets with immutable caching, keeps the shell
+uncached, and falls back to it only outside reserved API/protocol routes.
 
 ### The base path is real, and it is an application concern
 

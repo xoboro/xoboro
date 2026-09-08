@@ -38,7 +38,10 @@
     try {
       context = await readMediaItemReaderContext(id, { signal: requestController.signal })
       if (requestController.signal.aborted) return
-      kind = context.item.mediaKind ?? context.item.kind ?? 'COMIC'
+      // `type` is the field the production Xoboro DTO actually serializes. Keep the
+      // older aliases behind it for fixtures/older servers, but never let their absence
+      // send a production NOVEL through the image reader.
+      kind = context.item.type ?? context.item.mediaKind ?? context.item.kind ?? 'COMIC'
     } catch (caught) {
       if (requestController.signal.aborted) return
       error = caught

@@ -8,9 +8,15 @@ import io.xoboro.core.domain.WebLink
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqBookMetadataRepository(
+class JooqBookMetadataRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : BookMetadataRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqBookMetadataRepository =
+    JooqBookMetadataRepository(database, readDsl)
+
   override fun findByBookIdOrNull(bookId: BookId): BookMetadata? {
     return findAllByBookIds(listOf(bookId)).singleOrNull()
   }
@@ -20,7 +26,7 @@ class JooqBookMetadataRepository(
     if (ids.isEmpty()) return emptyList()
     return ids.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
       val records =
-        database.dsl.fetch(
+        readDsl.fetch(
           """
           SELECT book_metadata.*,
             CAST(created_at_ms AS TEXT) AS created_at_ms_64,
@@ -101,7 +107,7 @@ class JooqBookMetadataRepository(
   }
 
   private fun loadAuthors(bookIds: Collection<BookId>): Map<BookId, List<Author>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT book_id, name, role
@@ -116,7 +122,7 @@ class JooqBookMetadataRepository(
       )
 
   private fun loadTags(bookIds: Collection<BookId>): Map<BookId, Set<String>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT book_id, tag
@@ -131,7 +137,7 @@ class JooqBookMetadataRepository(
       ).mapValues { (_, values) -> values.toSet() }
 
   private fun loadLinks(bookIds: Collection<BookId>): Map<BookId, List<WebLink>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT book_id, label, url

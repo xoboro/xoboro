@@ -1,4 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import EpubReader from '../src/reader/EpubReader.svelte'
 import ReaderRoute from '../src/reader/ReaderRoute.svelte'
@@ -9,7 +11,7 @@ import {
 } from '../src/lib/api/catalog.js'
 import { resetProgressClock } from '../src/lib/api/progress.js'
 import { bindEpubFrame } from '../src/reader/epubFrame.js'
-import { epubProgressFor, epubResume } from '../src/reader/epubPosition.js'
+import { epubNavigationFor, epubProgressFor, epubResume } from '../src/reader/epubPosition.js'
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
 vi.mock('svelte-spa-router', () => router)
@@ -205,6 +207,26 @@ describe('EPUB position mapping', () => {
     expect(bottom.locator.locations.totalProgression).toBe(1)
     expect(bottom.completed).toBe(true)
   })
+
+  it('resolves only internal spine links relative to the current resource', () => {
+    expect(epubNavigationFor(positions, 0, '#section-2')).toEqual({
+      index: 0,
+      href: 'chapter-1.xhtml#section-2',
+      resourceHref: 'chapter-1.xhtml',
+      fragment: 'section-2',
+      progression: 0,
+    })
+    expect(epubNavigationFor(positions, 0, 'chapter-2.xhtml#ending')).toEqual({
+      index: 2,
+      href: 'chapter-2.xhtml#ending',
+      resourceHref: 'chapter-2.xhtml',
+      fragment: 'ending',
+      progression: 0,
+    })
+    expect(epubNavigationFor(positions, 0, '../outside.xhtml')).toBeNull()
+    expect(epubNavigationFor(positions, 0, 'https://example.invalid/chapter.xhtml')).toBeNull()
+    expect(epubNavigationFor(positions, 0, 'javascript:alert(1)')).toBeNull()
+  })
 })
 
 describe('EPUB frame binding', () => {
@@ -298,6 +320,62 @@ describe('EPUB frame binding', () => {
     expect(paragraphStyle.color).toBe('rgb(255, 255, 255)')
     expect(paragraphStyle.fontSize).toBe('130%')
     expect(paragraphStyle.lineHeight).toBe('1.8')
+
+    const style = frameDocument.getElementById('xoboro-epub-style').textContent
+    expect(style).toContain(':where(img, svg, video, canvas)')
+    expect(style).toContain('max-width: 100% !important')
+    expect(style).toContain(':where(table, pre)')
+    expect(style).toContain('overflow-x: auto !important')
+
+    binding.destroy()
+    frame.remove()
+  })
+
+  it('keeps the same logical location while typography reflows the chapter', () => {
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    const frameDocument = frame.contentDocument
+    const scrolling = frameDocument.documentElement
+    let scrollTop = 0
+    Object.defineProperties(scrolling, {
+      scrollHeight: {
+        configurable: true,
+        get: () =>
+          frameDocument.getElementById('xoboro-epub-style')?.textContent.includes('font-size: 130%')
+            ? 2200
+            : 1200,
+      },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value) => {
+          scrollTop = value
+          frameDocument.dispatchEvent(new Event('scroll'))
+        },
+      },
+    })
+    const onProgress = vi.fn()
+    const options = {
+      restoreKey: 'same-chapter',
+      progression: 0.5,
+      styles: { fontSize: '100', lineHeight: '1.6', margin: '32', width: '42', theme: 'dark' },
+      onProgress,
+    }
+    const binding = bindEpubFrame(frame, options)
+
+    frame.dispatchEvent(new Event('load'))
+    expect(scrolling.scrollTop).toBe(500)
+    onProgress.mockClear()
+
+    binding.update({
+      ...options,
+      styles: { ...options.styles, fontSize: '130' },
+    })
+
+    expect(scrolling.scrollTop).toBe(1000)
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onProgress).toHaveBeenLastCalledWith({ progression: 0.5, atBottom: false })
 
     binding.destroy()
     frame.remove()
@@ -409,6 +487,21 @@ describe('EpubReader', () => {
     frame.dispatchEvent(new Event('load'))
     frameDocument.dispatchEvent(new MouseEvent('click'))
     await waitFor(() => expect(screen.getByTestId('open-settings')).toBeInTheDocument())
+  })
+
+  it('keeps both chrome bars inside the horizontal safe area', async () => {
+    globalThis.fetch = novelRoutes()
+    render(EpubReader, { params: { id: 'n1' } })
+
+    await fireEvent.click(await screen.findByTestId('keyboard-chrome-toggle'))
+    const source = readFileSync(join(process.cwd(), 'src/reader/EpubReader.svelte'), 'utf8')
+
+    expect(source).toContain(
+      'padding-left: max(var(--space-3), calc(var(--inset-left) + var(--space-2)))',
+    )
+    expect(source).toContain(
+      'padding-right: max(var(--space-3), calc(var(--inset-right) + var(--space-2)))',
+    )
   })
 
   it('uses history replacement for adjacent items and list navigation', async () => {
@@ -593,6 +686,211 @@ describe('EpubReader', () => {
     expect(JSON.parse(write[1].body).locator.locations.progression).toBe(0.75)
   })
 
+  it('retains an unconfirmed ordinary write for a race-safe pagehide resend', async () => {
+    const context = {
+      item: NOVEL,
+      previousId: null,
+      nextId: null,
+      pages: [],
+      positions: POSITIONS,
+    }
+    let rejectOrdinary
+    let progressWrites = 0
+    const fetchImpl = routes([
+      [
+        '/media-items/n1/progress',
+        () => {
+          progressWrites += 1
+          if (progressWrites === 1) {
+            return new Promise((_, reject) => (rejectOrdinary = reject))
+          }
+          return reply(null, 204)
+        },
+      ],
+    ])
+    globalThis.fetch = fetchImpl
+    render(EpubReader, { params: { id: 'n1' }, initialContext: context })
+
+    const frame = await screen.findByTestId('chapter-frame')
+    const frameDocument = installFrameDocument(frame)
+    const scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 750 },
+    })
+    frame.dispatchEvent(new Event('load'))
+    scrolling.scrollTop = 750
+    frameDocument.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(progressWrites).toBe(1), { timeout: 1500 })
+
+    window.dispatchEvent(new Event('pagehide'))
+    await waitFor(() => expect(progressWrites).toBe(2))
+    const writes = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(writes[0][1].keepalive).toBe(false)
+    expect(writes[1][1].keepalive).toBe(true)
+    expect(JSON.parse(writes[1][1].body).locator.locations.progression).toBe(0.75)
+
+    rejectOrdinary(new Error('obsolete ordinary request failed'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    window.dispatchEvent(new Event('pagehide'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(progressWrites).toBe(2)
+  })
+
+  it('resends the latest unconfirmed position when the document becomes hidden', async () => {
+    const context = {
+      item: NOVEL,
+      previousId: null,
+      nextId: null,
+      pages: [],
+      positions: POSITIONS,
+    }
+    const fetchImpl = routes([['/media-items/n1/progress', reply(null, 204)]])
+    globalThis.fetch = fetchImpl
+    render(EpubReader, { params: { id: 'n1' }, initialContext: context })
+
+    const frame = await screen.findByTestId('chapter-frame')
+    const frameDocument = installFrameDocument(frame)
+    const scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 600 },
+    })
+    frame.dispatchEvent(new Event('load'))
+    scrolling.scrollTop = 600
+    frameDocument.dispatchEvent(new Event('scroll'))
+
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() =>
+      expect(fetchImpl.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true),
+    )
+    visibility.mockRestore()
+
+    const write = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)
+    expect(write[1].keepalive).toBe(true)
+    expect(JSON.parse(write[1].body).locator.locations.progression).toBe(0.6)
+  })
+
+  it('follows valid chapter anchors, records fragments, and blocks external anchors', async () => {
+    const context = {
+      item: NOVEL,
+      previousId: null,
+      nextId: null,
+      pages: [],
+      positions: POSITIONS,
+    }
+    const fetchImpl = routes([['/media-items/n1/progress', reply(null, 204)]])
+    globalThis.fetch = fetchImpl
+    render(EpubReader, { params: { id: 'n1' }, initialContext: context })
+
+    let frame = await screen.findByTestId('chapter-frame')
+    let frameDocument = installFrameDocument(frame)
+    frameDocument.body.innerHTML = `
+      <a id="same" href="#section">same chapter</a>
+      <a id="cross" href="chapter-2.xhtml#ending">next chapter</a>
+      <a id="external" href="https://example.invalid/escape">external</a>
+      <h2 id="section">section</h2>
+    `
+    const scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    Object.defineProperty(frameDocument.getElementById('section'), 'offsetTop', {
+      configurable: true,
+      value: 750,
+    })
+    frame.dispatchEvent(new Event('load'))
+
+    const sameClick = new MouseEvent('click', { bubbles: true, cancelable: true })
+    frameDocument.getElementById('same').dispatchEvent(sameClick)
+    expect(sameClick.defaultPrevented).toBe(true)
+    await waitFor(() => expect(scrolling.scrollTop).toBe(750))
+
+    const externalClick = new MouseEvent('click', { bubbles: true, cancelable: true })
+    frameDocument.getElementById('external').dispatchEvent(externalClick)
+    expect(externalClick.defaultPrevented).toBe(true)
+    expect(screen.getByTestId('chapter-frame').getAttribute('src')).toContain('chapter-1.xhtml')
+
+    const crossClick = new MouseEvent('click', { bubbles: true, cancelable: true })
+    frameDocument.getElementById('cross').dispatchEvent(crossClick)
+    expect(crossClick.defaultPrevented).toBe(true)
+    await waitFor(() =>
+      expect(screen.getByTestId('chapter-frame').getAttribute('src')).toContain('chapter-2.xhtml'),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const write = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)
+    expect(JSON.parse(write[1].body).locator.href).toBe('OEBPS/text/chapter-2.xhtml#ending')
+  })
+
+  it('resumes the later progression after scrolling beyond a followed anchor', async () => {
+    const context = {
+      item: NOVEL,
+      previousId: null,
+      nextId: null,
+      pages: [],
+      positions: POSITIONS,
+    }
+    const fetchImpl = routes([['/media-items/n1/progress', reply(null, 204)]])
+    globalThis.fetch = fetchImpl
+    const first = render(EpubReader, { params: { id: 'n1' }, initialContext: context })
+
+    let frame = await screen.findByTestId('chapter-frame')
+    let frameDocument = installFrameDocument(frame)
+    frameDocument.body.innerHTML = '<a id="jump" href="#section">section</a><h2 id="section">section</h2>'
+    let scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    Object.defineProperty(frameDocument.getElementById('section'), 'offsetTop', {
+      configurable: true,
+      value: 750,
+    })
+    frame.dispatchEvent(new Event('load'))
+
+    frameDocument
+      .getElementById('jump')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await waitFor(() => expect(scrolling.scrollTop).toBe(750))
+    scrolling.scrollTop = 900
+    frameDocument.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => setTimeout(resolve, 900))
+
+    const write = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT').at(-1)
+    const stored = JSON.parse(write[1].body)
+    expect(stored.locator.href).toBe(POSITIONS[0].href)
+    expect(stored.locator.locations.progression).toBe(0.9)
+
+    first.unmount()
+    const resumedContext = { ...context, item: { ...NOVEL, progress: stored } }
+    render(EpubReader, { params: { id: 'n1' }, initialContext: resumedContext })
+    frame = await screen.findByTestId('chapter-frame')
+    frameDocument = installFrameDocument(frame)
+    frameDocument.body.innerHTML = '<h2 id="section">section</h2>'
+    scrolling = frameDocument.documentElement
+    Object.defineProperties(scrolling, {
+      scrollHeight: { configurable: true, value: 1200 },
+      clientHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    })
+    Object.defineProperty(frameDocument.getElementById('section'), 'offsetTop', {
+      configurable: true,
+      value: 750,
+    })
+    frame.dispatchEvent(new Event('load'))
+
+    expect(scrolling.scrollTop).toBe(900)
+  })
+
 
   it('writes a locator alongside the page position', async () => {
     // The endpoint stores both. Sending only the page would lose the place for a reader
@@ -681,6 +979,48 @@ describe('EpubReader', () => {
 })
 
 describe('ReaderRoute', () => {
+  it('routes the literal production media-item shape by item.type', async () => {
+    const item = {
+      id: 'production-novel',
+      libraryId: 'library-1',
+      seriesId: 'series-1',
+      type: 'NOVEL',
+      title: 'Production-shaped Novel',
+      seriesTitle: 'Synthetic Series',
+      summary: '',
+      number: '1',
+      sortNumber: 1,
+      releaseDate: null,
+      authors: [],
+      tags: [],
+      isbn: '',
+      links: [],
+      media: { status: 'READY', mediaType: 'application/epub+zip', profile: null, pageCount: 1, message: null },
+      progress: null,
+      fileSize: 1024,
+      oneShot: false,
+      deleted: false,
+      createdAtMillis: 1,
+      updatedAtMillis: 1,
+      sourceModifiedAtMillis: 1,
+    }
+    globalThis.fetch = routes([
+      [
+        '/media-items/production-novel/reader-context',
+        reply({
+          item,
+          pages: [],
+          positions: [{ ...POSITIONS[0], href: 'OEBPS/text/production.xhtml' }],
+        }),
+      ],
+    ])
+
+    render(ReaderRoute, { params: { id: 'production-novel' } })
+
+    const frame = await screen.findByTestId('chapter-frame')
+    expect(frame.getAttribute('src')).toContain('OEBPS/text/production.xhtml')
+  })
+
   it('opens a novel in the EPUB reader', async () => {
     const fetchImpl = novelRoutes()
     globalThis.fetch = fetchImpl

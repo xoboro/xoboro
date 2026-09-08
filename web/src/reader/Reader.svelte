@@ -155,6 +155,14 @@
   let saveTimer = null
   let pendingProgress = null
   let progressWriteToken = 0
+  let progressRevision = 0
+  let confirmedProgressRevision = 0
+  let initialProgressPending = false
+  let viewportWidth = $state(window.innerWidth)
+  let viewportHeight = $state(window.innerHeight)
+  let viewportDensity = $state(window.devicePixelRatio)
+  const trackedViews = new Map()
+  let trackingFrame = null
 
   const isScroll = $derived(mode === 'scroll' || mode === 'split-scroll')
   const isSplit = $derived(mode === 'split' || mode === 'split-scroll')
@@ -169,16 +177,33 @@
   function flushProgress({ keepalive = false } = {}) {
     clearTimeout(saveTimer)
     saveTimer = null
-    if (pendingProgress === null || !loadedId) return
+    if (pendingProgress === null) return
     const progress = pendingProgress
-    pendingProgress = null
+    const mediaItemId = progress.mediaItemId
     const token = ++progressWriteToken
-    writeProgress(loadedId, { ...progress, keepalive })
+    writeProgress(mediaItemId, {
+      page: progress.page,
+      completed: progress.completed,
+      keepalive,
+    })
       .then(() => {
-        if (token === progressWriteToken) progressError = null
+        confirmedProgressRevision = Math.max(confirmedProgressRevision, progress.revision)
+        if (
+          pendingProgress?.mediaItemId === mediaItemId &&
+          pendingProgress.revision <= confirmedProgressRevision
+        ) {
+          pendingProgress = null
+        }
+        if (token === progressWriteToken && loadedId === mediaItemId) progressError = null
       })
       .catch((caught) => {
-        if (token === progressWriteToken) progressError = caught
+        if (
+          token === progressWriteToken &&
+          loadedId === mediaItemId &&
+          progress.revision > confirmedProgressRevision
+        ) {
+          progressError = caught
+        }
       })
   }
 
@@ -189,7 +214,12 @@
     current = page
     if (!loadedId) return
     clearTimeout(saveTimer)
-    pendingProgress = { page, completed }
+    pendingProgress = {
+      mediaItemId: loadedId,
+      page,
+      completed,
+      revision: ++progressRevision,
+    }
     saveTimer = setTimeout(flushProgress, PROGRESS_DEBOUNCE_MILLIS)
   }
 
@@ -203,7 +233,9 @@
     // set or clear the status for the replacement item.
     progressWriteToken += 1
     loader.reset()
+    trackedViews.clear()
     loadedId = ''
+    initialProgressPending = false
     pages = []
     failedViews = []
     item = null
@@ -237,6 +269,7 @@
       current = start
       loadedId = id
       index = indexOfPage(buildViews(manifest, isSplit, direction), start)
+      initialProgressPending = true
 
       previousId = context.previousId ?? null
       nextId = context.nextId ?? null
@@ -247,7 +280,10 @@
         if (token !== loadToken) return
         if (isScroll) scrollTo(start)
         requestAnimationFrame(() => {
-          if (token === loadToken) restoring = false
+          if (token === loadToken) {
+            restoring = false
+            scheduleVisibleTrack()
+          }
         })
       })
     } catch (caught) {
@@ -324,13 +360,34 @@
 
   onMount(() => {
     const onPageHide = () => flushProgress({ keepalive: true })
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushProgress({ keepalive: true })
+    }
+    const onResize = () => {
+      const visualViewport = window.visualViewport
+      viewportWidth = visualViewport?.width ?? window.innerWidth
+      viewportHeight = visualViewport?.height ?? window.innerHeight
+      viewportDensity = window.devicePixelRatio
+      scheduleVisibleTrack()
+    }
+    onResize()
     window.addEventListener('keydown', onKeydown)
     window.addEventListener('pagehide', onPageHide)
     window.addEventListener('scroll', noteDocumentScroll, { passive: true })
+    window.addEventListener('resize', onResize, { passive: true })
+    window.addEventListener('orientationchange', onResize, { passive: true })
+    window.visualViewport?.addEventListener('resize', onResize, { passive: true })
+    window.visualViewport?.addEventListener('scroll', scheduleVisibleTrack, { passive: true })
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.removeEventListener('keydown', onKeydown)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('scroll', noteDocumentScroll)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+      window.visualViewport?.removeEventListener('resize', onResize)
+      window.visualViewport?.removeEventListener('scroll', scheduleVisibleTrack)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   })
 
@@ -340,6 +397,8 @@
     flushProgress()
     openController?.abort()
     loader.destroy()
+    trackedViews.clear()
+    if (trackingFrame !== null) cancelAnimationFrame(trackingFrame)
   })
 
   function failView(view) {
@@ -350,6 +409,13 @@
   function retryView(view) {
     const key = viewKey(view)
     failedViews = failedViews.filter((failed) => failed !== key)
+  }
+
+  /** Records an opened view once it has pixels, including a final view with no page-turn. */
+  function noteInitialViewRendered(view, at) {
+    if (!initialProgressPending || !loadedId || at !== index) return
+    initialProgressPending = false
+    noteProgress(view.page, !isScroll && at === views.length - 1)
   }
 
   const TAP_SLOP = 10
@@ -401,25 +467,67 @@
     if (isTap(event)) toggleChrome()
   }
 
-  /** Marks the visible view while scrolling, so progress follows the reader. */
+  /**
+   * Marks the view crossing the physical centre of the visual viewport.
+   *
+   * IntersectionObserver percentage root margins are resolved against viewport width,
+   * even for the vertical axis. A `-49%` centre strip therefore sits in the wrong place
+   * on every non-square phone. Reading the rendered rectangles in one animation frame
+   * keeps the calculation tied to the actual viewport height and coalesces scroll work.
+   */
+  function scheduleVisibleTrack() {
+    if (trackingFrame !== null) return
+    trackingFrame = requestAnimationFrame(() => {
+      trackingFrame = null
+      if (restoring || !isScroll || trackedViews.size === 0) return
+      // The physical end wins over the centre. A short final slot can leave the
+      // viewport centre inside the preceding page even though the reader reached bottom.
+      if (isAtDocumentBottom()) return
+      const visualViewport = window.visualViewport
+      const centre =
+        (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? viewportHeight) / 2
+      let chosen = null
+      let chosenContainsCentre = false
+      let chosenDistance = Number.POSITIVE_INFINITY
+      for (const [node, at] of trackedViews) {
+        const rect = node.getBoundingClientRect()
+        if (!Number.isFinite(rect.top) || !Number.isFinite(rect.bottom) || rect.bottom <= rect.top) {
+          continue
+        }
+        const containsCentre = centre >= rect.top && centre < rect.bottom
+        const distance = containsCentre
+          ? 0
+          : Math.min(Math.abs(centre - rect.top), Math.abs(centre - rect.bottom))
+        if (
+          chosen === null ||
+          (containsCentre && !chosenContainsCentre) ||
+          (containsCentre === chosenContainsCentre && distance < chosenDistance)
+        ) {
+          chosen = at
+          chosenContainsCentre = containsCentre
+          chosenDistance = distance
+        }
+      }
+      if (chosen === null || chosen.index === index) return
+      index = chosen.index
+      noteProgress(chosen.page, false)
+    })
+  }
+
+  /** Registers a rendered slot with the single viewport-centre tracker. */
   function track(node, position) {
     let at = position
-    const observer = new IntersectionObserver(
-      (entries) =>
-        entries.forEach((entry) => {
-          if (!restoring && entry.isIntersecting) {
-            index = at.index
-            noteProgress(at.page, false)
-          }
-        }),
-      { rootMargin: '-49% 0px -49% 0px', threshold: 0 },
-    )
-    observer.observe(node)
+    trackedViews.set(node, at)
+    scheduleVisibleTrack()
     return {
       update(next) {
         at = next
+        trackedViews.set(node, at)
+        scheduleVisibleTrack()
       },
-      destroy: () => observer.disconnect(),
+      destroy() {
+        trackedViews.delete(node)
+      },
     }
   }
 
@@ -429,27 +537,43 @@
   }
 
   function noteDocumentScroll() {
-    if (!isScroll || views.length === 0 || !isAtDocumentBottom()) return
+    if (!isScroll || views.length === 0) return
+    scheduleVisibleTrack()
+    if (!isAtDocumentBottom()) return
     index = views.length - 1
     noteProgress(views[index].page)
   }
 
   function displayWidth(view) {
-    const viewport = window.innerWidth
+    const viewport = viewportWidth
     const preferred = Number(width)
     const available =
       isScroll && width !== 'full' && Number.isFinite(preferred)
         ? Math.min(viewport, preferred)
         : viewport
     if ((isScroll && fit !== 'height') || !view.width || !view.height) return available
-    return Math.min(available, window.innerHeight * (view.width / view.height))
+    return Math.min(available, viewportHeight * (view.width / view.height))
+  }
+
+  function slotStyle(view) {
+    const declarations = []
+    if ((!isScroll || fit === 'height') && view.width && view.height) {
+      declarations.push(`width:${displayWidth(view)}px`)
+    }
+    const ratio = aspectRatio(view)
+    if (ratio) declarations.push(`aspect-ratio:${ratio}`)
+    return declarations.join(';')
+  }
+
+  function imageStyle(view) {
+    return view.half === null ? 'width:100%' : 'width:200%;max-width:none'
   }
 
   function imageUrl(view) {
     const maxWidth = maximumPageWidth({
       sourceWidth: view.half === null ? view.width : view.width * 2,
       displayWidth: displayWidth(view),
-      devicePixelRatio: window.devicePixelRatio,
+      devicePixelRatio: viewportDensity,
       split: view.half !== null,
     })
     return pageUrl(loadedId, view.page, { maxWidth })
@@ -565,7 +689,8 @@
           class:right={view.half === 'R'}
           data-page={view.page}
           data-view={at}
-          style={aspectRatio(view) ? `aspect-ratio:${aspectRatio(view)}` : ''}
+          style={slotStyle(view)}
+          use:track={{ page: view.page, index: at }}
         >
           {#if failedViews.includes(viewKey(view))}
             <button
@@ -582,12 +707,13 @@
               use:loader.load={{
                 url: imageUrl(view),
                 priority: pageLoadPriority(view.page, current, pageCount),
+                onSuccess: () => noteInitialViewRendered(view, at),
                 onFailure: () => failView(view),
               }}
-              use:track={{ page: view.page, index: at }}
               alt=""
               role="presentation"
               decoding="async"
+              style={imageStyle(view)}
             />
           {/if}
         </div>
@@ -602,7 +728,7 @@
           class="slot paged"
           class:half={view.half !== null}
           class:right={view.half === 'R'}
-          style={aspectRatio(view) ? `aspect-ratio:${aspectRatio(view)}` : ''}
+          style={slotStyle(view)}
         >
           {#if failedViews.includes(viewKey(view))}
             <button
@@ -619,11 +745,13 @@
               use:loader.load={{
                 url: imageUrl(view),
                 priority: 0,
+                onSuccess: () => noteInitialViewRendered(view, index),
                 onFailure: () => failView(view),
               }}
               alt=""
               role="presentation"
               decoding="async"
+              style={imageStyle(view)}
             />
           {/if}
         </div>
@@ -738,6 +866,8 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
+    padding-right: max(var(--space-3), calc(var(--inset-right) + var(--space-2)));
+    padding-left: max(var(--space-3), calc(var(--inset-left) + var(--space-2)));
     background: var(--surface-overlay);
   }
   .progress-error {
@@ -750,8 +880,6 @@
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
-    padding-right: max(var(--space-3), var(--inset-right));
-    padding-left: max(var(--space-3), var(--inset-left));
     border-bottom: 1px solid var(--line-subtle);
   }
   .bottombar {
@@ -831,12 +959,6 @@
   .slot.half.right img {
     transform: translateX(-50%);
   }
-  .fit-height .slot img {
-    width: auto;
-    max-width: 100%;
-    height: 100dvh;
-    margin-inline: auto;
-  }
   .stage {
     display: flex;
     min-height: 100dvh;
@@ -851,6 +973,9 @@
   .slot.paged img {
     max-width: 100%;
     max-height: 100dvh;
+  }
+  .slot.paged.half img {
+    max-width: none;
   }
   fieldset {
     margin: 0 0 var(--space-3);

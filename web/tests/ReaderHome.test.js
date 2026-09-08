@@ -158,6 +158,51 @@ describe('Reader home', () => {
     })
   })
 
+  it('keeps a requested second page when a catalog event supersedes its delayed response', async () => {
+    const pages = []
+    let delayedPageSignal = null
+    let pageOneRequests = 0
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
+      if (url.includes('/feeds/')) return Promise.resolve(reply(envelope()))
+      if (url.includes('/series?')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        pages.push(page)
+        if (page === 1 && ++pageOneRequests === 1) {
+          delayedPageSignal = init.signal
+          return new Promise((_, reject) => {
+            init.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'))
+            })
+          })
+        }
+        const first = page * 100
+        return Promise.resolve(
+          reply({
+            ...envelope([{ id: `series-${first}`, title: `Synthetic series ${first}` }]),
+            page,
+            size: 100,
+            totalItems: 201,
+            totalPages: 3,
+            hasPrevious: page > 0,
+            hasNext: page < 2,
+          }),
+        )
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await waitFor(() => expect(delayedPageSignal).not.toBeNull())
+    emitHomeEvent('series.changed')
+
+    await waitFor(() => expect(pages).toHaveLength(3))
+    expect(delayedPageSignal.aborted).toBe(true)
+    expect(pages).toEqual([0, 1, 1])
+    await screen.findByText('Synthetic series 100')
+  })
+
   it('cannot page past either end', async () => {
     globalThis.fetch = pagedSeriesServer({ totalItems: 40 })
     render(Home)

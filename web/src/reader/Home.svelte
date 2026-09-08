@@ -377,6 +377,10 @@
     const controller = new AbortController()
     seriesController = controller
     const requestedLibraryId = libraryId
+    // This is the page the screen owns as soon as navigation starts. An event can
+    // supersede the request before it answers; its refresh must repeat this page,
+    // not fall back to the last page that happened to finish rendering.
+    seriesPage = page
     seriesBusy = true
     try {
       const answer = await listSeries({

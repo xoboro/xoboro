@@ -5,6 +5,7 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -30,6 +31,7 @@ import io.xoboro.server.api.SessionResponse
 import io.xoboro.server.api.SessionTransport
 import io.xoboro.server.api.SetupRequest
 import io.xoboro.server.api.XOBORO_API_PREFIX
+import io.xoboro.server.api.XoboroMediaProgressRequest
 import io.xoboro.server.persistence.DatabaseConfig
 import io.xoboro.server.persistence.JooqBookMediaRepository
 import io.xoboro.server.persistence.JooqBookMetadataRepository
@@ -43,8 +45,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.junit.jupiter.api.io.TempDir
 
 class XoboroNativeReaderContextApplicationTest {
@@ -82,7 +87,10 @@ class XoboroNativeReaderContextApplicationTest {
             ),
           )
         }
-      val token = requireNotNull(Json.decodeFromString<SessionResponse>(setup.bodyAsText()).accessToken)
+      val token =
+        requireNotNull(
+          Json.decodeFromString<SessionResponse>(setup.bodyAsText()).accessToken,
+        )
 
       val response =
         client.get("$XOBORO_API_PREFIX/media-items/media-1/reader-context") {
@@ -94,6 +102,85 @@ class XoboroNativeReaderContextApplicationTest {
       assertEquals(setOf("item", "pages", "positions"), context.keys)
       assertEquals(1, context.getValue("pages").jsonArray.size)
       assertEquals(0, context.getValue("positions").jsonArray.size)
+    }
+
+    assertFalse(runtime.isReady())
+  }
+
+  @Test
+  fun `reader context round trips locator and device progress through the running app`() {
+    val databasePath = tempDirectory.resolve("reader-context-progress.sqlite")
+    createSingleItemCatalog(databasePath)
+    val runtime =
+      XoboroRuntime.open(
+        ServerConfig(
+          port = 25_601,
+          databasePath = databasePath,
+          workerCount = 1,
+          taskPollMillis = 10,
+          taskFailurePollMillis = 10,
+          taskLeaseMillis = 1_000,
+          shutdownTimeoutMillis = 2_000,
+        ),
+      )
+
+    testApplication {
+      application { xoboroModule(runtime) }
+      val client = createClient { install(ContentNegotiation) { json() } }
+      val setup =
+        client.post("$XOBORO_API_PREFIX/setup") {
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            SetupRequest(
+              email = "reader-progress@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+      val token =
+        requireNotNull(
+          Json.decodeFromString<SessionResponse>(setup.bodyAsText()).accessToken,
+        )
+      val locator =
+        buildJsonObject {
+          put("href", "001.jpg")
+          put("locations", buildJsonObject { put("progression", 0.75) })
+        }
+
+      val write =
+        client.put("$XOBORO_API_PREFIX/media-items/media-1/progress") {
+          bearerAuth(token)
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            XoboroMediaProgressRequest(
+              page = 1,
+              completed = false,
+              locator = locator,
+              deviceId = "reader-device",
+              deviceName = "Synthetic handset",
+              modifiedAtMillis = 10_000,
+            ),
+          )
+        }
+      assertEquals(HttpStatusCode.OK, write.status, write.bodyAsText())
+
+      val response =
+        client.get("$XOBORO_API_PREFIX/media-items/media-1/reader-context") {
+          bearerAuth(token)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+      val progress =
+        Json.parseToJsonElement(response.bodyAsText())
+          .jsonObject
+          .getValue("item")
+          .jsonObject
+          .getValue("progress")
+          .jsonObject
+      assertEquals("reader-device", progress.getValue("deviceId").jsonPrimitive.content)
+      assertEquals("Synthetic handset", progress.getValue("deviceName").jsonPrimitive.content)
+      assertEquals(locator, progress.getValue("locator"))
     }
 
     assertFalse(runtime.isReady())

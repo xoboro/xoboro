@@ -14,12 +14,18 @@ import io.xoboro.core.domain.MediaStatus
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqBookMediaRepository(
+class JooqBookMediaRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : BookMediaRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqBookMediaRepository =
+    JooqBookMediaRepository(database, readDsl)
+
   override fun findByBookIdOrNull(bookId: BookId): BookMedia? {
     val record =
-      database.dsl.fetchOne(
+      readDsl.fetchOne(
         """
         SELECT media.*,
           CAST(created_at_ms AS TEXT) AS created_at_ms_64,
@@ -34,16 +40,16 @@ class JooqBookMediaRepository(
       status = MediaStatus.valueOf(record.requiredString("status")),
       mediaType = record.get("media_type", String::class.java),
       profile = record.get("profile", String::class.java)?.let(MediaProfile::valueOf),
-      pages = database.dsl.findPages(bookId),
+      pages = readDsl.findPages(bookId),
       pageCount = record.requiredInt("page_count"),
-      files = database.dsl.findFiles(bookId),
+      files = readDsl.findFiles(bookId),
       epubDivinaCompatible = record.requiredBoolean("epub_divina_compatible"),
       epubIsKepub = record.requiredBoolean("epub_is_kepub"),
       epubIsFixedLayout = record.requiredBoolean("epub_is_fixed_layout"),
-      toc = database.dsl.findNavigation(bookId, "TOC"),
-      landmarks = database.dsl.findNavigation(bookId, "LANDMARK"),
-      pageList = database.dsl.findNavigation(bookId, "PAGE_LIST"),
-      positions = database.dsl.findPositions(bookId),
+      toc = readDsl.findNavigation(bookId, "TOC"),
+      landmarks = readDsl.findNavigation(bookId, "LANDMARK"),
+      pageList = readDsl.findNavigation(bookId, "PAGE_LIST"),
+      positions = readDsl.findPositions(bookId),
       comment = record.get("comment", String::class.java),
       createdAtMillis = record.requiredLongText("created_at_ms_64"),
       updatedAtMillis = record.requiredLongText("updated_at_ms_64"),
@@ -59,7 +65,7 @@ class JooqBookMediaRepository(
   private fun findBatch(bookIds: List<BookId>): List<BookMedia> {
     if (bookIds.isEmpty()) return emptyList()
     val records =
-      database.dsl.fetch(
+      readDsl.fetch(
         """
         SELECT media.*,
           CAST(created_at_ms AS TEXT) AS created_at_ms_64,
@@ -70,12 +76,12 @@ class JooqBookMediaRepository(
         """.trimIndent(),
         *bookIds.map { it.value }.toTypedArray(),
       )
-    val pages = database.dsl.findPagesBatch(bookIds)
-    val files = database.dsl.findFilesBatch(bookIds)
-    val positions = database.dsl.findPositionsBatch(bookIds)
-    val toc = database.dsl.findNavigationBatch(bookIds, "TOC")
-    val landmarks = database.dsl.findNavigationBatch(bookIds, "LANDMARK")
-    val pageLists = database.dsl.findNavigationBatch(bookIds, "PAGE_LIST")
+    val pages = readDsl.findPagesBatch(bookIds)
+    val files = readDsl.findFilesBatch(bookIds)
+    val positions = readDsl.findPositionsBatch(bookIds)
+    val toc = readDsl.findNavigationBatch(bookIds, "TOC")
+    val landmarks = readDsl.findNavigationBatch(bookIds, "LANDMARK")
+    val pageLists = readDsl.findNavigationBatch(bookIds, "PAGE_LIST")
     return records.map { record ->
       val id = BookId(record.requiredString("book_id"))
       BookMedia(

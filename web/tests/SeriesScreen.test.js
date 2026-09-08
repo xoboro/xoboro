@@ -368,6 +368,49 @@ describe('series screen refreshes', () => {
 })
 
 describe('SeriesScreen', () => {
+  it('aborts the old route and restores ordering when params change to another series', async () => {
+    localStorage.setItem('xoboro.pref.anonymous.s1.sort', 'number,desc')
+    localStorage.setItem('xoboro.pref.anonymous.s2.sort', 'number,asc')
+    const oldSignals = []
+    const requested = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      requested.push(url)
+      if (url.includes('/series/s1/')) {
+        oldSignals.push(init.signal)
+        return new Promise((_, reject) => {
+          init.signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          })
+        })
+      }
+      if (url.includes('/series/s2/media-items')) {
+        return Promise.resolve(
+          reply(
+            envelope([
+              { ...ITEMS[0], id: 'm20', title: 'Second series chapter' },
+              { ...ITEMS[1], id: 'm21', title: 'Another second series chapter' },
+            ]),
+          ),
+        )
+      }
+      if (url.includes('/series/s2/reader-context')) {
+        const second = { ...SERIES, id: 's2', title: 'Second Series' }
+        return Promise.resolve(reply({ series: second, first: null, resume: null }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    const view = render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(oldSignals).toHaveLength(2))
+    await view.rerender({ params: { id: 's2' } })
+
+    await screen.findByText('Second Series')
+    await screen.findByText('Second series chapter')
+    expect(oldSignals.every((signal) => signal.aborted)).toBe(true)
+    const secondItems = requested.find((url) => url.includes('/series/s2/media-items'))
+    expect(secondItems).toContain('sort=number%2Casc')
+  })
+
   it('requests the next page so every chapter beyond the first hundred is reachable', async () => {
     const fetchImpl = vi.fn(async (url) => {
       if (url.includes('/series/s1/media-items')) {

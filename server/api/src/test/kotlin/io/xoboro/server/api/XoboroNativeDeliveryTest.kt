@@ -44,6 +44,7 @@ import io.xoboro.core.domain.MediaFileKind
 import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaPosition
 import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadata
 import io.xoboro.core.domain.User
@@ -105,6 +106,42 @@ class XoboroNativeDeliveryTest {
       assertEquals(
         """[{"position":1,"href":"OEBPS/text/chapter-1.xhtml","mediaType":"application/xhtml+xml","progression":0.0,"totalProgression":0.0,"koboSpan":null},{"position":2,"href":"OEBPS/text/aaa-out-of-lexical-order.xhtml","mediaType":"application/xhtml+xml","progression":0.0,"totalProgression":0.5,"koboSpan":null}]""",
         context.getValue("positions").jsonArray.toString(),
+      )
+    }
+
+  @Test
+  fun `reader context preserves the complete stored progress`() =
+    testApplication {
+      val fixture = Fixture.visibleWithProgress()
+      installDelivery(fixture)
+
+      val response = client.get(READER_CONTEXT_PATH) { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val progress =
+        Json.parseToJsonElement(response.bodyAsText())
+          .jsonObject
+          .getValue("item")
+          .jsonObject
+          .getValue("progress")
+          .jsonObject
+      assertEquals(
+        setOf(
+          "page",
+          "completed",
+          "readAtMillis",
+          "updatedAtMillis",
+          "deviceId",
+          "deviceName",
+          "locator",
+        ),
+        progress.keys,
+      )
+      assertEquals("epub-reader", progress.getValue("deviceId").jsonPrimitive.content)
+      assertEquals("Synthetic phone", progress.getValue("deviceName").jsonPrimitive.content)
+      assertEquals(
+        """{"href":"OEBPS/text/chapter-1.xhtml","locations":{"progression":0.25}}""",
+        progress.getValue("locator").jsonObject.toString(),
       )
     }
 
@@ -560,8 +597,19 @@ class XoboroNativeDeliveryTest {
       assertEquals("OEBPS/text/chapter-1.xhtml", fixture.content.lastResourcePath)
       assertEquals("application/xhtml+xml", response.headers[HttpHeaders.ContentType])
       val policy = assertNotNull(response.headers["Content-Security-Policy"])
+      assertTrue("default-src 'none'" in policy)
       assertTrue("script-src 'none'" in policy)
+      assertTrue("style-src 'self' 'unsafe-inline'" in policy)
+      assertTrue("img-src 'self' data:" in policy)
+      assertTrue("font-src 'self' data:" in policy)
+      assertTrue("media-src 'self' data:" in policy)
+      assertTrue("connect-src 'none'" in policy)
+      assertTrue("frame-src 'none'" in policy)
       assertTrue("object-src 'none'" in policy)
+      assertTrue("form-action 'none'" in policy)
+      assertTrue("base-uri 'none'" in policy)
+      assertFalse("http:" in policy)
+      assertFalse("https:" in policy)
       assertNull(response.headers[HttpHeaders.ContentDisposition])
       assertEquals(1, fixture.content.openResourceCallCount)
       assertTrue(assertNotNull(fixture.content.lastResourceStream).closed)
@@ -948,9 +996,10 @@ class XoboroNativeDeliveryTest {
     status: MediaStatus,
     mediaKind: MediaKind = MediaKind.EPUB,
     name: String = "Synthetic delivery.epub",
+    progress: ReadProgress? = null,
   ) {
     private val users = InMemoryUserRepository(user)
-    private val book = syntheticBook(status, mediaKind, name)
+    private val book = syntheticBook(status, mediaKind, name, progress)
     val sessions =
       UserSessionLifecycle(
         users = users,
@@ -973,6 +1022,30 @@ class XoboroNativeDeliveryTest {
               sharesAllLibraries = true,
             ),
           status = status,
+        )
+
+      fun visibleWithProgress(): Fixture =
+        Fixture(
+          user =
+            syntheticUser(
+              roles = setOf(UserRole.PAGE_STREAMING),
+              sharesAllLibraries = true,
+            ),
+          status = MediaStatus.READY,
+          progress =
+            ReadProgress(
+              bookId = MEDIA_ID,
+              userId = USER_ID,
+              page = 1,
+              completed = false,
+              readAtMillis = 1_735_689_600_200,
+              deviceId = "epub-reader",
+              deviceName = "Synthetic phone",
+              locatorJson =
+                """{"href":"OEBPS/text/chapter-1.xhtml","locations":{"progression":0.25}}""",
+              createdAtMillis = 1_735_689_600_200,
+              updatedAtMillis = 1_735_689_600_300,
+            ),
         )
 
       fun restricted(): Fixture =
@@ -1382,6 +1455,7 @@ class XoboroNativeDeliveryTest {
       status: MediaStatus,
       mediaKind: MediaKind,
       name: String,
+      progress: ReadProgress?,
     ): CatalogBook {
       val book =
         Book(
@@ -1487,7 +1561,7 @@ class XoboroNativeDeliveryTest {
             createdAtMillis = 1_735_689_600_000,
             updatedAtMillis = 1_735_689_600_123,
           ),
-        readProgress = null,
+        readProgress = progress,
       )
     }
   }

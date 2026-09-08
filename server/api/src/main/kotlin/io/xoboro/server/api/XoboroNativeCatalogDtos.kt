@@ -270,15 +270,7 @@ internal fun CatalogBook.toNativeResponse(): XoboroMediaItemResponse =
         pageCount = media?.pageCount ?: 0,
         message = media?.comment,
       ),
-    progress =
-      readProgress?.let {
-        XoboroMediaProgressResponse(
-          page = it.page,
-          completed = it.completed,
-          readAtMillis = it.readAtMillis,
-          updatedAtMillis = it.updatedAtMillis,
-        )
-      },
+    progress = readProgress?.toNativeProgressResponse(),
     fileSize = book.fileSize,
     oneShot = book.oneshot,
     deleted = book.deletedAtMillis != null,

@@ -17,7 +17,7 @@
    * not gate it behind an administrator: it authorizes by what the caller can already
    * see.
    */
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { Check, CheckCheck, ChevronLeft, PencilLine, RotateCcw } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import {
@@ -57,6 +57,7 @@
   let order = $state(SeriesOrder.NEWEST)
   let pageIndex = $state(0)
   let loading = $state(false)
+  let activeSeriesId = $state(null)
 
   /**
    * Which read is the current one.
@@ -71,6 +72,8 @@
   let loadController = null
 
   async function load(page = pageIndex) {
+    const requestedSeriesId = activeSeriesId
+    if (!requestedSeriesId) return
     const mine = ++loadSequence
     loadController?.abort()
     const controller = new AbortController()
@@ -81,10 +84,10 @@
     loading = true
     try {
       const [context, itemPage] = await Promise.all([
-        readSeriesReaderContext(params.id, { signal: controller.signal }),
-        listSeriesMediaItems(params.id, { page, sort: order, signal: controller.signal }),
+        readSeriesReaderContext(requestedSeriesId, { signal: controller.signal }),
+        listSeriesMediaItems(requestedSeriesId, { page, sort: order, signal: controller.signal }),
       ])
-      if (mine !== loadSequence) return
+      if (mine !== loadSequence || requestedSeriesId !== activeSeriesId) return
       series = context.series
       items = itemPage
       pageIndex = itemPage.page
@@ -107,17 +110,40 @@
   function choose(next) {
     order = next
     pageIndex = 0
-    writePreference(readerId, params.id, Preference.SORT, next)
+    writePreference(readerId, activeSeriesId, Preference.SORT, next)
     load(0)
   }
 
-  onMount(() => {
+  function openSeries(id) {
+    if (!id || id === activeSeriesId) return
+    loadSequence += 1
+    loadController?.abort()
+    clearTimeout(reloadTimer)
+    activeSeriesId = id
+    series = null
+    items = null
+    first = null
+    resume = null
+    error = null
+    editing = false
+    pageIndex = 0
+    loading = false
+    marking = new Set()
+    markingSeries = false
     order = oneOf(
-      readPreference(readerId, params.id, Preference.SORT, SeriesOrder.NEWEST),
+      readPreference(readerId, id, Preference.SORT, SeriesOrder.NEWEST),
       ORDERS,
       SeriesOrder.NEWEST,
     )
-    load()
+    load(0)
+  }
+
+  $effect(() => {
+    const id = params.id
+    untrack(() => openSeries(id))
+  })
+
+  onMount(() => {
     const offCatalog = eventHub.on(
       ['series.changed', 'media-item.added', 'media-item.changed'],
       (message) => {
@@ -131,6 +157,7 @@
     return () => {
       loadSequence += 1
       loadController?.abort()
+      activeSeriesId = null
       offCatalog()
       offResync()
       clearTimeout(reloadTimer)
@@ -153,8 +180,8 @@
     const ids = message?.ids
     const seriesId = message?.seriesId
     if (!Array.isArray(ids) && seriesId == null) return true
-    if (seriesId != null && seriesId === params.id) return true
-    return Array.isArray(ids) && ids.includes(params.id)
+    if (seriesId != null && seriesId === activeSeriesId) return true
+    return Array.isArray(ids) && ids.includes(activeSeriesId)
   }
 
   /**
@@ -200,14 +227,15 @@
     if (marking.has(item.id)) return
     busyWith(item.id, true)
     error = null
+    const requestedSeriesId = activeSeriesId
     try {
       if (item.progress?.completed) await clearProgress(item.id)
       else await writeProgress(item.id, { page: item.media?.pageCount ?? 1 })
-      await load()
+      if (requestedSeriesId === activeSeriesId) await load()
     } catch (caught) {
-      error = caught
+      if (requestedSeriesId === activeSeriesId) error = caught
     } finally {
-      busyWith(item.id, false)
+      if (requestedSeriesId === activeSeriesId) busyWith(item.id, false)
     }
   }
 
@@ -215,13 +243,14 @@
     if (markingSeries) return
     markingSeries = true
     error = null
+    const requestedSeriesId = activeSeriesId
     try {
-      await writeSeriesProgress(params.id, { read })
-      await load()
+      await writeSeriesProgress(requestedSeriesId, { read })
+      if (requestedSeriesId === activeSeriesId) await load()
     } catch (caught) {
-      error = caught
+      if (requestedSeriesId === activeSeriesId) error = caught
     } finally {
-      markingSeries = false
+      if (requestedSeriesId === activeSeriesId) markingSeries = false
     }
   }
 

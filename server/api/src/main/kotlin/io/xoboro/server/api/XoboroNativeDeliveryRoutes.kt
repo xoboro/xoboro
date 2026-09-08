@@ -253,7 +253,17 @@ fun Route.xoboroNativeDeliveryRoutes(
           }
           call.response.header(
             "Content-Security-Policy",
-            "script-src 'none'; object-src 'none';",
+            "default-src 'none'; " +
+              "script-src 'none'; " +
+              "style-src 'self' 'unsafe-inline'; " +
+              "img-src 'self' data:; " +
+              "font-src 'self' data:; " +
+              "media-src 'self' data:; " +
+              "connect-src 'none'; " +
+              "frame-src 'none'; " +
+              "object-src 'none'; " +
+              "form-action 'none'; " +
+              "base-uri 'none';",
           )
           call.respondNativeContent(stream)
         }

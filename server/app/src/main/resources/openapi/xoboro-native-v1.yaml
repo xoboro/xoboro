@@ -4443,11 +4443,11 @@ components:
         One EPUB reading position. `position` is one-based and ascending order *is*
         reading order, which no other response carries. `href` matches a resource-manifest
         `path` and is what the resource route is asked for verbatim. `totalProgression` is
-        `position / count`, so it reports progress at the end of the position rather than
-        at its start — one position ahead of the Readium convention, which
-        `docs/api/native-v1.md` explains. Spelled out as an array of this schema rather
-        than the bare `type: object` used elsewhere in this file, because being an ordered
-        list is the entire value of this endpoint.
+        `(position - 1) / count`, so it reports progress at the start of the position and
+        follows the Readium convention: the first position is zero and no position reports
+        one. Spelled out as an array of this schema rather than the bare `type: object` used
+        elsewhere in this file, because being an ordered list is the entire value of this
+        endpoint.
       properties:
         position: { type: integer }
         href: { type: string }

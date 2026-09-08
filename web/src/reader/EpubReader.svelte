@@ -12,7 +12,7 @@
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import { bindEpubFrame } from './epubFrame.js'
-  import { epubProgressFor, epubResume } from './epubPosition.js'
+  import { epubNavigationFor, epubProgressFor, epubResume } from './epubPosition.js'
 
   let { params, initialContext = null } = $props()
 
@@ -64,6 +64,8 @@
   let nextId = $state(null)
   let loadedId = $state('')
   let restoreProgression = $state(0)
+  let restoreFragment = $state(null)
+  let locatorHref = $state(null)
   let restoreKey = $state(0)
 
   let saveTimer = null
@@ -81,8 +83,10 @@
   const frameOptions = $derived({
     restoreKey,
     progression: restoreProgression,
+    fragment: restoreFragment,
     styles: { fontSize, lineHeight, margin, width: columnWidth, theme },
     onProgress: noteFrameProgress,
+    onNavigate: followLink,
     onToggleChrome: toggleChrome,
     onKeydown,
   })
@@ -92,14 +96,17 @@
     saveTimer = null
     if (!pendingProgress) return
     const write = pendingProgress
-    pendingProgress = null
     const token = ++progressWriteToken
     writeProgress(write.id, { ...write.progress, keepalive })
       .then(() => {
-        if (token === progressWriteToken && loadedId === write.id) progressError = null
+        if (token !== progressWriteToken || pendingProgress !== write) return
+        pendingProgress = null
+        if (loadedId === write.id) progressError = null
       })
       .catch((caught) => {
-        if (token === progressWriteToken && loadedId === write.id) progressError = caught
+        if (token === progressWriteToken && pendingProgress === write && loadedId === write.id) {
+          progressError = caught
+        }
       })
   }
 
@@ -112,9 +119,24 @@
 
   function noteFrameProgress({ progression, atBottom }) {
     if (!position) return
-    const progress = epubProgressFor(positions, position.href, progression, pageCount, atBottom)
+    const exactLocatorHref = locatorHref
+    const progress = epubProgressFor(
+      positions,
+      position.href,
+      progression,
+      pageCount,
+      atBottom,
+      exactLocatorHref,
+    )
     at = progress.index
     noteProgress(progress)
+    // A fragment is an instruction for this navigation, not a permanent resume pin.
+    // Once the frame reports the restored anchor, later scrolling must persist its
+    // numeric progression against the resource itself.
+    if (exactLocatorHref) {
+      locatorHref = null
+      restoreFragment = null
+    }
   }
 
   async function load(id) {
@@ -123,7 +145,6 @@
     const controller = new AbortController()
     loadController = controller
     flushProgress()
-    progressWriteToken += 1
     item = null
     positions = []
     previousId = null
@@ -132,6 +153,8 @@
     error = null
     progressError = null
     retryable = false
+    restoreFragment = null
+    locatorHref = null
 
     try {
       const context =
@@ -175,11 +198,34 @@
       return
     }
     at = next
+    locatorHref = null
+    restoreFragment = null
     restoreProgression = Number(positions[next].progression) || 0
     restoreKey += 1
     noteProgress(
       epubProgressFor(positions, positions[next].href, restoreProgression, pageCount, false),
     )
+  }
+
+  function followLink(destination) {
+    const navigation = epubNavigationFor(positions, at, destination)
+    if (!navigation) return false
+    at = navigation.index
+    locatorHref = navigation.href
+    restoreFragment = navigation.fragment
+    restoreProgression = navigation.progression
+    restoreKey += 1
+    noteProgress(
+      epubProgressFor(
+        positions,
+        navigation.resourceHref,
+        navigation.progression,
+        pageCount,
+        false,
+        navigation.href,
+      ),
+    )
+    return true
   }
 
   function toggleChrome() {
@@ -210,17 +256,21 @@
 
   onMount(() => {
     const onPageHide = () => flushProgress({ keepalive: true })
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushProgress({ keepalive: true })
+    }
     window.addEventListener('keydown', onKeydown)
     window.addEventListener('pagehide', onPageHide)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       window.removeEventListener('keydown', onKeydown)
       window.removeEventListener('pagehide', onPageHide)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   })
 
   onDestroy(() => {
     flushProgress()
-    progressWriteToken += 1
     loadController?.abort()
   })
 </script>
@@ -422,6 +472,8 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
+    padding-right: max(var(--space-3), calc(var(--inset-right) + var(--space-2)));
+    padding-left: max(var(--space-3), calc(var(--inset-left) + var(--space-2)));
     background: var(--surface-overlay);
   }
   .topbar {
