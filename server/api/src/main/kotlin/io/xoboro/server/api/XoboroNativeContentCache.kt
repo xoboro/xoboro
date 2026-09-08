@@ -34,12 +34,19 @@ internal suspend fun ApplicationCall.respondNativeContent(stream: MediaContentSt
     contentType = stream.mediaType.toNativeContentType(),
     status = HttpStatusCode.OK,
     contentLength = stream.contentLength,
-  ) {
-    val buffer = ByteArray(CONTENT_BUFFER_SIZE)
-    while (true) {
-      val read = stream.read(buffer)
-      if (read < 0) break
-      if (read > 0) write(buffer, 0, read)
+) {
+    try {
+      val buffer = ByteArray(CONTENT_BUFFER_SIZE)
+      while (true) {
+        val read = stream.read(buffer)
+        if (read < 0) break
+        if (read > 0) write(buffer, 0, read)
+      }
+    } finally {
+      // respondOutputStream can run this writer after the route handler has returned. The writer,
+      // not the handler, therefore owns the stream; closing it around the call produced a declared
+      // Content-Length with an empty body under the real Ktor engine.
+      stream.close()
     }
   }
 }

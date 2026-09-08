@@ -232,6 +232,24 @@ class XoboroNativeCatalogTest {
       assertEquals(listOf("Synthetic Writer" to "writer"), authors.map { it.name to it.role })
     }
 
+  @Test
+  fun `returns bounded series reader entry data in one response`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installCatalog(fixture)
+
+      val response =
+        client.get("$XOBORO_API_PREFIX/series/series-1/reader-context") {
+          bearerAuth(fixture.token)
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      val context = response.body<XoboroSeriesReaderContextResponse>()
+      assertEquals("series-1", context.series.id)
+      assertEquals("media-1", context.first?.id)
+      assertEquals("media-1", context.resume?.id)
+    }
+
   private fun ApplicationTestBuilder.installCatalog(fixture: Fixture) {
     application {
       install(ContentNegotiation) {

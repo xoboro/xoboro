@@ -73,37 +73,37 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           val bookId = BookId(call.requiredParameter("mediaItemId"))
-          val item = catalog.findBookByIdOrNull(bookId, user.catalogAccess())
-          if (item == null) {
+          val delivery = catalog.findBookDeliveryByIdOrNull(bookId, user.catalogAccess())
+          if (delivery == null) {
             call.respondNativeNotFound("media_item_not_found", "Media item was not found")
             return@get
           }
           val pageNumber =
             call.requiredParameter("pageNumber").toIntOrNull()
               ?: throw XoboroInvalidQueryException("pageNumber must be an integer")
-          val media = item.media
-          if (media == null || media.status != MediaStatus.READY) {
-            call.respondMediaUnusable(media?.status)
+          if (delivery.mediaStatus != MediaStatus.READY) {
+            call.respondMediaUnusable(delivery.mediaStatus)
             return@get
           }
-          if (pageNumber !in 1..media.pageCount) {
+          if (pageNumber !in 1..delivery.pageCount) {
             call.respondNativeNotFound("page_not_found", "Page was not found")
             return@get
           }
+          val mediaUpdatedAtMillis = requireNotNull(delivery.mediaUpdatedAtMillis)
           val request = call.nativePageImageRequest()
           val entityTag =
             nativeMetadataEntityTag(
               "page",
               bookId.value,
-              item.book.fileSize,
-              item.book.fileModifiedAtMillis,
-              media.updatedAtMillis,
+              delivery.fileSize,
+              delivery.fileModifiedAtMillis,
+              mediaUpdatedAtMillis,
               pageNumber,
               request.format,
               request.maximumDimension,
               request.raw,
             )
-          if (call.respondNativeNotModified(entityTag, media.updatedAtMillis)) return@get
+          if (call.respondNativeNotModified(entityTag, mediaUpdatedAtMillis)) return@get
           val stream =
             try {
               content.openPage(bookId, pageNumber, request)
@@ -118,11 +118,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             call.respondNativeNotFound("page_not_found", "Page was not found")
             return@get
           }
-          try {
-            call.respondNativeContent(stream)
-          } finally {
-            stream.close()
-          }
+          call.respondNativeContent(stream)
         }
         get("/{mediaItemId}/resources") {
           val user = call.nativeUser()
@@ -249,15 +245,11 @@ fun Route.xoboroNativeDeliveryRoutes(
             call.respondNativeNotFound("resource_not_found", "Resource was not found")
             return@get
           }
-          try {
-            call.response.header(
-              "Content-Security-Policy",
-              "script-src 'none'; object-src 'none';",
-            )
-            call.respondNativeContent(stream)
-          } finally {
-            stream.close()
-          }
+          call.response.header(
+            "Content-Security-Policy",
+            "script-src 'none'; object-src 'none';",
+          )
+          call.respondNativeContent(stream)
         }
         get("/{mediaItemId}/file") {
           val user = call.nativeUser()

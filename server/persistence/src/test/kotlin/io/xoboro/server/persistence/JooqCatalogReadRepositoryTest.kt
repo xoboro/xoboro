@@ -21,6 +21,7 @@ import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.ReadList
 import io.xoboro.core.domain.ReadListId
 import io.xoboro.core.domain.ReadProgress
@@ -34,12 +35,57 @@ import io.xoboro.core.domain.UserId
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
 class JooqCatalogReadRepositoryTest {
   @TempDir
   lateinit var tempDirectory: Path
+
+  @Test
+  fun `reads page delivery metadata without hydrating the full media model`() {
+    withCatalog("delivery") { database ->
+      database.dsl.execute(
+        """
+        INSERT INTO media (book_id, status, page_count, created_at_ms, updated_at_ms)
+        VALUES ('book-1', 'READY', 12, 10, 77)
+        """.trimIndent(),
+      )
+      val catalog = JooqCatalogReadRepository(database)
+
+      val descriptor =
+        catalog.findBookDeliveryByIdOrNull(BookId("book-1"), CatalogAccess())
+
+      assertEquals(BookId("book-1"), descriptor?.bookId)
+      assertEquals(MediaKind.COMIC_ARCHIVE, descriptor?.mediaKind)
+      assertEquals(1_024L, descriptor?.fileSize)
+      assertEquals(1L, descriptor?.fileModifiedAtMillis)
+      assertEquals(MediaStatus.READY, descriptor?.mediaStatus)
+      assertEquals(12, descriptor?.pageCount)
+      assertEquals(77L, descriptor?.mediaUpdatedAtMillis)
+      assertNull(
+        catalog.findBookDeliveryByIdOrNull(
+          BookId("book-1"),
+          CatalogAccess(libraryIds = setOf(LibraryId("library-hidden"))),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `checks artwork owner visibility without hydrating catalog responses`() {
+    withCatalog("artwork-visibility") { database ->
+      val catalog = JooqCatalogReadRepository(database)
+
+      assertTrue(catalog.canReadBook(BookId("book-1"), CatalogAccess()))
+      assertTrue(catalog.canReadSeries(SeriesId("series-a"), CatalogAccess()))
+      val hidden = CatalogAccess(libraryIds = setOf(LibraryId("library-hidden")))
+      assertFalse(catalog.canReadBook(BookId("book-1"), hidden))
+      assertFalse(catalog.canReadSeries(SeriesId("series-a"), hidden))
+    }
+  }
 
   @Test
   fun `pages searches sorts and resolves book siblings in the database`() {

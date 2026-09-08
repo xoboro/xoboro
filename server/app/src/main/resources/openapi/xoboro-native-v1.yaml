@@ -3136,6 +3136,48 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/series/{seriesId}/reader-context:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        description: Series identifier.
+        schema:
+          type: string
+    get:
+      tags: [Series]
+      operationId: get_series_seriesId_reader_context
+      description: >-
+        Returns the series, its first visible media item, and the current reader's
+        preferred resume item in one bounded response.
+      responses:
+        "200":
+          description: Success.
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid request body or query parameter.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Authenticated but not permitted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/series/{seriesId}/analyze:
     parameters:
       - name: seriesId

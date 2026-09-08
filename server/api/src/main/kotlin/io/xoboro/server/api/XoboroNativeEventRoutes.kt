@@ -18,6 +18,7 @@ import io.ktor.server.routing.route
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
 import io.ktor.util.AttributeKey
+import io.ktor.util.cio.ChannelWriteException
 import io.ktor.util.pipeline.PipelineContext
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.User
@@ -157,6 +158,10 @@ fun Route.xoboroNativeEventRoutes(
           } catch (_: XoboroNativeEventHubClosedException) {
             // The hub already delivered its own final resync-required frame (overflow or
             // superseded) through receive() before closing the channel; nothing more to send.
+          } catch (_: ChannelWriteException) {
+            // EventSource closes the socket whenever navigation replaces this stream. Ktor
+            // reports that ordinary client disconnect as a failed write; it is not a server
+            // failure and must not escape into StatusPages as a synthetic 500.
           }
         }
       }

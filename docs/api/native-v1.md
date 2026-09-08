@@ -299,6 +299,12 @@ the entries that are not gone yet. Media-item listings accept it too.
 `GET /api/xoboro/v1/series/{seriesId}/media-items` returns its visible
 non-deleted items, ordered by number unless an explicit sort is provided.
 
+`GET /api/xoboro/v1/series/{seriesId}/reader-context` returns the visible series,
+its first item, and the current reader's resume item in one bounded response. The
+resume item prefers an in-progress item and otherwise selects the next unread item;
+both item fields are nullable. This is the series-screen entry request and avoids
+serial keep-reading, on-deck, and oldest-item round trips.
+
 ## Media items
 
 `GET /api/xoboro/v1/media-items` returns visible non-deleted items and accepts

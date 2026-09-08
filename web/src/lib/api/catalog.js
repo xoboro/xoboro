@@ -53,6 +53,10 @@ export function readSeries(seriesId) {
   return request(`/series/${seriesId}`)
 }
 
+export function readSeriesReaderContext(seriesId, { signal } = {}) {
+  return request(`/series/${seriesId}/reader-context`, { signal })
+}
+
 /** Series listing orders, as the `sort` parameter spells them. */
 export const SeriesOrder = Object.freeze({
   NEWEST: 'number,desc',
@@ -72,29 +76,9 @@ export const SeriesOrder = Object.freeze({
  */
 export function listSeriesMediaItems(
   seriesId,
-  { page = 0, size = 100, sort = SeriesOrder.NEWEST } = {},
+  { page = 0, size = 100, sort = SeriesOrder.NEWEST, signal } = {},
 ) {
-  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort } })
-}
-
-/**
- * The item a reader would resume, or `null` when they have not started the series.
- *
- * Asked of the server in two steps because "resume" means two different things: an
- * item left part-read is where the reader actually stopped, and once none is
- * part-read the next unread one is where they are going. Both filters are resolved
- * in SQL over the whole series, so neither depends on how the listing happens to be
- * paged.
- */
-export async function readResumePoint(seriesId) {
-  for (const filter of [{ keepReading: true }, { onDeck: true }]) {
-    const page = await request(`/series/${seriesId}/media-items`, {
-      query: { page: 0, size: 1, sort: SeriesOrder.OLDEST, ...filter },
-    })
-    const [item] = page.items ?? []
-    if (item) return item
-  }
-  return null
+  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort }, signal })
 }
 
 export function readMediaItem(mediaItemId, { signal } = {}) {

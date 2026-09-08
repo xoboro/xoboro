@@ -87,11 +87,7 @@ private fun Route.nativeArtworkOwnerRoutes(
           bytes = content.bytes,
           mediaType = content.artwork.mediaType,
         )
-      try {
-        call.respondNativeContent(stream)
-      } finally {
-        stream.close()
-      }
+      call.respondNativeContent(stream)
     }
     get("/artworks") {
       val owner = call.authorizedArtworkOwnerOrNull(catalog, kind) ?: return@get
@@ -124,11 +120,7 @@ private fun Route.nativeArtworkOwnerRoutes(
           bytes = content.bytes,
           mediaType = content.artwork.mediaType,
         )
-      try {
-        call.respondNativeContent(stream)
-      } finally {
-        stream.close()
-      }
+      call.respondNativeContent(stream)
     }
     post("/artworks") {
       val user = call.nativeUser()
@@ -211,10 +203,10 @@ internal suspend fun ApplicationCall.authorizedArtworkOwnerOrNull(
       ArtworkOwnerKind.MEDIA_ITEM -> {
         val mediaItemId = requiredParameter("mediaItemId")
         if (
-          catalog.findBookByIdOrNull(
+          !catalog.canReadBook(
             BookId(mediaItemId),
             user.catalogAccess(),
-          ) == null
+          )
         ) {
           respondNativeNotFound("media_item_not_found", "Media item was not found")
           return null
@@ -224,10 +216,10 @@ internal suspend fun ApplicationCall.authorizedArtworkOwnerOrNull(
       ArtworkOwnerKind.SERIES -> {
         val seriesId = requiredParameter("seriesId")
         if (
-          catalog.findSeriesByIdOrNull(
+          !catalog.canReadSeries(
             SeriesId(seriesId),
             user.catalogAccess(),
-          ) == null
+          )
         ) {
           respondNativeNotFound("series_not_found", "Series was not found")
           return null

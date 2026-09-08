@@ -6,10 +6,12 @@ import io.xoboro.core.domain.BookMedia
 import io.xoboro.core.domain.BookMetadata
 import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.LibraryId
+import io.xoboro.core.domain.MediaKind
+import io.xoboro.core.domain.MediaStatus
+import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadata
-import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.SeriesReadProgress
 import io.xoboro.core.domain.UserId
 
@@ -187,6 +189,16 @@ data class CatalogBook(
   val readProgress: ReadProgress?,
 )
 
+data class CatalogBookDelivery(
+  val bookId: BookId,
+  val mediaKind: MediaKind,
+  val fileSize: Long,
+  val fileModifiedAtMillis: Long,
+  val mediaStatus: MediaStatus?,
+  val pageCount: Int,
+  val mediaUpdatedAtMillis: Long?,
+)
+
 data class BookMetadataAggregation(
   val authors: List<io.xoboro.core.domain.Author> = emptyList(),
   val tags: Set<String> = emptySet(),
@@ -221,6 +233,27 @@ interface CatalogReadRepository {
     access: CatalogAccess,
   ): CatalogBook?
 
+  fun findBookDeliveryByIdOrNull(
+    id: BookId,
+    access: CatalogAccess,
+  ): CatalogBookDelivery? =
+    findBookByIdOrNull(id, access)?.let { item ->
+      CatalogBookDelivery(
+        bookId = item.book.id,
+        mediaKind = item.book.mediaKind,
+        fileSize = item.book.fileSize,
+        fileModifiedAtMillis = item.book.fileModifiedAtMillis,
+        mediaStatus = item.media?.status,
+        pageCount = item.media?.pageCount ?: 0,
+        mediaUpdatedAtMillis = item.media?.updatedAtMillis,
+      )
+    }
+
+  fun canReadBook(
+    id: BookId,
+    access: CatalogAccess,
+  ): Boolean = findBookByIdOrNull(id, access) != null
+
   fun findPreviousBookOrNull(
     id: BookId,
     access: CatalogAccess,
@@ -241,6 +274,11 @@ interface CatalogReadRepository {
     id: SeriesId,
     access: CatalogAccess,
   ): CatalogSeries?
+
+  fun canReadSeries(
+    id: SeriesId,
+    access: CatalogAccess,
+  ): Boolean = findSeriesByIdOrNull(id, access) != null
 
   fun countSeriesByFirstCharacter(
     query: SeriesCatalogQuery,

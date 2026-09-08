@@ -111,6 +111,13 @@ data class XoboroMediaItemResponse(
 )
 
 @Serializable
+data class XoboroSeriesReaderContextResponse(
+  val series: XoboroSeriesResponse,
+  val first: XoboroMediaItemResponse? = null,
+  val resume: XoboroMediaItemResponse? = null,
+)
+
+@Serializable
 data class XoboroMediaResponse(
   val status: String,
   val mediaType: String? = null,
