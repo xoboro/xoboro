@@ -58,5 +58,13 @@ web/dist/
 # of a real library is real library data, and this repository never holds that.
 .playwright-mcp/
 *.png
+# Deliberate, generated PWA assets. Keep the blanket PNG rule above so screenshots and
+# real-library imagery remain impossible to add accidentally.
+!web/public/favicon-16.png
+!web/public/favicon-32.png
+!web/public/apple-touch-icon.png
+!web/public/icon-192.png
+!web/public/icon-512.png
+!web/public/icon-maskable-512.png
 __pycache__/
 *.pyc
