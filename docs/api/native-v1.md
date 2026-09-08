@@ -338,12 +338,13 @@ page bytes. It accepts:
 perform `Accept`-header format negotiation and deliberately has no
 `contentNegotiation` query parameter.
 
-Successful page responses include a strong content-derived `ETag`,
+Successful page responses include a weak metadata-derived `ETag`,
 `Last-Modified` from the indexed media update timestamp, and
 `Cache-Control: max-age=0, must-revalidate, private`. Clients can revalidate
 with `If-None-Match` or `If-Modified-Since`; a match returns `304 Not Modified`.
-The page is opened and buffered before its ETag can be evaluated, including
-requests that ultimately return 304.
+The validator includes the media and source version, page number, and requested
+conversion parameters. A matching request returns before the page source is opened;
+a cache miss streams the page without buffering the complete body in memory.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/resources` returns indexed EPUB
 page and asset entries as a JSON list; general container files are excluded.
@@ -409,8 +410,8 @@ Successful resource responses set
 `Content-Security-Policy: script-src 'none'; object-src 'none';` because EPUB
 resources are user-supplied same-origin content. They do not set
 `Content-Disposition`, since resources can be iframe subresources. Resource
-bytes use the same strong content-derived ETag, private conditional caching,
-and 304 behavior as page bytes. They do not support byte ranges.
+bytes use the same weak metadata-derived ETag, private conditional caching,
+and early 304 behavior as page bytes. They do not support byte ranges.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/file` downloads the original
 media file. It uses `Content-Disposition: attachment` with both a safe ASCII

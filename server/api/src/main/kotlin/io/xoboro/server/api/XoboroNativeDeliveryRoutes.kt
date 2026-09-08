@@ -91,6 +91,19 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           val request = call.nativePageImageRequest()
+          val entityTag =
+            nativeMetadataEntityTag(
+              "page",
+              bookId.value,
+              item.book.fileSize,
+              item.book.fileModifiedAtMillis,
+              media.updatedAtMillis,
+              pageNumber,
+              request.format,
+              request.maximumDimension,
+              request.raw,
+            )
+          if (call.respondNativeNotModified(entityTag, media.updatedAtMillis)) return@get
           val stream =
             try {
               content.openPage(bookId, pageNumber, request)
@@ -106,7 +119,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             return@get
           }
           try {
-            call.respondNativeCachedContent(stream, media.updatedAtMillis)
+            call.respondNativeContent(stream)
           } finally {
             stream.close()
           }
@@ -214,6 +227,17 @@ fun Route.xoboroNativeDeliveryRoutes(
             call.respondNativeNotFound("resource_not_found", "Resource was not found")
             return@get
           }
+          val media = requireNotNull(item.media)
+          val entityTag =
+            nativeMetadataEntityTag(
+              "resource",
+              bookId.value,
+              item.book.fileSize,
+              item.book.fileModifiedAtMillis,
+              media.updatedAtMillis,
+              resourcePath,
+            )
+          if (call.respondNativeNotModified(entityTag, media.updatedAtMillis)) return@get
           val stream =
             try {
               content.openResource(bookId, resourcePath)
@@ -230,7 +254,7 @@ fun Route.xoboroNativeDeliveryRoutes(
               "Content-Security-Policy",
               "script-src 'none'; object-src 'none';",
             )
-            call.respondNativeCachedContent(stream, item.media!!.updatedAtMillis)
+            call.respondNativeContent(stream)
           } finally {
             stream.close()
           }

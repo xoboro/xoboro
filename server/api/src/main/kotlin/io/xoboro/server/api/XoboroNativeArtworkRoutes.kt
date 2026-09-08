@@ -63,7 +63,21 @@ private fun Route.nativeArtworkOwnerRoutes(
   route(prefix) {
     get("/artwork") {
       val owner = call.authorizedArtworkOwnerOrNull(catalog, kind) ?: return@get
-      val content = artwork.selectedContentOrNull(owner)
+      val item = artwork.selectedOrNull(owner)
+      if (item == null) {
+        call.respondArtworkNotFound()
+        return@get
+      }
+      if (
+        call.respondNativeNotModified(
+          item.nativeArtworkEntityTag(),
+          item.updatedAtMillis,
+          NATIVE_ARTWORK_CACHE_CONTROL,
+        )
+      ) {
+        return@get
+      }
+      val content = artwork.contentOrNull(item)
       if (content == null) {
         call.respondArtworkNotFound()
         return@get
@@ -74,11 +88,7 @@ private fun Route.nativeArtworkOwnerRoutes(
           mediaType = content.artwork.mediaType,
         )
       try {
-        call.respondNativeCachedContent(
-          stream,
-          content.artwork.updatedAtMillis,
-          NATIVE_ARTWORK_CACHE_CONTROL,
-        )
+        call.respondNativeContent(stream)
       } finally {
         stream.close()
       }
@@ -90,7 +100,21 @@ private fun Route.nativeArtworkOwnerRoutes(
     get("/artworks/{artworkId}") {
       val owner = call.authorizedArtworkOwnerOrNull(catalog, kind) ?: return@get
       val id = ArtworkId(call.requiredParameter("artworkId"))
-      val content = artwork.contentOrNull(owner, id)
+      val item = artwork.findByIdOrNull(owner, id)
+      if (item == null) {
+        call.respondArtworkNotFound()
+        return@get
+      }
+      if (
+        call.respondNativeNotModified(
+          item.nativeArtworkEntityTag(),
+          item.updatedAtMillis,
+          NATIVE_ARTWORK_CACHE_CONTROL,
+        )
+      ) {
+        return@get
+      }
+      val content = artwork.contentOrNull(item)
       if (content == null) {
         call.respondArtworkNotFound()
         return@get
@@ -101,11 +125,7 @@ private fun Route.nativeArtworkOwnerRoutes(
           mediaType = content.artwork.mediaType,
         )
       try {
-        call.respondNativeCachedContent(
-          stream,
-          content.artwork.updatedAtMillis,
-          NATIVE_ARTWORK_CACHE_CONTROL,
-        )
+        call.respondNativeContent(stream)
       } finally {
         stream.close()
       }
@@ -220,6 +240,9 @@ internal suspend fun ApplicationCall.authorizedArtworkOwnerOrNull(
     }
   return ArtworkOwner(kind, id)
 }
+
+private fun io.xoboro.core.domain.Artwork.nativeArtworkEntityTag(): String =
+  nativeMetadataEntityTag(id.value, updatedAtMillis, fileSize)
 
 private suspend fun ApplicationCall.receiveNativeArtworkUpload(): ByteArray? {
   var bytes: ByteArray? = null
