@@ -85,6 +85,30 @@ function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {
 }
 
 describe('Reader home', () => {
+  it('renders a completed shelf without waiting for the slowest feed', async () => {
+    let finishSlowFeed
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('/libraries')) return reply([])
+      if (url.includes('/media-items/feeds/keep-reading')) {
+        return new Promise((resolve) => (finishSlowFeed = () => resolve(reply(envelope()))))
+      }
+      if (url.includes('/series/feeds/new')) {
+        return reply(
+          envelope([
+            { id: 'series-fast', title: 'Fast shelf result', mediaItemCount: 1 },
+          ]),
+        )
+      }
+      return reply(envelope())
+    })
+
+    render(Home)
+
+    await screen.findByText('Fast shelf result')
+    expect(finishSlowFeed).toBeTypeOf('function')
+    finishSlowFeed()
+  })
+
   it('reaches a catalog larger than one page', async () => {
     // The grid asked for one page of 100 and rendered it as "all series", so a library of
     // 3,339 showed its first 100 and offered no route to the other 3,239. The listing it

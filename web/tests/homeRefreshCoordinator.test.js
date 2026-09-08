@@ -96,4 +96,42 @@ describe('home refresh coordinator', () => {
 
     expect(refreshCatalog).not.toHaveBeenCalled()
   })
+
+  it('runs at most one merged follow-up while a refresh is in flight', async () => {
+    vi.useFakeTimers()
+    let finishRefresh
+    const refreshCatalog = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finishRefresh = resolve)),
+      )
+      .mockResolvedValue(undefined)
+    const refreshShelves = vi.fn().mockResolvedValue(undefined)
+    const refreshSearch = vi.fn().mockResolvedValue(undefined)
+    const coordinator = createHomeRefreshCoordinator({
+      selectedLibrary: () => 'lib-webtoon',
+      searchActive: () => false,
+      refreshCatalog,
+      refreshShelves,
+      refreshSearch,
+      delay: 200,
+    })
+
+    coordinator.onCatalog({ libraryId: 'lib-webtoon' })
+    await vi.advanceTimersByTimeAsync(200)
+    expect(refreshCatalog).toHaveBeenCalledTimes(1)
+
+    coordinator.onProgress()
+    coordinator.onCatalog({ libraryId: 'lib-webtoon' })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(refreshCatalog).toHaveBeenCalledTimes(1)
+    expect(refreshShelves).not.toHaveBeenCalled()
+
+    finishRefresh()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(refreshCatalog).toHaveBeenCalledTimes(2)
+    expect(refreshShelves).not.toHaveBeenCalled()
+  })
 })

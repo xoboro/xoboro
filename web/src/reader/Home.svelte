@@ -271,24 +271,57 @@
     const controller = new AbortController()
     shelvesController = controller
     const requestedLibraryId = libraryId
-    // Settled rather than all-or-nothing: a reader with no progress yet gets nothing
-    // useful from keep-reading, and that must not blank the rest of the page.
-    const [keep, deck, added, changed] = await Promise.allSettled([
-      readFeed('media-items', 'keep-reading', { libraryId: requestedLibraryId, signal: controller.signal }),
-      readFeed('media-items', 'on-deck', { libraryId: requestedLibraryId, signal: controller.signal }),
-      readFeed('series', 'new', { libraryId: requestedLibraryId, signal: controller.signal }),
-      readFeed('series', 'updated', { libraryId: requestedLibraryId, signal: controller.signal }),
+    // Each successful shelf is assigned as soon as it arrives. Waiting for all four
+    // before assigning made a fast local shelf invisible behind one slow NAS query.
+    // Outcomes are still settled independently so an empty or failed shelf cannot
+    // blank the others.
+    const settle = async (promise, assign) => {
+      try {
+        const value = await promise
+        if (serial === shelvesSerial && !controller.signal.aborted) {
+          assign(value.items ?? [])
+        }
+        return { status: 'fulfilled' }
+      } catch (reason) {
+        return { status: 'rejected', reason }
+      }
+    }
+    const outcomes = await Promise.all([
+      settle(
+        readFeed('media-items', 'keep-reading', {
+          libraryId: requestedLibraryId,
+          signal: controller.signal,
+        }),
+        (items) => (keepReading = items),
+      ),
+      settle(
+        readFeed('media-items', 'on-deck', {
+          libraryId: requestedLibraryId,
+          signal: controller.signal,
+        }),
+        (items) => (onDeck = items),
+      ),
+      settle(
+        readFeed('series', 'new', {
+          libraryId: requestedLibraryId,
+          signal: controller.signal,
+        }),
+        (items) => (recent = items),
+      ),
+      settle(
+        readFeed('series', 'updated', {
+          libraryId: requestedLibraryId,
+          signal: controller.signal,
+        }),
+        (items) => (updated = items),
+      ),
     ])
     if (serial !== shelvesSerial) return
-    if (keep.status === 'fulfilled') keepReading = keep.value.items ?? []
-    if (deck.status === 'fulfilled') onDeck = deck.value.items ?? []
-    if (added.status === 'fulfilled') recent = added.value.items ?? []
-    if (changed.status === 'fulfilled') updated = changed.value.items ?? []
     // Counted and said, not swallowed. Settling the failures kept the page usable and
     // also hid a total outage: every feed answered `500` for a while, and the only
     // symptom was four permanently empty shelves - which reads as an empty library.
     // A shelf that could not be read is not a shelf with nothing on it.
-    shelvesFailed = [keep, deck, added, changed].filter((r) => r.status === 'rejected').length
+    shelvesFailed = outcomes.filter((outcome) => outcome.status === 'rejected').length
     shelvesController = null
   }
 
