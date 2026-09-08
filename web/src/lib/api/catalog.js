@@ -85,6 +85,10 @@ export function readMediaItem(mediaItemId, { signal } = {}) {
   return request(`/media-items/${mediaItemId}`, { signal })
 }
 
+export function readMediaItemReaderContext(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}/reader-context`, { signal })
+}
+
 /**
  * Walks the in-series reading order.
  *
@@ -129,19 +133,30 @@ export const MAX_PAGE_DIMENSION = 4096
  * A page's bytes.
  *
  * `format=source` returns the stored bytes without re-encoding and **cannot** be
- * combined with `maxDimension`; the server rejects the pair rather than ignoring one
+ * combined with a resize; the server rejects the pair rather than ignoring one
  * of them, so the combination is refused here instead of producing a 400 later.
  */
-export function pageUrl(mediaItemId, pageNumber, { format = null, maxDimension = null } = {}) {
-  if (format === 'source' && maxDimension !== null) {
-    throw new Error('format=source cannot be combined with maxDimension')
+export function pageUrl(
+  mediaItemId,
+  pageNumber,
+  { format = null, maxDimension = null, maxWidth = null } = {},
+) {
+  if (maxDimension !== null && maxWidth !== null) {
+    throw new Error('maxDimension and maxWidth are mutually exclusive')
+  }
+  if (format === 'source' && (maxDimension !== null || maxWidth !== null)) {
+    throw new Error('format=source cannot be combined with a resize')
   }
   if (maxDimension !== null && (maxDimension <= 0 || maxDimension > MAX_PAGE_DIMENSION)) {
     throw new Error(`maxDimension must be between 1 and ${MAX_PAGE_DIMENSION}`)
   }
+  if (maxWidth !== null && (maxWidth <= 0 || maxWidth > MAX_PAGE_DIMENSION)) {
+    throw new Error(`maxWidth must be between 1 and ${MAX_PAGE_DIMENSION}`)
+  }
   const search = new URLSearchParams()
   if (format) search.set('format', format)
   if (maxDimension !== null) search.set('maxDimension', String(maxDimension))
+  if (maxWidth !== null) search.set('maxWidth', String(maxWidth))
   const query = search.toString()
   return resourceUrl(`/media-items/${mediaItemId}/pages/${pageNumber}${query ? `?${query}` : ''}`)
 }

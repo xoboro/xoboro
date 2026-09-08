@@ -66,6 +66,10 @@ const POSITIONS = [
 function novelRoutes(extra = []) {
   return routes([
     ...extra,
+    [
+      '/media-items/n1/reader-context',
+      reply({ item: NOVEL, previousId: null, nextId: null, pages: [], positions: POSITIONS }),
+    ],
     ['/media-items/n1/positions', reply(POSITIONS)],
     ['/media-items/n1/progress', reply(null, 204)],
     ['/media-items/n1', reply(NOVEL)],
@@ -220,8 +224,9 @@ describe('ReaderRoute', () => {
 
     await waitFor(() => expect(screen.getByTestId('chapter-frame')).toBeInTheDocument())
     expect(
-      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/n1')).length,
+      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/n1/reader-context')).length,
     ).toBe(1)
+    expect(fetchImpl.mock.calls.some(([url]) => url.endsWith('/media-items/n1'))).toBe(false)
   })
 
   it('opens a PDF in the image reader, because the server renders its pages', async () => {
@@ -239,9 +244,16 @@ describe('ReaderRoute', () => {
     }
     globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0)
     const fetchImpl = routes([
-      ['/media-items/b1/pages', reply([{ number: 1, mediaType: 'image/jpeg', width: 800, height: 1200 }])],
-      ['/media-items/b1/previous', reply({ code: 'media_item_not_found' }, 404)],
-      ['/media-items/b1/next', reply({ code: 'media_item_not_found' }, 404)],
+      [
+        '/media-items/b1/reader-context',
+        reply({
+          item: pdf,
+          previousId: null,
+          nextId: null,
+          pages: [{ number: 1, mediaType: 'image/jpeg', width: 800, height: 1200 }],
+          positions: [],
+        }),
+      ],
       ['/media-items/b1', reply(pdf)],
     ])
     globalThis.fetch = fetchImpl
@@ -250,7 +262,8 @@ describe('ReaderRoute', () => {
     await waitFor(() => expect(container.querySelector('.slot img')).toBeTruthy())
     expect(screen.queryByTestId('chapter-frame')).toBeNull()
     expect(
-      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/b1')).length,
+      fetchImpl.mock.calls.filter(([url]) => url.endsWith('/media-items/b1/reader-context')).length,
     ).toBe(1)
+    expect(fetchImpl.mock.calls.some(([url]) => /\/media-items\/b1\/(pages|previous|next)$/.test(url))).toBe(false)
   })
 })

@@ -7,6 +7,7 @@ import {
   listSeriesMediaItems,
   pageUrl,
   readFeed,
+  readMediaItemReaderContext,
   readNeighbour,
   readSeriesReaderContext,
 } from '../src/lib/api/catalog.js'
@@ -103,6 +104,26 @@ describe('series reader context', () => {
   })
 })
 
+describe('media-item reader context', () => {
+  it('loads the bounded reader context and forwards cancellation', async () => {
+    const expected = {
+      item: { id: 'm1' },
+      previousId: null,
+      nextId: 'm2',
+      pages: [{ number: 1 }],
+      positions: [],
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(reply(expected))
+    globalThis.fetch = fetchImpl
+    const controller = new AbortController()
+
+    expect(await readMediaItemReaderContext('m1', { signal: controller.signal })).toEqual(expected)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toContain('/media-items/m1/reader-context')
+    expect(fetchImpl.mock.calls[0][1].signal).toBe(controller.signal)
+  })
+})
+
 describe('readNeighbour', () => {
   it('returns null at the end of a series rather than wrapping', async () => {
     // The ends answer 404 on purpose. Wrapping around would silently restart the series
@@ -143,6 +164,17 @@ describe('pageUrl', () => {
     expect(() => pageUrl('m1', 1, { maxDimension: MAX_PAGE_DIMENSION + 1 })).toThrow(/between 1/)
     expect(() => pageUrl('m1', 1, { maxDimension: 0 })).toThrow(/between 1/)
     expect(pageUrl('m1', 1, { maxDimension: 1600 })).toContain('maxDimension=1600')
+  })
+
+  it('builds a width-only page request and refuses conflicting transforms', () => {
+    expect(pageUrl('m1', 1, { maxWidth: 1200 })).toContain('maxWidth=1200')
+    expect(() => pageUrl('m1', 1, { maxWidth: 800, maxDimension: 1200 })).toThrow(
+      /mutually exclusive/,
+    )
+    expect(() => pageUrl('m1', 1, { format: 'source', maxWidth: 800 })).toThrow(
+      /cannot be combined/,
+    )
+    expect(() => pageUrl('m1', 1, { maxWidth: MAX_PAGE_DIMENSION + 1 })).toThrow(/between 1/)
   })
 })
 

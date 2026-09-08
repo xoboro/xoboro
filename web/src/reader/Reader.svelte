@@ -21,12 +21,14 @@
    */
   import { onDestroy, onMount, untrack } from 'svelte'
   import { ChevronLeft, ChevronRight, List, Settings } from '@lucide/svelte'
+  import { replace } from 'svelte-spa-router'
   import { _ } from '../lib/i18n.js'
-  import { listPages, pageUrl, readMediaItem, readNeighbour } from '../lib/api/catalog.js'
+  import { pageUrl, readMediaItemReaderContext } from '../lib/api/catalog.js'
   import { writeProgress, resumePage } from '../lib/api/progress.js'
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import { createPriorityLoader } from './priorityLoader.js'
+  import { maximumPageWidth } from './imageRequest.js'
   import {
     DIRECTIONS,
     aspectRatio,
@@ -38,7 +40,7 @@
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
 
-  let { params, initialItem = null } = $props()
+  let { params, initialContext = null } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
   const MODES = ['scroll', 'paged', 'split', 'split-scroll']
@@ -139,17 +141,20 @@
   let chrome = $state(false)
   let settingsOpen = $state(false)
   let error = $state(null)
+  let progressError = $state(null)
   let previousId = $state(null)
   let nextId = $state(null)
   let loadedId = $state('')
   let scrollNode = $state(null)
+  let failedViews = $state([])
 
   const loader = createPriorityLoader()
   let restoring = false
   let loadToken = 0
   let openController = null
   let saveTimer = null
-  let pendingPage = null
+  let pendingProgress = null
+  let progressWriteToken = 0
 
   const isScroll = $derived(mode === 'scroll' || mode === 'split-scroll')
   const isSplit = $derived(mode === 'split' || mode === 'split-scroll')
@@ -161,20 +166,27 @@
   // the fallback would report the wrong total and clamp a resume position backwards.
   const pageCount = $derived(item?.media?.pageCount ?? pages.length)
 
-  function flushProgress() {
+  function flushProgress({ keepalive = false } = {}) {
     clearTimeout(saveTimer)
     saveTimer = null
-    if (pendingPage === null || !loadedId) return
-    const page = pendingPage
-    pendingPage = null
-    writeProgress(loadedId, { page }).catch((caught) => (error = caught))
+    if (pendingProgress === null || !loadedId) return
+    const progress = pendingProgress
+    pendingProgress = null
+    const token = ++progressWriteToken
+    writeProgress(loadedId, { ...progress, keepalive })
+      .then(() => {
+        if (token === progressWriteToken) progressError = null
+      })
+      .catch((caught) => {
+        if (token === progressWriteToken) progressError = caught
+      })
   }
 
-  function noteProgress(page) {
+  function noteProgress(page, completed = false) {
     current = page
     if (!loadedId) return
     clearTimeout(saveTimer)
-    pendingPage = page
+    pendingProgress = { page, completed }
     saveTimer = setTimeout(flushProgress, PROGRESS_DEBOUNCE_MILLIS)
   }
 
@@ -187,21 +199,22 @@
     loader.reset()
     loadedId = ''
     pages = []
+    failedViews = []
     item = null
+    error = null
+    progressError = null
     previousId = null
     nextId = null
     restoring = true
 
     try {
-      const detailRequest =
-        initialItem?.id === id
-          ? Promise.resolve(initialItem)
-          : readMediaItem(id, { signal: controller.signal })
-      const [detail, manifest] = await Promise.all([
-        detailRequest,
-        listPages(id, { signal: controller.signal }),
-      ])
+      const context =
+        initialContext?.item?.id === id
+          ? initialContext
+          : await readMediaItemReaderContext(id, { signal: controller.signal })
       if (token !== loadToken) return
+      const detail = context.item
+      const manifest = context.pages ?? []
       item = detail
       // Restored before the first view is built: `index` below is derived from
       // `direction`, so applying the series' direction afterwards would open a split
@@ -219,21 +232,8 @@
       loadedId = id
       index = indexOfPage(buildViews(manifest, isSplit, direction), start)
 
-      // Started before the DOM settles, because they do not depend on it. They were
-      // originally sequenced after an `await tick()` and never ran at all — a tick
-      // awaited from inside an effect's own async continuation does not resolve here,
-      // and everything after it was silently skipped, so previous/next stayed disabled
-      // for every item.
-      readNeighbour(id, 'previous', { signal: controller.signal })
-        .then((found) => {
-          if (token === loadToken) previousId = found?.id ?? null
-        })
-        .catch(() => {})
-      readNeighbour(id, 'next', { signal: controller.signal })
-        .then((found) => {
-          if (token === loadToken) nextId = found?.id ?? null
-        })
-        .catch(() => {})
+      previousId = context.previousId ?? null
+      nextId = context.nextId ?? null
 
       // Two frames: one for Svelte to render the slots, one to scroll to the resumed
       // page before the observer is allowed to report a position.
@@ -271,7 +271,7 @@
     const next = index + delta
     if (next < 0 || next >= views.length) return
     index = next
-    noteProgress(views[index].page)
+    noteProgress(views[index].page, !isScroll && index === views.length - 1)
     if (isScroll) {
       const at = index
       requestAnimationFrame(() => {
@@ -317,8 +317,13 @@
   }
 
   onMount(() => {
+    const onPageHide = () => flushProgress({ keepalive: true })
     window.addEventListener('keydown', onKeydown)
-    return () => window.removeEventListener('keydown', onKeydown)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      window.removeEventListener('keydown', onKeydown)
+      window.removeEventListener('pagehide', onPageHide)
+    }
   })
 
   onDestroy(() => {
@@ -326,8 +331,18 @@
     // matters, and a debounce timer would otherwise be discarded with the component.
     flushProgress()
     openController?.abort()
-    loader.reset()
+    loader.destroy()
   })
+
+  function failView(view) {
+    const key = viewKey(view)
+    if (!failedViews.includes(key)) failedViews = [...failedViews, key]
+  }
+
+  function retryView(view) {
+    const key = viewKey(view)
+    failedViews = failedViews.filter((failed) => failed !== key)
+  }
 
   const TAP_SLOP = 10
   const SWIPE_DISTANCE = 40
@@ -350,7 +365,8 @@
     const dx = event.clientX - sx
     const dy = event.clientY - sy
     if (Math.abs(dx) > SWIPE_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
-      go(dx < 0 ? 1 : -1)
+      const physical = dx < 0 ? 1 : -1
+      go(direction === 'rtl' ? -physical : physical)
       return
     }
     if (isTap(event)) {
@@ -385,10 +401,10 @@
         entries.forEach((entry) => {
           if (!restoring && entry.isIntersecting) {
             index = at.index
-            noteProgress(at.page)
+            noteProgress(at.page, false)
           }
         }),
-      { threshold: 0.5 },
+      { rootMargin: '-49% 0px -49% 0px', threshold: 0 },
     )
     observer.observe(node)
     return {
@@ -397,6 +413,30 @@
       },
       destroy: () => observer.disconnect(),
     }
+  }
+
+  function noteScrollBottom(event) {
+    const node = event.currentTarget
+    if (node.scrollTop + node.clientHeight < node.scrollHeight - 1 || views.length === 0) return
+    index = views.length - 1
+    noteProgress(views[index].page, true)
+  }
+
+  function displayWidth() {
+    const viewport = window.innerWidth
+    if (!isScroll || fit !== 'width' || width === 'full') return viewport
+    const preferred = Number(width)
+    return Number.isFinite(preferred) ? Math.min(viewport, preferred) : viewport
+  }
+
+  function imageUrl(view) {
+    const maxWidth = maximumPageWidth({
+      sourceWidth: view.half === null ? view.width : view.width * 2,
+      displayWidth: displayWidth(),
+      devicePixelRatio: window.devicePixelRatio,
+      split: view.half !== null,
+    })
+    return pageUrl(loadedId, view.page, { maxWidth })
   }
 </script>
 
@@ -422,7 +462,15 @@
 
 {#if chrome}
   <div class="topbar">
-    <a class="ic" href={item?.seriesId ? `#/series/${item.seriesId}` : '#/'} aria-label={$_('common.back')}>
+    <a
+      class="ic"
+      href={item?.seriesId ? `#/series/${item.seriesId}` : '#/'}
+      aria-label={$_('common.back')}
+      onclick={(event) => {
+        event.preventDefault()
+        replace(item?.seriesId ? `/series/${item.seriesId}` : '/')
+      }}
+    >
       <ChevronLeft size={22} aria-hidden="true" />
     </a>
     <span class="title">{item?.title ?? ''}</span>
@@ -446,7 +494,7 @@
         data-testid="previous-item"
         disabled={!previousId}
         aria-label={$_('reader.previousItem')}
-        onclick={() => previousId && (window.location.hash = `#/read/${previousId}`)}
+        onclick={() => previousId && replace(`/read/${previousId}`)}
       >
         <ChevronLeft size={22} aria-hidden="true" />
       </button>
@@ -454,6 +502,10 @@
         class="ic"
         href={item?.seriesId ? `#/series/${item.seriesId}` : '#/'}
         aria-label={$_('common.list')}
+        onclick={(event) => {
+          event.preventDefault()
+          replace(item?.seriesId ? `/series/${item.seriesId}` : '/')
+        }}
       >
         <List size={20} aria-hidden="true" />
       </a>
@@ -463,7 +515,7 @@
         data-testid="next-item"
         disabled={!nextId}
         aria-label={$_('reader.nextItem')}
-        onclick={() => nextId && (window.location.hash = `#/read/${nextId}`)}
+        onclick={() => nextId && replace(`/read/${nextId}`)}
       >
         <ChevronRight size={22} aria-hidden="true" />
       </button>
@@ -472,6 +524,12 @@
 {/if}
 
 <ErrorNotice {error} />
+
+{#if progressError}
+  <div class="progress-error" style="position: fixed" data-testid="progress-error">
+    <ErrorNotice error={progressError} />
+  </div>
+{/if}
 
 {#key loadedId}
   {#if isScroll}
@@ -483,6 +541,7 @@
       bind:this={scrollNode}
       onpointerdown={pointerDown}
       onpointerup={scrollPointerUp}
+      onscroll={noteScrollBottom}
     >
       {#each views as view, at (viewKey(view))}
         <div
@@ -493,16 +552,28 @@
           data-view={at}
           style={aspectRatio(view) ? `aspect-ratio:${aspectRatio(view)}` : ''}
         >
-          <img
-            use:loader.load={{
-              url: pageUrl(loadedId, view.page),
-              priority: pageLoadPriority(view.page, current, pageCount),
-            }}
-            use:track={{ page: view.page, index: at }}
-            alt=""
-            role="presentation"
-            decoding="async"
-          />
+          {#if failedViews.includes(viewKey(view))}
+            <button
+              class="slot-retry"
+              type="button"
+              data-testid={`retry-page-${viewKey(view)}`}
+              onclick={() => retryView(view)}
+            >
+              {$_('common.retry')}
+            </button>
+          {:else}
+            <img
+              use:loader.load={{
+                url: imageUrl(view),
+                priority: pageLoadPriority(view.page, current, pageCount),
+                onFailure: () => failView(view),
+              }}
+              use:track={{ page: view.page, index: at }}
+              alt=""
+              role="presentation"
+              decoding="async"
+            />
+          {/if}
         </div>
       {/each}
     </div>
@@ -511,8 +582,33 @@
     <div class="stage" onpointerdown={pointerDown} onpointerup={pointerUp}>
       {#if views[index]}
         {@const view = views[index]}
-        <div class="slot paged" class:half={view.half !== null} class:right={view.half === 'R'}>
-          <img src={pageUrl(loadedId, view.page)} alt="" role="presentation" decoding="async" />
+        <div
+          class="slot paged"
+          class:half={view.half !== null}
+          class:right={view.half === 'R'}
+          style={aspectRatio(view) ? `aspect-ratio:${aspectRatio(view)}` : ''}
+        >
+          {#if failedViews.includes(viewKey(view))}
+            <button
+              class="slot-retry"
+              type="button"
+              data-testid={`retry-page-${viewKey(view)}`}
+              onclick={() => retryView(view)}
+            >
+              {$_('common.retry')}
+            </button>
+          {:else}
+            <img
+              use:loader.load={{
+                url: imageUrl(view),
+                priority: 0,
+                onFailure: () => failView(view),
+              }}
+              alt=""
+              role="presentation"
+              decoding="async"
+            />
+          {/if}
         </div>
       {/if}
     </div>
@@ -627,6 +723,13 @@
     padding: var(--space-2) var(--space-3);
     background: var(--surface-overlay);
   }
+  .progress-error {
+    position: fixed;
+    right: max(var(--space-3), var(--inset-right));
+    bottom: max(var(--space-3), var(--inset-bottom));
+    left: max(var(--space-3), var(--inset-left));
+    z-index: 22;
+  }
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
@@ -678,6 +781,7 @@
     min-height: 100dvh;
   }
   .slot {
+    position: relative;
     display: block;
     width: min(100%, var(--reader-width, 100%));
     margin-inline: auto;
@@ -686,6 +790,21 @@
   .slot img {
     display: block;
     width: 100%;
+  }
+  .slot-retry {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+    padding: 0 var(--space-3);
+    transform: translate(-50%, -50%);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    background: var(--surface-overlay);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
   }
   /* A spread is shown at double width and slid sideways, so each half fills the slot
      without the server having to cut the image. */
