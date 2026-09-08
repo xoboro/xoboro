@@ -150,6 +150,7 @@
 
   const loader = createPriorityLoader()
   let restoring = false
+  let leaving = false
   let loadToken = 0
   let openController = null
   let saveTimer = null
@@ -207,7 +208,28 @@
       })
   }
 
+  /**
+   * Stops the old route from observing the destination history entry's scroll position.
+   * Browsers emit popstate before restoring that entry's document scroll, so the reader
+   * otherwise sees the later scroll-to-zero as a genuine return to page one.
+  */
+  function freezeProgressTracking() {
+    if (leaving) return
+    leaving = true
+    if (trackingFrame !== null) {
+      cancelAnimationFrame(trackingFrame)
+      trackingFrame = null
+    }
+    flushProgress()
+  }
+
+  function navigate(path) {
+    freezeProgressTracking()
+    replace(path)
+  }
+
   function noteProgress(page, completed = false) {
+    if (leaving) return
     if (isScroll) {
       completed = views.at(-1)?.page === page && isAtDocumentBottom()
     }
@@ -225,6 +247,12 @@
 
   async function open(id) {
     const token = ++loadToken
+    restoring = true
+    leaving = false
+    if (trackingFrame !== null) {
+      cancelAnimationFrame(trackingFrame)
+      trackingFrame = null
+    }
     openController?.abort()
     const controller = new AbortController()
     openController = controller
@@ -243,7 +271,6 @@
     progressError = null
     previousId = null
     nextId = null
-    restoring = true
 
     try {
       const context =
@@ -360,6 +387,7 @@
 
   onMount(() => {
     const onPageHide = () => flushProgress({ keepalive: true })
+    const onPopState = () => freezeProgressTracking()
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushProgress({ keepalive: true })
     }
@@ -373,6 +401,7 @@
     onResize()
     window.addEventListener('keydown', onKeydown)
     window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('popstate', onPopState, true)
     window.addEventListener('scroll', noteDocumentScroll, { passive: true })
     window.addEventListener('resize', onResize, { passive: true })
     window.addEventListener('orientationchange', onResize, { passive: true })
@@ -382,6 +411,7 @@
     return () => {
       window.removeEventListener('keydown', onKeydown)
       window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('popstate', onPopState, true)
       window.removeEventListener('scroll', noteDocumentScroll)
       window.removeEventListener('resize', onResize)
       window.removeEventListener('orientationchange', onResize)
@@ -394,7 +424,7 @@
   onDestroy(() => {
     // Flushed rather than dropped: leaving the reader is exactly when the last position
     // matters, and a debounce timer would otherwise be discarded with the component.
-    flushProgress()
+    freezeProgressTracking()
     openController?.abort()
     loader.destroy()
     trackedViews.clear()
@@ -476,10 +506,10 @@
    * keeps the calculation tied to the actual viewport height and coalesces scroll work.
    */
   function scheduleVisibleTrack() {
-    if (trackingFrame !== null) return
+    if (leaving || trackingFrame !== null) return
     trackingFrame = requestAnimationFrame(() => {
       trackingFrame = null
-      if (restoring || !isScroll || trackedViews.size === 0) return
+      if (leaving || restoring || !isScroll || trackedViews.size === 0) return
       // The physical end wins over the centre. A short final slot can leave the
       // viewport centre inside the preceding page even though the reader reached bottom.
       if (isAtDocumentBottom()) return
@@ -537,7 +567,7 @@
   }
 
   function noteDocumentScroll() {
-    if (!isScroll || views.length === 0) return
+    if (leaving || restoring || !isScroll || views.length === 0) return
     scheduleVisibleTrack()
     if (!isAtDocumentBottom()) return
     index = views.length - 1
@@ -608,7 +638,7 @@
       aria-label={$_('common.back')}
       onclick={(event) => {
         event.preventDefault()
-        replace(item?.seriesId ? `/series/${item.seriesId}` : '/')
+        navigate(item?.seriesId ? `/series/${item.seriesId}` : '/')
       }}
     >
       <ChevronLeft size={22} aria-hidden="true" />
@@ -634,7 +664,7 @@
         data-testid="previous-item"
         disabled={!previousId}
         aria-label={$_('reader.previousItem')}
-        onclick={() => previousId && replace(`/read/${previousId}`)}
+        onclick={() => previousId && navigate(`/read/${previousId}`)}
       >
         <ChevronLeft size={22} aria-hidden="true" />
       </button>
@@ -644,7 +674,7 @@
         aria-label={$_('common.list')}
         onclick={(event) => {
           event.preventDefault()
-          replace(item?.seriesId ? `/series/${item.seriesId}` : '/')
+          navigate(item?.seriesId ? `/series/${item.seriesId}` : '/')
         }}
       >
         <List size={20} aria-hidden="true" />
@@ -655,7 +685,7 @@
         data-testid="next-item"
         disabled={!nextId}
         aria-label={$_('reader.nextItem')}
-        onclick={() => nextId && replace(`/read/${nextId}`)}
+        onclick={() => nextId && navigate(`/read/${nextId}`)}
       >
         <ChevronRight size={22} aria-hidden="true" />
       </button>

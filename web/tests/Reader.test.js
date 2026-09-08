@@ -742,6 +742,96 @@ describe('Reader', () => {
     await waitFor(() => expect(screen.getByTestId('position').textContent).toContain('3'))
   })
 
+  it('does not let history scroll restoration overwrite the last read page on exit', async () => {
+    const writes = []
+    globalThis.fetch = routes([
+      [
+        '/media-items/m1/progress',
+        (_url, init) => {
+          const progress = JSON.parse(init.body)
+          writes.push(progress)
+          return reply({ ...progress, readAtMillis: 1, updatedAtMillis: 1 })
+        },
+      ],
+    ])
+    const { container, unmount } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: CONTEXT,
+    })
+
+    await waitFor(() => expect(container.querySelectorAll('.slot')).toHaveLength(3))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const slots = container.querySelectorAll('.slot')
+    place(slots[0], { top: -900, bottom: 0 })
+    place(slots[1], { top: 0, bottom: 1_500 })
+    place(slots[2], { top: 1_500, bottom: 2_400 })
+
+    await fireEvent.scroll(window)
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toContain('2'))
+    await waitFor(() => expect(writes.at(-1)?.page).toBe(2), { timeout: 2_000 })
+    const confirmedWrites = writes.length
+
+    // A real browser dispatches popstate while the old reading scroll position is still
+    // visible, then restores the destination history entry's document scroll to zero.
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    place(slots[0], { top: 0, bottom: 1_200 })
+    place(slots[1], { top: 1_200, bottom: 2_700 })
+    place(slots[2], { top: 2_700, bottom: 3_600 })
+    await fireEvent.scroll(window)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(writes).toHaveLength(confirmedWrites)
+    expect(writes.at(-1)).toMatchObject({ page: 2, completed: false })
+  })
+
+  it('freezes visible-page tracking before toolbar route replacement', async () => {
+    const writes = []
+    globalThis.fetch = routes([
+      [
+        '/media-items/m1/progress',
+        (_url, init) => {
+          const progress = JSON.parse(init.body)
+          writes.push(progress)
+          // Keep the navigation flush in flight while the component is destroyed. A
+          // second freeze must not issue a duplicate request for the same snapshot.
+          return new Promise(() => {})
+        },
+      ],
+    ])
+    const { container, unmount } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: CONTEXT,
+    })
+
+    await waitFor(() => expect(container.querySelectorAll('.slot')).toHaveLength(3))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const slots = container.querySelectorAll('.slot')
+    place(slots[0], { top: -900, bottom: 0 })
+    place(slots[1], { top: 0, bottom: 1_500 })
+    place(slots[2], { top: 1_500, bottom: 2_400 })
+    await fireEvent.scroll(window)
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toContain('2'))
+
+    await fireEvent.click(screen.getByTestId('keyboard-chrome-toggle'))
+    await fireEvent.click(container.querySelector('.topbar a'))
+    expect(router.replace).toHaveBeenCalledWith('/series/s1')
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toMatchObject({ page: 2, completed: false })
+
+    place(slots[0], { top: 0, bottom: 1_200 })
+    place(slots[1], { top: 1_200, bottom: 2_700 })
+    place(slots[2], { top: 2_700, bottom: 3_600 })
+    await fireEvent.scroll(window)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    unmount()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(writes).toHaveLength(1)
+    expect(writes.at(-1)).toMatchObject({ page: 2, completed: false })
+  })
+
   it('keeps the first half of the final split page incomplete until its second half', async () => {
     localStorage.setItem('xoboro.reader.mode', 'split')
     const finalSpread = [PAGES[0], { ...PAGES[1], number: 2 }]
