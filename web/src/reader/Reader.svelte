@@ -183,6 +183,9 @@
   }
 
   function noteProgress(page, completed = false) {
+    if (isScroll) {
+      completed = views.at(-1)?.page === page && isAtDocumentBottom()
+    }
     current = page
     if (!loadedId) return
     clearTimeout(saveTimer)
@@ -196,6 +199,9 @@
     const controller = new AbortController()
     openController = controller
     flushProgress()
+    // The flushed write belongs to the item being left. Its eventual result must not
+    // set or clear the status for the replacement item.
+    progressWriteToken += 1
     loader.reset()
     loadedId = ''
     pages = []
@@ -320,9 +326,11 @@
     const onPageHide = () => flushProgress({ keepalive: true })
     window.addEventListener('keydown', onKeydown)
     window.addEventListener('pagehide', onPageHide)
+    window.addEventListener('scroll', noteDocumentScroll, { passive: true })
     return () => {
       window.removeEventListener('keydown', onKeydown)
       window.removeEventListener('pagehide', onPageHide)
+      window.removeEventListener('scroll', noteDocumentScroll)
     }
   })
 
@@ -415,24 +423,32 @@
     }
   }
 
-  function noteScrollBottom(event) {
-    const node = event.currentTarget
-    if (node.scrollTop + node.clientHeight < node.scrollHeight - 1 || views.length === 0) return
-    index = views.length - 1
-    noteProgress(views[index].page, true)
+  function isAtDocumentBottom() {
+    const node = document.scrollingElement ?? document.documentElement
+    return node.scrollTop + node.clientHeight >= node.scrollHeight - 1
   }
 
-  function displayWidth() {
+  function noteDocumentScroll() {
+    if (!isScroll || views.length === 0 || !isAtDocumentBottom()) return
+    index = views.length - 1
+    noteProgress(views[index].page)
+  }
+
+  function displayWidth(view) {
     const viewport = window.innerWidth
-    if (!isScroll || fit !== 'width' || width === 'full') return viewport
     const preferred = Number(width)
-    return Number.isFinite(preferred) ? Math.min(viewport, preferred) : viewport
+    const available =
+      isScroll && width !== 'full' && Number.isFinite(preferred)
+        ? Math.min(viewport, preferred)
+        : viewport
+    if ((isScroll && fit !== 'height') || !view.width || !view.height) return available
+    return Math.min(available, window.innerHeight * (view.width / view.height))
   }
 
   function imageUrl(view) {
     const maxWidth = maximumPageWidth({
       sourceWidth: view.half === null ? view.width : view.width * 2,
-      displayWidth: displayWidth(),
+      displayWidth: displayWidth(view),
       devicePixelRatio: window.devicePixelRatio,
       split: view.half !== null,
     })
@@ -541,7 +557,6 @@
       bind:this={scrollNode}
       onpointerdown={pointerDown}
       onpointerup={scrollPointerUp}
-      onscroll={noteScrollBottom}
     >
       {#each views as view, at (viewKey(view))}
         <div
@@ -556,6 +571,7 @@
             <button
               class="slot-retry"
               type="button"
+              aria-label={`${$_('common.retry')} ${view.page}`}
               data-testid={`retry-page-${viewKey(view)}`}
               onclick={() => retryView(view)}
             >
@@ -592,6 +608,7 @@
             <button
               class="slot-retry"
               type="button"
+              aria-label={`${$_('common.retry')} ${view.page}`}
               data-testid={`retry-page-${viewKey(view)}`}
               onclick={() => retryView(view)}
             >

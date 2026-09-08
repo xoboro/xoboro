@@ -80,6 +80,12 @@ beforeEach(() => {
   globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0)
   Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1 })
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 })
+  Object.defineProperties(document.documentElement, {
+    scrollTop: { configurable: true, value: 0 },
+    clientHeight: { configurable: true, value: 1000 },
+    scrollHeight: { configurable: true, value: 3000 },
+  })
 })
 
 function captureIntersections() {
@@ -274,6 +280,40 @@ describe('Reader', () => {
     expect(slots[1].querySelector('img')).toBe(unrelated)
     expect(unrelated.getAttribute('src')).toBe(unrelatedSource)
     expect(slots[0].querySelector('img')).toBeTruthy()
+  })
+
+  it('names each inline retry control with its failed page number', async () => {
+    const pages = PAGES.slice(0, 2)
+    const item = { ...ITEM, media: { ...ITEM.media, pageCount: 2 } }
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: { ...CONTEXT, item, pages },
+    })
+
+    const first = await waitFor(() => {
+      const image = container.querySelectorAll('.slot img')[0]
+      expect(image?.getAttribute('src')).toBeTruthy()
+      return image
+    })
+    await fireEvent.error(first)
+    await waitFor(() => expect(first.getAttribute('src')).toBeTruthy())
+    await fireEvent.error(first)
+    const firstRetry = await screen.findByTestId('retry-page-1')
+
+    const second = await waitFor(() => {
+      const image = container.querySelectorAll('.slot')[1].querySelector('img')
+      expect(image?.getAttribute('src')).toBeTruthy()
+      return image
+    })
+    await fireEvent.error(second)
+    await waitFor(() => expect(second.getAttribute('src')).toBeTruthy())
+    await fireEvent.error(second)
+    const secondRetry = await screen.findByTestId('retry-page-2')
+
+    expect(firstRetry).toHaveAccessibleName(/1/)
+    expect(secondRetry).toHaveAccessibleName(/2/)
+    expect(firstRetry).not.toHaveAccessibleName(secondRetry.textContent)
   })
 
   it('offers a keyboard path to the chrome', async () => {
@@ -487,6 +527,43 @@ describe('Reader', () => {
     expect(JSON.parse(writes[0][1].body)).toMatchObject({ page: 3, completed: true })
   })
 
+  it('ignores a delayed progress rejection from the item replaced by a route change', async () => {
+    let rejectOldWrite
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/media-items/m1/progress') && init.method === 'PUT') {
+        return new Promise((resolve, reject) => {
+          rejectOldWrite = reject
+        })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    localStorage.setItem('xoboro.reader.mode', 'paged')
+    const nextContext = {
+      ...CONTEXT,
+      item: { ...ITEM, id: 'm2', title: 'Replacement' },
+      previousId: 'm1',
+      nextId: null,
+      pages: [{ ...PAGES[0] }],
+    }
+    const { container, rerender } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: CONTEXT,
+    })
+
+    await screen.findByTestId('position')
+    await fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await rerender({ params: { id: 'm2' }, initialContext: nextContext })
+    await waitFor(() =>
+      expect(container.querySelector('.stage img')?.getAttribute('src')).toContain(
+        '/media-items/m2/pages/1',
+      ),
+    )
+
+    rejectOldWrite(new Error('old item failed late'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByTestId('progress-error')).toBeNull()
+  })
+
   it('advances on the physical left key when reading right to left', async () => {
     localStorage.setItem('xoboro.reader.direction', 'rtl')
     localStorage.setItem('xoboro.reader.mode', 'paged')
@@ -563,12 +640,12 @@ describe('Reader', () => {
     expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({ page: 2, completed: true })
   })
 
-  it('marks the final scrolling page complete only at the scroll bottom', async () => {
+  it('marks document scrolling complete at bottom and keeps a later observer write complete', async () => {
     const observers = captureIntersections()
     const item = { ...ITEM, media: { ...ITEM.media, pageCount: 2 } }
     const fetchImpl = standardRoutes()
     globalThis.fetch = fetchImpl
-    const { container } = render(Reader, {
+    render(Reader, {
       params: { id: 'm1' },
       initialContext: { ...CONTEXT, item, pages: PAGES.slice(0, 2) },
     })
@@ -580,13 +657,15 @@ describe('Reader', () => {
     let writes = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT')
     expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({ page: 2, completed: false })
 
-    const scroll = container.querySelector('.scroll')
-    Object.defineProperties(scroll, {
+    Object.defineProperties(document.documentElement, {
       scrollTop: { configurable: true, value: 2000 },
-      clientHeight: { configurable: true, value: 1000 },
-      scrollHeight: { configurable: true, value: 3000 },
     })
-    await fireEvent.scroll(scroll)
+    await fireEvent.scroll(window)
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    writes = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({ page: 2, completed: true })
+
+    observers[1].callback([{ isIntersecting: true, target: observers[1].node }])
     await new Promise((resolve) => setTimeout(resolve, 900))
     writes = fetchImpl.mock.calls.filter(([, init]) => init?.method === 'PUT')
     expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({ page: 2, completed: true })
@@ -621,6 +700,57 @@ describe('Reader', () => {
       return image
     })
     expect(pagedImage.getAttribute('src')).toBe(scrollingSource)
+  })
+
+  it('sizes a tall paged image by its height-constrained rendered width', async () => {
+    localStorage.setItem('xoboro.reader.mode', 'paged')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 3 })
+    const pages = [{ number: 1, mediaType: 'image/jpeg', width: 1600, height: 6400 }]
+    const item = { ...ITEM, media: { ...ITEM.media, pageCount: 1 } }
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: { ...CONTEXT, item, pages },
+    })
+
+    await waitFor(() => expect(container.querySelector('.stage img[src]')).toBeTruthy())
+    expect(container.querySelector('.stage img').getAttribute('src')).toContain('maxWidth=600')
+  })
+
+  it('sizes a fit-height scrolling image by viewport height and aspect ratio', async () => {
+    localStorage.setItem('xoboro.reader.fit', 'height')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 3 })
+    const pages = [{ number: 1, mediaType: 'image/jpeg', width: 1600, height: 6400 }]
+    const item = { ...ITEM, media: { ...ITEM.media, pageCount: 1 } }
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: { ...CONTEXT, item, pages },
+    })
+
+    await waitFor(() => expect(container.querySelector('.scroll img[src]')).toBeTruthy())
+    expect(container.querySelector('.scroll img').getAttribute('src')).toContain('maxWidth=600')
+  })
+
+  it('doubles the height-constrained visible half when requesting a split spread', async () => {
+    localStorage.setItem('xoboro.reader.mode', 'split')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 600 })
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 2 })
+    const pages = [{ number: 1, mediaType: 'image/jpeg', width: 1600, height: 1500 }]
+    const item = { ...ITEM, media: { ...ITEM.media, pageCount: 1 } }
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' },
+      initialContext: { ...CONTEXT, item, pages },
+    })
+
+    await waitFor(() => expect(container.querySelector('.stage img[src]')).toBeTruthy())
+    expect(container.querySelector('.stage img').getAttribute('src')).toContain('maxWidth=1280')
   })
 
   it('does not page when a key comes from a control', async () => {

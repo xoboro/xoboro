@@ -84,7 +84,11 @@ export function createPriorityLoader({
     task.node.addEventListener('error', task.onError)
     task.node.src = task.url
     task.timer = setTimer(() => fail(task, attempt), timeoutMillis)
-    if (task.node.complete) schedule(() => succeed(task, attempt))
+    if (task.node.complete) {
+      schedule(() =>
+        task.node.naturalWidth > 0 ? succeed(task, attempt) : fail(task, attempt),
+      )
+    }
   }
 
   function pump() {

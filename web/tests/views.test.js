@@ -153,6 +153,7 @@ function fakeImage() {
       if (value) this.requests.push(value)
     },
     complete: false,
+    naturalWidth: 100,
     addEventListener(name, handler) {
       if (!listeners.has(name)) listeners.set(name, new Set())
       listeners.get(name).add(handler)
@@ -292,6 +293,30 @@ describe('priority loader', () => {
     loader.load(next, { url: '/next', priority: 1 })
     flush()
 
+    expect(next.src).toBe('/next')
+  })
+
+  it('retries a cached broken image instead of treating complete as success', () => {
+    const { schedule, flush } = manualSchedule()
+    const timers = manualTimers()
+    const failures = []
+    const loader = createPriorityLoader({
+      schedule,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      timeoutMillis: 25,
+    })
+    const broken = fakeImage()
+    broken.complete = true
+    broken.naturalWidth = 0
+    const next = fakeImage()
+
+    loader.load(broken, { url: '/broken', priority: 0, onFailure: (url) => failures.push(url) })
+    loader.load(next, { url: '/next', priority: 1 })
+    flush()
+
+    expect(broken.requests).toEqual(['/broken', '/broken'])
+    expect(failures).toEqual(['/broken'])
     expect(next.src).toBe('/next')
   })
 
