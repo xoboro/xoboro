@@ -97,8 +97,8 @@ export async function readResumePoint(seriesId) {
   return null
 }
 
-export function readMediaItem(mediaItemId) {
-  return request(`/media-items/${mediaItemId}`)
+export function readMediaItem(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}`, { signal })
 }
 
 /**
@@ -109,12 +109,12 @@ export function readMediaItem(mediaItemId) {
  *
  * @returns the neighbouring item, or `null` at the end of the series.
  */
-export async function readNeighbour(mediaItemId, direction) {
+export async function readNeighbour(mediaItemId, direction, { signal } = {}) {
   if (direction !== 'previous' && direction !== 'next') {
     throw new Error(`unknown direction: ${direction}`)
   }
   try {
-    return await request(`/media-items/${mediaItemId}/${direction}`)
+    return await request(`/media-items/${mediaItemId}/${direction}`, { signal })
   } catch (error) {
     if (error.code === 'media_item_not_found' || error.code === 'not_found') return null
     throw error
@@ -163,8 +163,8 @@ export function pageUrl(mediaItemId, pageNumber, { format = null, maxDimension =
 }
 
 /** The page manifest: one-based `number`, `mediaType`, and optional dimensions. */
-export function listPages(mediaItemId) {
-  return request(`/media-items/${mediaItemId}/pages`)
+export function listPages(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}/pages`, { signal })
 }
 
 /**
@@ -177,8 +177,8 @@ export function listPages(mediaItemId) {
  *
  * A non-EPUB item answers with an empty list: it has pages, not positions.
  */
-export function listPositions(mediaItemId) {
-  return request(`/media-items/${mediaItemId}/positions`)
+export function listPositions(mediaItemId, { signal } = {}) {
+  return request(`/media-items/${mediaItemId}/positions`, { signal })
 }
 
 /**
