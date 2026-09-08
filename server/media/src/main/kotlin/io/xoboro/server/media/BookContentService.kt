@@ -498,15 +498,17 @@ class BookContentService(
           }
           val readParameters =
             reader.defaultReadParam.apply {
-              val boundRatio =
+              val subsampling =
                 when {
-                  maximumDimension != null -> maxOf(width, height).toDouble() / maximumDimension
-                  maximumWidth != null -> width.toDouble() / maximumWidth
-                  else -> null
+                  maximumDimension != null ->
+                    ceil(maxOf(width, height).toDouble() / maximumDimension)
+                      .toInt()
+                      .coerceAtLeast(1)
+                  maximumWidth != null -> (width / maximumWidth).coerceAtLeast(1)
+                  else -> 1
                 }
-              boundRatio
-                ?.let { ceil(it).toInt().coerceAtLeast(1) }
-                ?.takeIf { it > 1 }
+              subsampling
+                .takeIf { it > 1 }
                 ?.let { subsampling ->
                   setSourceSubsampling(subsampling, subsampling, 0, 0)
                 }

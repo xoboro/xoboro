@@ -325,17 +325,18 @@ class XoboroNativeDeliveryTest {
     }
 
   @Test
-  fun `maximum width is forwarded and changes the native page entity tag`() =
+  fun `distinct maximum widths produce distinct native page entity tags`() =
     testApplication {
       val fixture = Fixture.visible()
       installDelivery(fixture)
 
-      val source = client.get("$PAGE_PATH?format=source") { bearerAuth(fixture.token) }
-      val resized = client.get("$PAGE_PATH?maxWidth=800") { bearerAuth(fixture.token) }
-
-      assertEquals(HttpStatusCode.OK, resized.status)
+      val width800 = client.get("$PAGE_PATH?maxWidth=800") { bearerAuth(fixture.token) }
       assertEquals(PageImageRequest(maximumWidth = 800), fixture.content.lastRequest)
-      assertTrue(source.headers[HttpHeaders.ETag] != resized.headers[HttpHeaders.ETag])
+      val width900 = client.get("$PAGE_PATH?maxWidth=900") { bearerAuth(fixture.token) }
+
+      assertEquals(HttpStatusCode.OK, width800.status)
+      assertEquals(HttpStatusCode.OK, width900.status)
+      assertTrue(width800.headers[HttpHeaders.ETag] != width900.headers[HttpHeaders.ETag])
     }
 
   @Test

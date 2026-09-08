@@ -13,8 +13,8 @@ enum class PageImageFormat(
 data class PageImageRequest(
   val format: PageImageFormat? = null,
   val maximumDimension: Int? = null,
-  val maximumWidth: Int? = null,
   val raw: Boolean = false,
+  val maximumWidth: Int? = null,
 ) {
   init {
     require(maximumDimension == null || maximumDimension > 0) {

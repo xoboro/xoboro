@@ -7,7 +7,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class XoboroMediaItemReaderContextResponse(
   val item: XoboroMediaItemResponse,
+  /** Omitted by production JSON serialization when the current item is first. */
   val previousId: String?,
+  /** Omitted by production JSON serialization when the current item is last. */
   val nextId: String?,
   val pages: List<XoboroMediaPageResponse>,
   val positions: List<XoboroMediaPositionResponse>,

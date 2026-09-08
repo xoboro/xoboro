@@ -298,6 +298,30 @@ class BookContentServiceTest {
   }
 
   @Test
+  fun `maximum width decodes a non-multiple source at or above the requested width`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(1_601, 600, BufferedImage.TYPE_BYTE_GRAY), "png", output)
+        output.toByteArray()
+      }
+    val service = service(access = RecordingAccess(archive(mapOf("nested/001.png" to source))))
+
+    val opened =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(maximumWidth = 800),
+        ),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(opened.readAllBytes())))
+
+    assertEquals(800, image.width)
+    assertEquals(299, image.height)
+    opened.close()
+  }
+
+  @Test
   fun `does not materialize for an out of range page`() {
     val access = RecordingAccess(archive(emptyMap()))
     val service = service(access = access)

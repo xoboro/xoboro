@@ -4225,22 +4225,102 @@ components:
         width: { type: integer, minimum: 1 }
         height: { type: integer, minimum: 1 }
         sizeBytes: { type: integer, format: int64, minimum: 0 }
+    XoboroAuthor:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string }
+        role: { type: string }
+    XoboroWebLink:
+      type: object
+      required: [label, url]
+      properties:
+        label: { type: string }
+        url: { type: string }
+    XoboroMedia:
+      type: object
+      required: [status, pageCount]
+      properties:
+        status:
+          type: string
+          enum: [UNKNOWN, ERROR, READY, UNSUPPORTED, OUTDATED]
+        mediaType: { type: string }
+        profile:
+          type: string
+          enum: [DIVINA, PDF, EPUB]
+        pageCount: { type: integer, minimum: 0 }
+        message: { type: string }
+    XoboroMediaItem:
+      type: object
+      required:
+        - id
+        - libraryId
+        - seriesId
+        - type
+        - title
+        - seriesTitle
+        - summary
+        - number
+        - sortNumber
+        - authors
+        - tags
+        - isbn
+        - links
+        - media
+        - fileSize
+        - oneShot
+        - deleted
+        - createdAtMillis
+        - updatedAtMillis
+        - sourceModifiedAtMillis
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        seriesId: { type: string }
+        type:
+          type: string
+          enum: [COMIC, NOVEL, BOOK, VIDEO, AUDIO]
+        title: { type: string }
+        seriesTitle: { type: string }
+        summary: { type: string }
+        number: { type: string }
+        sortNumber: { type: number, format: float }
+        releaseDate: { type: string }
+        authors:
+          type: array
+          items: { $ref: "#/components/schemas/XoboroAuthor" }
+        tags:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        isbn: { type: string }
+        links:
+          type: array
+          items: { $ref: "#/components/schemas/XoboroWebLink" }
+        media: { $ref: "#/components/schemas/XoboroMedia" }
+        progress: { $ref: "#/components/schemas/XoboroMediaProgressResponse" }
+        fileSize: { type: integer, format: int64, minimum: 0 }
+        oneShot: { type: boolean }
+        deleted: { type: boolean }
+        createdAtMillis: { type: integer, format: int64 }
+        updatedAtMillis: { type: integer, format: int64 }
+        sourceModifiedAtMillis: { type: integer, format: int64 }
     XoboroMediaItemReaderContext:
       type: object
       required: [item, pages, positions]
       properties:
         item:
-          type: object
-          additionalProperties: true
-          description: The existing native media-item response.
+          $ref: "#/components/schemas/XoboroMediaItem"
         previousId:
           type: string
-          nullable: true
-          description: Previous visible sibling in stable catalogue order.
+          description: >-
+            Previous visible sibling in stable catalogue order. Omitted when the
+            current item is first.
         nextId:
           type: string
-          nullable: true
-          description: Next visible sibling in stable catalogue order.
+          description: >-
+            Next visible sibling in stable catalogue order. Omitted when the
+            current item is last.
         pages:
           type: array
           description: Populated for comic and PDF items; empty for EPUB.

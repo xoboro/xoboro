@@ -328,11 +328,14 @@ delivery require the `PAGE_STREAMING` role; original file download requires
 parameter on the native surface.
 
 `GET /api/xoboro/v1/media-items/{mediaItemId}/reader-context` returns the
-hydrated current item, nullable adjacent item identifiers, and one bounded
+hydrated current item, optional adjacent item identifiers, and one bounded
 manifest. Comic and PDF responses populate `pages` and return empty
 `positions`; EPUB responses populate `positions` and return empty `pages`.
 Adjacent values are identifiers rather than embedded media items, and the
 response includes no page bytes, EPUB resource bytes, artwork, or series list.
+`previousId` is omitted for the first visible item and `nextId` is omitted for
+the last visible item; production JSON serialization does not emit those keys
+with null values.
 
 For example:
 
