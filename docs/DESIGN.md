@@ -198,23 +198,20 @@ being redesigned.
 what "latest" sorts by. Xoboro has named discovery feeds whose ordering is fixed
 server-side (ADR 0103), precisely so clients cannot disagree about that.
 
-**Decision: shelves are driven by the five named feeds** — `new`, `updated`,
-`recently-read`, `on-deck`, `keep-reading`. The client does not pass `sort` to a
-feed; the server rejects it rather than ignoring it, so a client that tries has
-a bug, not a preference.
+**Decision: Home renders four named feeds** — series `new` and `updated`, plus
+media-item `on-deck` and `keep-reading`. The fifth discovery feed,
+`recently-read`, remains available through the native API but is not a Home
+shelf. The client does not pass `sort` to a feed; the server rejects it rather
+than ignoring it, so a client that tries has a bug, not a preference.
 
 ### Scan progress is an event, not a poll
 
-`Home.svelte` currently polls with a hand-tuned backoff
-(`[5000, 10000, 20000, 30000, 60000, 60000, 60000]`) to notice that a scan has
-finished, because Komga gave it nothing better. Xoboro has a native event
-stream.
-
-**Decision: subscribe to the event stream; delete the backoff ladder.** This is
-not only tidier — the measured runtime queues over ten thousand tasks on a
-15,000-item catalog, so "poll until the numbers stop changing" is a poor
-question to keep asking, and the poll interval has no relationship to when the
-work actually lands.
+`Home.svelte` subscribes to the native event stream through `eventHub`. Catalog,
+progress, and resync events are coalesced into the relevant shelf, catalog, or
+search refresh; Home has no polling or refresh-backoff ladder. This matters
+because the measured runtime queues over ten thousand tasks on a 15,000-item
+catalog, so "poll until the numbers stop changing" would be both expensive and
+unrelated to when the work actually lands.
 
 ### Three readers, not one
 
@@ -258,18 +255,19 @@ page above its bottom, and an EPUB final resource above its bottom remain incomp
 Only the final logical view completes the item. Older native/compatibility callers
 that omit the field retain the historical page-derived behavior.
 
-### Progress conflict is a non-blocking status
+### Progress conflict is silently reconciled
 
 `simple-komga` writes progress with `.catch(() => {})`. Xoboro answers
 `409 stale_progress` when a newer position already exists, specifically so a
-second device cannot silently rewind the reader's place (ADR 0101). Swallowing
-that error would throw away the entire point of the contract.
+second device cannot silently rewind the reader's place (ADR 0101). The server
+has already protected the winner, but the client still learns its clock so the
+next real movement does not repeat the stale write.
 
 **Decision: reconcile from the winning progress embedded in the `409`.** The
 reader advances its client clock from that response without a follow-up item GET,
-keeps the current view in place, and reports the write failure in a fixed live
-status region rather than interrupting reading with a popup. A later successful
-write clears that status.
+keeps the current view in place, and resolves the stale write silently: no popup
+and no live error status. The fixed live status region is reserved for
+non-conflict progress failures and clears after a later successful write.
 
 ### Search, paging, and catalogue restoration have one owner
 
