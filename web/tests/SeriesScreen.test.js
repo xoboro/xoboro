@@ -306,6 +306,49 @@ describe('series screen refreshes', () => {
     await waitFor(() => expect(supersededSignal.aborted).toBe(true))
   })
 
+  it('reloads the requested page when an event supersedes its in-flight request', async () => {
+    const pages = []
+    let pageOneRequests = 0
+    let supersededSignal = null
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        pages.push(page)
+        if (page === 1 && ++pageOneRequests === 1) {
+          supersededSignal = init.signal
+          return new Promise((_, reject) => {
+            init.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'))
+            })
+          })
+        }
+        return reply({
+          ...envelope(page === 0 ? ITEMS : [{ ...ITEMS[1], id: 'm101', title: 'Chapter 101' }]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    await waitFor(() => expect(supersededSignal).not.toBeNull())
+    emit('series.changed', { ids: ['s1'] })
+
+    await waitFor(() => expect(pages).toHaveLength(3))
+    expect(supersededSignal.aborted).toBe(true)
+    expect(pages).toEqual([0, 1, 1])
+  })
+
   /**
    * A payload naming nothing still reloads. Guessing "not mine" from a payload that says nothing
    * would trade needless reloads for a screen that silently stops updating, and only one of those
@@ -396,6 +439,42 @@ describe('SeriesScreen', () => {
       expect(last).toContain('page=0')
       expect(last).toContain('sort=number%2Casc')
     })
+  })
+
+  it('retries the page that failed instead of the last successfully rendered page', async () => {
+    const pages = []
+    let pageOneRequests = 0
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        pages.push(page)
+        if (page === 1 && ++pageOneRequests === 1) {
+          return reply({ code: 'internal_error', message: 'synthetic page failure' }, 500)
+        }
+        return reply({
+          ...envelope(page === 0 ? ITEMS : [{ ...ITEMS[1], id: 'm101', title: 'Chapter 101' }]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    const alert = await screen.findByRole('alert')
+    await fireEvent.click(alert.querySelector('button'))
+
+    await waitFor(() => expect(pages).toHaveLength(3))
+    expect(pages).toEqual([0, 1, 1])
   })
 
   it('shows the series cover', async () => {

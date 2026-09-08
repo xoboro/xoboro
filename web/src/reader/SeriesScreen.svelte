@@ -75,6 +75,9 @@
     loadController?.abort()
     const controller = new AbortController()
     loadController = controller
+    // The requested page is the one retries and event refreshes own, even before its
+    // response succeeds. Keeping the last rendered page here sent both back to page zero.
+    pageIndex = page
     loading = true
     try {
       const [context, itemPage] = await Promise.all([

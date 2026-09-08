@@ -167,6 +167,7 @@
   let searchField = $state(null)
 
   function openAdvanced() {
+    if (!query.trim()) catalogScrollY = window.scrollY
     clearTimeout(searchTimer)
     searchSerial += 1
     searchController?.abort()
@@ -242,9 +243,14 @@
   let seriesController = null
   let refreshCoordinator = null
   let restoreScrollY = null
+  /** The catalog's position, kept separate while either search surface owns the document. */
+  let catalogScrollY = 0
 
-  function saveHomeState(scrollY = window.scrollY) {
-    writeHomeState(user?.id ?? null, libraryId, { page: seriesPage, scrollY })
+  function saveHomeState(captureDocumentScroll = true) {
+    if (captureDocumentScroll && !advancedOpen && !query.trim()) {
+      catalogScrollY = window.scrollY
+    }
+    writeHomeState(user?.id ?? null, libraryId, { page: seriesPage, scrollY: catalogScrollY })
   }
 
   function setScroll(scrollY) {
@@ -268,9 +274,10 @@
   })
 
   function onQuery(event) {
-    query = event.target.value
+    const term = event.target.value
+    if (!advancedOpen && !query.trim() && term.trim()) catalogScrollY = window.scrollY
+    query = term
     clearTimeout(searchTimer)
-    const term = query
     // Cleared immediately rather than after the debounce: a reader who empties the field
     // is asking for their shelves back now, not in a third of a second.
     if (!term.trim()) {
@@ -278,7 +285,16 @@
       if (!advancedOpen) runSearch('')
       return
     }
-    if (!advancedOpen) searching = true
+    if (!advancedOpen) {
+      // The live query owns validity immediately, even though its request waits for the
+      // debounce. Otherwise the preceding answer can land during these 300 ms and make
+      // the new query look finished before its request has even started.
+      searchSerial += 1
+      searchController?.abort()
+      searchController = null
+      searchError = null
+      searching = true
+    }
     searchTimer = setTimeout(() => {
       submittedQuery = term
       if (!advancedOpen) runSearch(term)
@@ -391,9 +407,12 @@
       if (restoreScrollY !== null) {
         const scrollY = restoreScrollY
         restoreScrollY = null
+        catalogScrollY = scrollY
         setScroll(scrollY)
+        saveHomeState(false)
+      } else {
+        saveHomeState()
       }
-      saveHomeState()
     } catch (caught) {
       if (serial === seriesSerial && caught?.name !== 'AbortError') error = caught
     } finally {
@@ -456,6 +475,7 @@
     // nothing in it - page 7 of one library is often past the end of another.
     seriesPage = 0
     restoreScrollY = null
+    catalogScrollY = 0
     writeHomeState(user?.id ?? null, next, { page: 0, scrollY: 0 })
     setScroll(0)
     writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
@@ -475,6 +495,7 @@
     if (rememberedState) {
       seriesPage = rememberedState.page
       restoreScrollY = rememberedState.scrollY
+      catalogScrollY = rememberedState.scrollY
     }
     loadLibraries()
     refresh()

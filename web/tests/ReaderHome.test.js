@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { compile } from 'svelte/compiler'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Home from '../src/reader/Home.svelte'
 import { SessionStatus, session } from '../src/lib/session.js'
 
@@ -319,6 +319,11 @@ const TWO_LIBRARIES = [
   { id: 'lib-comics', name: 'comics' },
   { id: 'lib-webtoon', name: 'webtoon' },
 ]
+
+beforeEach(() => {
+  globalThis.localStorage?.clear()
+  globalThis.sessionStorage?.clear()
+})
 
 afterEach(() => {
   session.set({ status: SessionStatus.UNKNOWN, user: null })
@@ -791,6 +796,82 @@ describe('home search', () => {
       expect(screen.getByTestId('home-search-results').textContent).toContain('Later Answer'),
     )
     expect(screen.getByTestId('home-search-results').textContent).not.toContain('Earlier Answer')
+  })
+
+  it('invalidates the old quick request before the new query debounce starts', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
+      if (url.includes('/feeds/')) return Promise.resolve(reply(envelope()))
+      if (url.includes('query=')) {
+        return new Promise((resolve) => pending.push({ url, signal: init.signal, resolve }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+
+    await typeQuery('old')
+    await waitFor(() => expect(pending).toHaveLength(1))
+    const old = pending[0]
+
+    await typeQuery('new')
+    expect(old.signal.aborted).toBe(true)
+    expect(screen.getByTestId('home-quick-search')).toHaveAttribute('aria-busy', 'true')
+
+    old.resolve(reply(envelope([{ id: 'old', title: 'Obsolete Answer' }])))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(screen.queryByText('Obsolete Answer')).toBeNull()
+    expect(screen.getByTestId('home-quick-search')).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('keeps the catalog scroll when navigating away from search and remounting', async () => {
+    session.set({
+      status: SessionStatus.AUTHENTICATED,
+      user: { id: 'reader-scroll', roles: [] },
+    })
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      writable: true,
+      value: 540,
+    })
+    const fetchImpl = searchServer({
+      series: [{ id: 's1', title: 'Found for navigation', mediaItemCount: 1 }],
+    })
+    globalThis.fetch = fetchImpl
+    const searching = render(Home)
+
+    await screen.findByTestId('all-series-page-next')
+    await typeQuery('navigation')
+    await screen.findByText('Found for navigation')
+    window.scrollY = 1_300
+    searching.unmount()
+
+    const stored = Object.keys(sessionStorage)
+      .map((key) => JSON.parse(sessionStorage.getItem(key)))
+      .find((value) => value.libraryId === null)
+    expect(stored).toEqual({ libraryId: null, page: 0, scrollY: 540 })
+
+    const scrolling = document.scrollingElement ?? document.documentElement
+    const originalScrollTop = Object.getOwnPropertyDescriptor(scrolling, 'scrollTop')
+    const restorations = []
+    Object.defineProperty(scrolling, 'scrollTop', {
+      configurable: true,
+      get: () => 0,
+      set: (top) => {
+        restorations.push({
+          top,
+          catalogRendered: Boolean(screen.queryByTestId('all-series-page-next')),
+        })
+      },
+    })
+    render(Home)
+
+    await waitFor(() => expect(restorations).toHaveLength(1))
+    expect(restorations[0]).toEqual({ top: 540, catalogRendered: true })
+    if (originalScrollTop) Object.defineProperty(scrolling, 'scrollTop', originalScrollTop)
+    else delete scrolling.scrollTop
   })
 
   it('aborts the previous library search and immediately searches the selected library', async () => {
