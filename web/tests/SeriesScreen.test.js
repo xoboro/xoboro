@@ -306,6 +306,49 @@ describe('series screen refreshes', () => {
     await waitFor(() => expect(supersededSignal.aborted).toBe(true))
   })
 
+  it('reloads the requested page when an event supersedes its in-flight request', async () => {
+    const pages = []
+    let pageOneRequests = 0
+    let supersededSignal = null
+    const fetchImpl = vi.fn(async (url, init = {}) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        pages.push(page)
+        if (page === 1 && ++pageOneRequests === 1) {
+          supersededSignal = init.signal
+          return new Promise((_, reject) => {
+            init.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'))
+            })
+          })
+        }
+        return reply({
+          ...envelope(page === 0 ? ITEMS : [{ ...ITEMS[1], id: 'm101', title: 'Chapter 101' }]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    await waitFor(() => expect(supersededSignal).not.toBeNull())
+    emit('series.changed', { ids: ['s1'] })
+
+    await waitFor(() => expect(pages).toHaveLength(3))
+    expect(supersededSignal.aborted).toBe(true)
+    expect(pages).toEqual([0, 1, 1])
+  })
+
   /**
    * A payload naming nothing still reloads. Guessing "not mine" from a payload that says nothing
    * would trade needless reloads for a screen that silently stops updating, and only one of those
@@ -325,6 +368,158 @@ describe('series screen refreshes', () => {
 })
 
 describe('SeriesScreen', () => {
+  it('aborts the old route and restores ordering when params change to another series', async () => {
+    localStorage.setItem('xoboro.pref.anonymous.s1.sort', 'number,desc')
+    localStorage.setItem('xoboro.pref.anonymous.s2.sort', 'number,asc')
+    const oldSignals = []
+    const requested = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      requested.push(url)
+      if (url.includes('/series/s1/')) {
+        oldSignals.push(init.signal)
+        return new Promise((_, reject) => {
+          init.signal.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          })
+        })
+      }
+      if (url.includes('/series/s2/media-items')) {
+        return Promise.resolve(
+          reply(
+            envelope([
+              { ...ITEMS[0], id: 'm20', title: 'Second series chapter' },
+              { ...ITEMS[1], id: 'm21', title: 'Another second series chapter' },
+            ]),
+          ),
+        )
+      }
+      if (url.includes('/series/s2/reader-context')) {
+        const second = { ...SERIES, id: 's2', title: 'Second Series' }
+        return Promise.resolve(reply({ series: second, first: null, resume: null }))
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    const view = render(SeriesScreen, { params: { id: 's1' } })
+
+    await waitFor(() => expect(oldSignals).toHaveLength(2))
+    await view.rerender({ params: { id: 's2' } })
+
+    await screen.findByText('Second Series')
+    await screen.findByText('Second series chapter')
+    expect(oldSignals.every((signal) => signal.aborted)).toBe(true)
+    const secondItems = requested.find((url) => url.includes('/series/s2/media-items'))
+    expect(secondItems).toContain('sort=number%2Casc')
+  })
+
+  it('requests the next page so every chapter beyond the first hundred is reachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        const item = page === 0 ? ITEMS[0] : { ...ITEMS[1], id: 'm101', title: 'Chapter 101' }
+        return reply({
+          ...envelope([item]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    const next = await screen.findByTestId('series-items-page-next')
+    expect(next).toBeEnabled()
+    await fireEvent.click(next)
+
+    await screen.findByText('Chapter 101')
+    const itemRequests = fetchImpl.mock.calls
+      .map(([url]) => url)
+      .filter((url) => url.includes('/series/s1/media-items'))
+    expect(itemRequests).toHaveLength(2)
+    expect(itemRequests[1]).toContain('page=1')
+  })
+
+  it('returns to page zero before requesting a different series order', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const query = new URL(url, 'http://localhost').searchParams
+        const page = Number(query.get('page') ?? 0)
+        const item = page === 0 ? ITEMS[0] : { ...ITEMS[1], id: 'm101', title: 'Chapter 101' }
+        return reply({
+          ...envelope([item]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    await screen.findByText('Chapter 101')
+    await fireEvent.click(screen.getByTestId('series-order-oldest'))
+
+    await waitFor(() => {
+      const last = fetchImpl.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.includes('/series/s1/media-items'))
+        .at(-1)
+      expect(last).toContain('page=0')
+      expect(last).toContain('sort=number%2Casc')
+    })
+  })
+
+  it('retries the page that failed instead of the last successfully rendered page', async () => {
+    const pages = []
+    let pageOneRequests = 0
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        pages.push(page)
+        if (page === 1 && ++pageOneRequests === 1) {
+          return reply({ code: 'internal_error', message: 'synthetic page failure' }, 500)
+        }
+        return reply({
+          ...envelope(page === 0 ? ITEMS : [{ ...ITEMS[1], id: 'm101', title: 'Chapter 101' }]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    const alert = await screen.findByRole('alert')
+    await fireEvent.click(alert.querySelector('button'))
+
+    await waitFor(() => expect(pages).toHaveLength(3))
+    expect(pages).toEqual([0, 1, 1])
+  })
+
   it('shows the series cover', async () => {
     globalThis.fetch = server()
     const { container } = render(SeriesScreen, { params: { id: 's1' } })

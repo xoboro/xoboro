@@ -45,9 +45,9 @@ fun interface ReadProgressEventPublisher {
  * accepted row is deleted concurrently the update is still reported as applied while no event is
  * published. Callers must not treat [Applied] as a guarantee that an event was emitted.
  *
- * [Stale.stored] is the progress currently held by the server. In the same concurrent-delete case
- * the row no longer exists and the rejected candidate is returned in its place, so callers should
- * not echo it to clients as authoritative server state.
+ * [Stale.stored] is the persisted row that won conflict ordering, captured atomically with the
+ * rejected write. The row can be deleted afterward, but this outcome never substitutes the rejected
+ * candidate for the winner.
  */
 sealed interface ReadProgressUpdate {
   data object MediaItemNotFound : ReadProgressUpdate
@@ -142,6 +142,7 @@ class ReadProgressLifecycle(
     deviceId: String,
     deviceName: String,
     locatorJson: String?,
+    completed: Boolean? = null,
   ): ReadProgressUpdate {
     val book = books.findByIdOrNull(bookId) ?: return ReadProgressUpdate.MediaItemNotFound
     require(book.deletedAtMillis == null) { "Cannot update progress for a deleted book" }
@@ -160,6 +161,9 @@ class ReadProgressLifecycle(
     require(page in 1..analyzed.pageCount) {
       "Page argument ($page) must be within 1 and book page count (${analyzed.pageCount})"
     }
+    require(completed != true || page == analyzed.pageCount) {
+      "Completed progress must point to the final page (${analyzed.pageCount})"
+    }
     val existing = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
     val now = now()
     val candidate =
@@ -167,7 +171,7 @@ class ReadProgressLifecycle(
         bookId = book.id,
         userId = userId,
         page = page,
-        completed = page == analyzed.pageCount,
+        completed = completed ?: (page == analyzed.pageCount),
         readAtMillis = modifiedAtMillis,
         deviceId = deviceId,
         deviceName = deviceName,
@@ -175,13 +179,12 @@ class ReadProgressLifecycle(
         createdAtMillis = existing?.createdAtMillis ?: now,
         updatedAtMillis = now,
       )
-    if (!progresses.upsertIfNewer(candidate)) {
-      return ReadProgressUpdate.Stale(
-        progresses.findByBookIdAndUserIdOrNull(book.id, userId) ?: candidate,
-      )
+    val write = progresses.upsertIfNewer(candidate)
+    if (!write.applied) {
+      return ReadProgressUpdate.Stale(write.stored)
     }
     val stored = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
-    return ReadProgressUpdate.Applied(stored ?: candidate)
+    return ReadProgressUpdate.Applied(stored ?: write.stored)
       .also { if (stored != null) eventPublisher.publish(ReadProgressEvent.Changed(stored)) }
   }
 

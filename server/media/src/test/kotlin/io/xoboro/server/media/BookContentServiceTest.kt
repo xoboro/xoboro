@@ -34,6 +34,7 @@ import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.common.PDRectangle
 
 class BookContentServiceTest {
   @TempDir
@@ -249,6 +250,78 @@ class BookContentServiceTest {
   }
 
   @Test
+  fun `maximum width preserves the aspect ratio of a tall page`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(1_600, 6_000, BufferedImage.TYPE_BYTE_GRAY), "png", output)
+        output.toByteArray()
+      }
+    val service = service(access = RecordingAccess(archive(mapOf("nested/001.png" to source))))
+
+    val opened =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(maximumWidth = 800),
+        ),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(opened.readAllBytes())))
+
+    assertEquals(800, image.width)
+    assertEquals(3_000, image.height)
+    opened.close()
+  }
+
+  @Test
+  fun `maximum width does not upscale a narrower page`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(600, 300, BufferedImage.TYPE_INT_RGB), "png", output)
+        output.toByteArray()
+      }
+    val service = service(access = RecordingAccess(archive(mapOf("nested/001.png" to source))))
+
+    val opened =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(maximumWidth = 800),
+        ),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(opened.readAllBytes())))
+
+    assertEquals(600, image.width)
+    assertEquals(300, image.height)
+    opened.close()
+  }
+
+  @Test
+  fun `maximum width decodes a non-multiple source at or above the requested width`() {
+    val source =
+      ByteArrayOutputStream().use { output ->
+        ImageIO.write(BufferedImage(1_601, 600, BufferedImage.TYPE_BYTE_GRAY), "png", output)
+        output.toByteArray()
+      }
+    val service = service(access = RecordingAccess(archive(mapOf("nested/001.png" to source))))
+
+    val opened =
+      requireNotNull(
+        service.openPage(
+          BOOK_ID,
+          1,
+          PageImageRequest(maximumWidth = 800),
+        ),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(opened.readAllBytes())))
+
+    assertEquals(800, image.width)
+    assertEquals(299, image.height)
+    opened.close()
+  }
+
+  @Test
   fun `does not materialize for an out of range page`() {
     val access = RecordingAccess(archive(emptyMap()))
     val service = service(access = access)
@@ -364,6 +437,40 @@ class BookContentServiceTest {
     assertTrue(rawBytes.decodeToString(0, 4).startsWith("%PDF"))
     raw.close()
     assertEquals(2, access.closeCount)
+  }
+
+  @Test
+  fun `maximum width bounds pdf rendering before the decoded pixel safety limit`() {
+    val path = temporaryDirectory.resolve("tall-synthetic.pdf")
+    PDDocument().use { document ->
+      document.addPage(PDPage(PDRectangle(400F, 100_000F)))
+      document.save(path.toFile())
+    }
+    val service =
+      service(
+        access = RecordingAccess(path),
+        mediaKind = MediaKind.PDF,
+        mediaType = PdfMediaAnalyzer.PDF_MEDIA_TYPE,
+        profile = MediaProfile.PDF,
+        pages =
+          listOf(
+            BookPage(
+              number = 1,
+              fileName = "1",
+              mediaType = PdfMediaAnalyzer.PDF_MEDIA_TYPE,
+            ),
+          ),
+      )
+
+    val opened =
+      requireNotNull(
+        service.openPage(BOOK_ID, 1, PageImageRequest(maximumWidth = 200)),
+      )
+    val image = requireNotNull(ImageIO.read(ByteArrayInputStream(opened.readAllBytes())))
+
+    assertEquals(200, image.width)
+    assertEquals(50_000, image.height)
+    opened.close()
   }
 
   private fun service(

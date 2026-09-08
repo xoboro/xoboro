@@ -16,7 +16,7 @@ export const Treatment = Object.freeze({
   REAUTHENTICATE: 'REAUTHENTICATE',
   /** Login throttled. Show the wait and disable submit until it passes. */
   THROTTLED: 'THROTTLED',
-  /** A newer read position exists. Re-read and ask; never resolve silently. */
+  /** A newer read position exists. Advance the local write clock and keep reading. */
   PROGRESS_CONFLICT: 'PROGRESS_CONFLICT',
   /** Refused because the library storage is unreachable. Offer a re-check. */
   LIBRARY_UNAVAILABLE: 'LIBRARY_UNAVAILABLE',
@@ -90,8 +90,9 @@ export class XoboroApiError extends Error {
    * @param {string} init.code the stable native code.
    * @param {string} [init.serverMessage] English server prose. For logs only.
    * @param {number|null} [init.retryAfterSeconds] parsed `Retry-After`.
+   * @param {Record<string, unknown>} [init.details] additional error response fields.
    */
-  constructor({ status, code, serverMessage = '', retryAfterSeconds = null }) {
+  constructor({ status, code, serverMessage = '', retryAfterSeconds = null, details = {} }) {
     // The Error message is for a developer reading a stack trace. It is never
     // what a user sees: `messageKey` is, and it goes through the catalog.
     super(`${code} (${status})`)
@@ -100,6 +101,7 @@ export class XoboroApiError extends Error {
     this.code = code
     this.serverMessage = serverMessage
     this.retryAfterSeconds = retryAfterSeconds
+    this.details = details
   }
 
   /** How the calling screen should react. */

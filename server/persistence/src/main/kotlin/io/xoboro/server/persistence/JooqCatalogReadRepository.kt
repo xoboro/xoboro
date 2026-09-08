@@ -5,6 +5,7 @@ import io.xoboro.core.application.BookMetadataAggregation
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
 import io.xoboro.core.application.CatalogBookDelivery
+import io.xoboro.core.application.CatalogBookReaderContext
 import io.xoboro.core.application.CatalogGroupCount
 import io.xoboro.core.application.CatalogPage
 import io.xoboro.core.application.CatalogPageRequest
@@ -32,6 +33,7 @@ import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadataRepository
 import io.xoboro.core.domain.SeriesRepository
 import io.xoboro.core.domain.UserId
+import org.jooq.DSLContext
 
 class JooqCatalogReadRepository(
   private val database: XoboroDatabase,
@@ -135,6 +137,127 @@ class JooqCatalogReadRepository(
       pageCount = record.get("page_count", Int::class.java) ?: 0,
       mediaUpdatedAtMillis =
         record.get("media_updated_at_ms_64", String::class.java)?.toLong(),
+    )
+  }
+
+  override fun findBookReaderContextByIdOrNull(
+    id: BookId,
+    access: CatalogAccess,
+  ): CatalogBookReaderContext? {
+    val snapshotRepositories = readerContextRepositoriesOrNull()
+    if (snapshotRepositories == null) {
+      // Custom repositories are a test seam and cannot be rebound to a jOOQ transaction. Keep
+      // their historical behavior, but never return an item whose access changed while the custom
+      // hydrator ran. Production wiring uses the concrete repositories below and therefore takes
+      // the single-snapshot branch.
+      val context =
+        findBookReaderContextByIdOrNull(
+          dsl = database.dsl,
+          id = id,
+          access = access,
+          repositories = null,
+        ) ?: return null
+      return context.takeIf { canReadBook(id, access) }
+    }
+    return database.transaction { transaction ->
+      findBookReaderContextByIdOrNull(
+        dsl = transaction,
+        id = id,
+        access = access,
+        repositories = snapshotRepositories.readingWith(transaction),
+      )
+    }
+  }
+
+  private fun findBookReaderContextByIdOrNull(
+    dsl: DSLContext,
+    id: BookId,
+    access: CatalogAccess,
+    repositories: ReaderContextRepositories?,
+  ): CatalogBookReaderContext? {
+    val filter = bookFilter(BookCatalogQuery(deleted = null), access)
+    val record =
+      dsl.fetchOne(
+        """
+        WITH visible_book AS (
+          SELECT b.id, b.series_id, b.relative_uri, b.deleted_at_ms, bm.number_sort
+          FROM book b
+          JOIN series s ON s.id = b.series_id
+          JOIN book_metadata bm ON bm.book_id = b.id
+          JOIN series_metadata sm ON sm.series_id = s.id
+          WHERE ${filter.sql}
+        )
+        SELECT
+          current.id,
+          (
+            SELECT sibling.id
+            FROM visible_book sibling
+            WHERE sibling.series_id = current.series_id
+              AND sibling.deleted_at_ms IS NULL
+              AND (
+                sibling.number_sort < current.number_sort
+                OR (
+                  sibling.number_sort = current.number_sort
+                  AND (
+                    sibling.relative_uri < current.relative_uri
+                    OR (
+                      sibling.relative_uri = current.relative_uri
+                      AND sibling.id < current.id
+                    )
+                  )
+                )
+              )
+            ORDER BY sibling.number_sort DESC, sibling.relative_uri DESC, sibling.id DESC
+            LIMIT 1
+          ) AS previous_id,
+          (
+            SELECT sibling.id
+            FROM visible_book sibling
+            WHERE sibling.series_id = current.series_id
+              AND sibling.deleted_at_ms IS NULL
+              AND (
+                sibling.number_sort > current.number_sort
+                OR (
+                  sibling.number_sort = current.number_sort
+                  AND (
+                    sibling.relative_uri > current.relative_uri
+                    OR (
+                      sibling.relative_uri = current.relative_uri
+                      AND sibling.id > current.id
+                    )
+                  )
+                )
+              )
+            ORDER BY sibling.number_sort, sibling.relative_uri, sibling.id
+            LIMIT 1
+          ) AS next_id
+        FROM visible_book current
+        WHERE current.id = ?
+        """.trimIndent(),
+        *(filter.bindings + id.value).toTypedArray(),
+      ) ?: return null
+    val itemId = BookId(requireNotNull(record.get("id", String::class.java)))
+    return CatalogBookReaderContext(
+      item = hydrateBook(itemId, access.userId, repositories) ?: return null,
+      previousId = record.get("previous_id", String::class.java)?.let(::BookId),
+      nextId = record.get("next_id", String::class.java)?.let(::BookId),
+    )
+  }
+
+  private fun readerContextRepositoriesOrNull(): ReaderContextRepositories? {
+    val snapshotBooks = books as? JooqBookRepository ?: return null
+    val snapshotSeries = series as? JooqSeriesRepository ?: return null
+    val snapshotBookMetadata = bookMetadata as? JooqBookMetadataRepository ?: return null
+    val snapshotSeriesMetadata = seriesMetadata as? JooqSeriesMetadataRepository ?: return null
+    val snapshotMedia = media as? JooqBookMediaRepository ?: return null
+    val snapshotReadProgress = readProgress as? JooqReadProgressRepository ?: return null
+    return ReaderContextRepositories(
+      books = snapshotBooks,
+      series = snapshotSeries,
+      bookMetadata = snapshotBookMetadata,
+      seriesMetadata = snapshotSeriesMetadata,
+      media = snapshotMedia,
+      readProgress = snapshotReadProgress,
     )
   }
 
@@ -394,23 +517,31 @@ class JooqCatalogReadRepository(
   private fun hydrateBook(
     id: BookId,
     userId: UserId?,
-  ): CatalogBook? = hydrateBooks(listOf(id), userId).singleOrNull()
+    repositories: ReaderContextRepositories? = null,
+  ): CatalogBook? = hydrateBooks(listOf(id), userId, repositories).singleOrNull()
 
   private fun hydrateBooks(
     ids: List<BookId>,
     userId: UserId?,
+    repositories: ReaderContextRepositories? = null,
   ): List<CatalogBook> {
     if (ids.isEmpty()) return emptyList()
-    val items = books.findAllByIds(ids).associateBy { it.id }
+    val bookReader = repositories?.books ?: books
+    val seriesReader = repositories?.series ?: series
+    val bookMetadataReader = repositories?.bookMetadata ?: bookMetadata
+    val seriesMetadataReader = repositories?.seriesMetadata ?: seriesMetadata
+    val mediaReader = repositories?.media ?: media
+    val progressReader = repositories?.readProgress ?: readProgress
+    val items = bookReader.findAllByIds(ids).associateBy { it.id }
     val parentIds = items.values.map { it.seriesId }.distinct()
-    val parents = series.findAllByIds(parentIds).associateBy { it.id }
-    val metadata = bookMetadata.findAllByBookIds(ids).associateBy { it.bookId }
+    val parents = seriesReader.findAllByIds(parentIds).associateBy { it.id }
+    val metadata = bookMetadataReader.findAllByBookIds(ids).associateBy { it.bookId }
     val parentMetadata =
-      seriesMetadata.findAllBySeriesIds(parentIds).associateBy { it.seriesId }
-    val mediaById = media.findAllByBookIds(ids).associateBy { it.bookId }
+      seriesMetadataReader.findAllBySeriesIds(parentIds).associateBy { it.seriesId }
+    val mediaById = mediaReader.findAllByBookIds(ids).associateBy { it.bookId }
     val progresses =
       userId
-        ?.let { readProgress.findAllByBookIdsAndUserId(ids, it) }
+        ?.let { progressReader.findAllByBookIdsAndUserId(ids, it) }
         .orEmpty()
         .associateBy { it.bookId }
     return ids.mapNotNull { id ->
@@ -480,6 +611,25 @@ class JooqCatalogReadRepository(
       createdAtMillis = createdAtMillis,
       updatedAtMillis = updatedAtMillis,
     )
+
+  private data class ReaderContextRepositories(
+    val books: JooqBookRepository,
+    val series: JooqSeriesRepository,
+    val bookMetadata: JooqBookMetadataRepository,
+    val seriesMetadata: JooqSeriesMetadataRepository,
+    val media: JooqBookMediaRepository,
+    val readProgress: JooqReadProgressRepository,
+  ) {
+    fun readingWith(readDsl: DSLContext): ReaderContextRepositories =
+      ReaderContextRepositories(
+        books = books.readingWith(readDsl),
+        series = series.readingWith(readDsl),
+        bookMetadata = bookMetadata.readingWith(readDsl),
+        seriesMetadata = seriesMetadata.readingWith(readDsl),
+        media = media.readingWith(readDsl),
+        readProgress = readProgress.readingWith(readDsl),
+      )
+  }
 
   private fun bookFilter(
     query: BookCatalogQuery,

@@ -7,18 +7,24 @@ import io.xoboro.core.domain.SeriesRepository
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqSeriesRepository(
+class JooqSeriesRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : SeriesRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqSeriesRepository =
+    JooqSeriesRepository(database, readDsl)
+
   override fun findByIdOrNull(id: SeriesId): Series? =
-    database.dsl.fetchOne("$SELECT_SERIES WHERE id = ?", id.value)?.toSeries()
+    readDsl.fetchOne("$SELECT_SERIES WHERE id = ?", id.value)?.toSeries()
 
   override fun findAllByIds(ids: Collection<SeriesId>): List<Series> =
     ids
       .distinct()
       .chunked(QUERY_BATCH_SIZE)
       .flatMap { batch ->
-        database.dsl
+        readDsl
           .fetch(
             "$SELECT_SERIES WHERE id IN (${batch.placeholders()}) ORDER BY id",
             *batch.map { it.value }.toTypedArray(),
@@ -26,7 +32,7 @@ class JooqSeriesRepository(
       }
 
   override fun findAllByLibraryId(libraryId: LibraryId): List<Series> =
-    database.dsl
+    readDsl
       .fetch(
         "$SELECT_SERIES WHERE library_id = ? ORDER BY relative_uri, id",
         libraryId.value,
@@ -38,7 +44,7 @@ class JooqSeriesRepository(
     relativePath: String,
   ): Series? {
     require(relativePath.isNotBlank()) { "Series relative path must not be blank" }
-    return database.dsl
+    return readDsl
       .fetchOne(
         "$SELECT_SERIES WHERE library_id = ? AND relative_uri = ?",
         libraryId.value,
@@ -80,7 +86,7 @@ class JooqSeriesRepository(
   }
 
   override fun count(): Long =
-    database.dsl.fetchOne("SELECT count(*) FROM series")?.get(0)?.let { it as Number }?.toLong()
+    readDsl.fetchOne("SELECT count(*) FROM series")?.get(0)?.let { it as Number }?.toLong()
       ?: 0L
 
   private fun DSLContext.insertSeries(series: Series) {

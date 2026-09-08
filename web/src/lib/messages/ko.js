@@ -307,8 +307,10 @@ export default {
     title: '내 서재',
     controls: '읽기 도구',
     chapter: '본문',
-    typographyNote:
-      '글자 크기와 줄 간격은 본문 문서 자체가 정합니다. 이 화면에서는 바꿀 수 없습니다 — 브라우저의 확대/축소를 쓰세요.',
+    fontSize: '글자 크기',
+    lineHeight: '줄 간격',
+    theme: '본문 테마',
+    themes: { dark: '어둡게', light: '밝게' },
     epubWidths: { '34': '좁게', '42': '보통', '52': '넓게', full: '가득' },
     margin: '여백',
     position: '{total}쪽 중 {page}쪽',

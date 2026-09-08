@@ -10,9 +10,15 @@ import io.xoboro.core.domain.WebLink
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqSeriesMetadataRepository(
+class JooqSeriesMetadataRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : SeriesMetadataRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqSeriesMetadataRepository =
+    JooqSeriesMetadataRepository(database, readDsl)
+
   override fun findBySeriesIdOrNull(seriesId: SeriesId): SeriesMetadata? {
     return findAllBySeriesIds(listOf(seriesId)).singleOrNull()
   }
@@ -22,7 +28,7 @@ class JooqSeriesMetadataRepository(
     if (ids.isEmpty()) return emptyList()
     return ids.chunked(QUERY_BATCH_SIZE).flatMap { batch ->
       val records =
-        database.dsl.fetch(
+        readDsl.fetch(
           """
           SELECT series_metadata.*,
             CAST(created_at_ms AS TEXT) AS created_at_ms_64,
@@ -154,7 +160,7 @@ class JooqSeriesMetadataRepository(
     column: String,
     seriesIds: Collection<SeriesId>,
   ): Map<SeriesId, Set<String>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT series_id, $column
@@ -169,7 +175,7 @@ class JooqSeriesMetadataRepository(
       ).mapValues { (_, values) -> values.toSet() }
 
   private fun loadLinks(seriesIds: Collection<SeriesId>): Map<SeriesId, List<WebLink>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT series_id, label, url
@@ -186,7 +192,7 @@ class JooqSeriesMetadataRepository(
   private fun loadAlternateTitles(
     seriesIds: Collection<SeriesId>,
   ): Map<SeriesId, List<AlternateTitle>> =
-    database.dsl
+    readDsl
       .fetch(
         """
         SELECT series_id, label, title

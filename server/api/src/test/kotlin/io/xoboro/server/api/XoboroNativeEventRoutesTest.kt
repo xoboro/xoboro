@@ -17,8 +17,11 @@ import io.ktor.server.auth.Authentication
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE as ServerSSE
+import io.ktor.server.sse.ServerSSESession
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import io.ktor.util.cio.ChannelWriteException
+import io.ktor.utils.io.ClosedWriteChannelException
 import io.xoboro.core.application.BookCatalogQuery
 import io.xoboro.core.application.CatalogAccess
 import io.xoboro.core.application.CatalogBook
@@ -110,6 +113,45 @@ class XoboroNativeEventRoutesTest {
         }
       }
     }
+
+  @Test
+  fun `ends normally for direct and engine-wrapped closed response writes`() {
+    val disconnects =
+      listOf<() -> Throwable>(
+        { ClosedWriteChannelException() },
+        {
+          ChannelWriteException(
+            "Synthetic client disconnect",
+            ClosedWriteChannelException(),
+          )
+        },
+      )
+
+    disconnects.forEach { disconnect ->
+      testApplication {
+        val fixture =
+          Fixture(
+            syntheticUser(),
+            hub = XoboroNativeEventHub(NoOpCatalog, maxTotalStreams = 1),
+          )
+        installEvents(fixture, sendEvent = { throw disconnect() })
+
+        val response =
+          client.get("$XOBORO_API_PREFIX/events") {
+            bearerAuth(fixture.token)
+          }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(
+          HttpStatusCode.OK,
+          client
+            .get("$XOBORO_API_PREFIX/events") {
+              bearerAuth(fixture.token)
+            }.status,
+        )
+      }
+    }
+  }
 
   @Test
   fun `forwards Last-Event-ID to the hub and resumes without a gap`() =
@@ -298,6 +340,7 @@ class XoboroNativeEventRoutesTest {
     heartbeatPeriod: Duration = 1.hours,
     reauthenticationPeriod: Duration = heartbeatPeriod,
     maxStreamLifetime: Duration = 1.hours,
+    sendEvent: suspend ServerSSESession.(ServerSentEvent) -> Unit = { send(it) },
     configureClient: SSEConfig.() -> Unit = {},
   ) {
     application {
@@ -313,6 +356,7 @@ class XoboroNativeEventRoutesTest {
           heartbeatPeriod = heartbeatPeriod,
           reauthenticationPeriod = reauthenticationPeriod,
           maxStreamLifetime = maxStreamLifetime,
+          sendEvent = sendEvent,
         )
       }
     }

@@ -144,6 +144,40 @@ describe('request', () => {
       .rejects.toMatchObject({ code: 'library_unavailable', status: 409 })
   })
 
+  it('preserves unknown error envelope fields as details', async () => {
+    const progress = {
+      page: 8,
+      completed: false,
+      readAtMillis: 500,
+      updatedAtMillis: 510,
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(
+      reply({
+        status: 409,
+        body: {
+          code: 'stale_progress',
+          message: 'stale',
+          progress,
+          requestId: 'synthetic-request',
+        },
+      }),
+    )
+
+    await expect(request('/media-items/m1/progress', { method: 'PUT', fetchImpl }))
+      .rejects.toMatchObject({ details: { progress, requestId: 'synthetic-request' } })
+  })
+
+  it('passes keepalive to fetch without changing same-origin credentials', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply({ status: 204 }))
+
+    await request('/media-items/m1/progress', { method: 'PUT', keepalive: true, fetchImpl })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/xoboro/v1/media-items/m1/progress',
+      expect.objectContaining({ keepalive: true, credentials: 'same-origin' }),
+    )
+  })
+
   it('parses Retry-After onto the error', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       reply({

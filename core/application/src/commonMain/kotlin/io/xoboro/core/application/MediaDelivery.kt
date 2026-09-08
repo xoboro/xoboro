@@ -14,12 +14,19 @@ data class PageImageRequest(
   val format: PageImageFormat? = null,
   val maximumDimension: Int? = null,
   val raw: Boolean = false,
+  val maximumWidth: Int? = null,
 ) {
   init {
     require(maximumDimension == null || maximumDimension > 0) {
       "Maximum image dimension must be positive"
     }
-    require(!raw || (format == null && maximumDimension == null)) {
+    require(maximumWidth == null || maximumWidth > 0) {
+      "Maximum image width must be positive"
+    }
+    require(maximumDimension == null || maximumWidth == null) {
+      "Maximum image dimension and width are mutually exclusive"
+    }
+    require(!raw || (format == null && maximumDimension == null && maximumWidth == null)) {
       "Raw page delivery cannot request image conversion"
     }
   }

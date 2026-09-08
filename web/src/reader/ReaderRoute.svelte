@@ -11,7 +11,10 @@
    * itself when mounted directly, but route entry must not request the same item twice.
    */
   import { _ } from '../lib/i18n.js'
-  import { isRetryableDeliveryFailure, readMediaItem } from '../lib/api/catalog.js'
+  import {
+    isRetryableDeliveryFailure,
+    readMediaItemReaderContext,
+  } from '../lib/api/catalog.js'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Reader from './Reader.svelte'
   import EpubReader from './EpubReader.svelte'
@@ -19,7 +22,7 @@
   let { params } = $props()
 
   let kind = $state(null)
-  let item = $state(null)
+  let context = $state(null)
   let error = $state(null)
   let retryable = $state(false)
   let controller = null
@@ -28,14 +31,17 @@
     controller?.abort()
     const requestController = new AbortController()
     controller = requestController
-    item = null
+    context = null
     kind = null
     error = null
     retryable = false
     try {
-      item = await readMediaItem(id, { signal: requestController.signal })
+      context = await readMediaItemReaderContext(id, { signal: requestController.signal })
       if (requestController.signal.aborted) return
-      kind = item.mediaKind ?? item.kind ?? 'COMIC'
+      // `type` is the field the production Xoboro DTO actually serializes. Keep the
+      // older aliases behind it for fixtures/older servers, but never let their absence
+      // send a production NOVEL through the image reader.
+      kind = context.item.type ?? context.item.mediaKind ?? context.item.kind ?? 'COMIC'
     } catch (caught) {
       if (requestController.signal.aborted) return
       error = caught
@@ -59,9 +65,9 @@
     <ErrorNotice {error} onretry={retryable ? () => load(params.id) : null} />
   </div>
 {:else if kind === 'NOVEL'}
-  <EpubReader {params} initialItem={item} />
+  <EpubReader {params} initialItem={context.item} initialContext={context} />
 {:else if kind}
-  <Reader {params} initialItem={item} />
+  <Reader {params} initialContext={context} />
 {:else}
   <p class="waiting" role="status">{$_('common.loading')}</p>
 {/if}

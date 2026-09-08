@@ -1,69 +1,56 @@
 <script>
-  /**
-   * The EPUB reader.
-   *
-   * New work rather than a port — the base had no EPUB reader at all.
-   *
-   * Reading order comes from `/positions`, **not** from the resource manifest. The
-   * manifest is in OPF order, the sequence the packager happened to write, so following
-   * it would present chapters in an arbitrary order that looks like a broken file. Each
-   * position's `href` is sent to the resource route verbatim; a raw OPF-relative href
-   * does not resolve, because resolution is an exact index lookup.
-   *
-   * Chapters render in an `iframe` because they are user-supplied markup. The server
-   * already answers resources with `script-src 'none'; object-src 'none'`, and the
-   * `sandbox` attribute here is the second half of that: same-origin content that can
-   * style itself but cannot run anything or navigate the reader away.
-   *
-   * Progress is a Readium locator alongside the page position, which is what the
-   * progress endpoint stores.
-   */
-  import { onDestroy, onMount } from 'svelte'
-  import { ChevronLeft, ChevronRight, List, Settings, SlidersHorizontal } from '@lucide/svelte'
+  import { onDestroy, onMount, untrack } from 'svelte'
+  import { ChevronLeft, ChevronRight, List, Settings } from '@lucide/svelte'
+  import { replace } from 'svelte-spa-router'
   import { _ } from '../lib/i18n.js'
   import {
     isRetryableDeliveryFailure,
-    listPositions,
-    readMediaItem,
+    readMediaItemReaderContext,
     resourceUrlFor,
   } from '../lib/api/catalog.js'
-  import { resumePage, writeProgress } from '../lib/api/progress.js'
+  import { writeProgress } from '../lib/api/progress.js'
   import Dialog from '../components/Dialog.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import { bindEpubFrame } from './epubFrame.js'
+  import { epubNavigationFor, epubProgressFor, epubResume } from './epubPosition.js'
 
-  let { params, initialItem = null } = $props()
+  let { params, initialContext = null } = $props()
 
   const PROGRESS_DEBOUNCE_MILLIS = 800
-  // Only settings that actually take effect. `font-size` and `line-height` on the
-  // iframe element do nothing: CSS does not cascade into a separate document, and
-  // injecting a stylesheet would need script inside the frame, which the sandbox and
-  // the server's `script-src 'none'` both refuse. Shipping those two as controls meant
-  // shipping switches that stored a preference and changed nothing on screen.
-  //
-  // Column width and page margin are properties of the *frame box*, so they are real.
+  const FONT_SIZES = ['90', '100', '115', '130']
+  const LINE_HEIGHTS = ['1.4', '1.6', '1.8']
   const WIDTHS = ['34', '42', '52', 'full']
   const MARGINS = ['16', '32', '64']
+  const THEMES = ['dark', 'light']
 
-  const stored = (key, fallback) => {
+  const stored = (key, values, fallback) => {
     try {
-      return localStorage.getItem(`xoboro.epub.${key}`) ?? fallback
+      const value = localStorage.getItem(`xoboro.epub.${key}`)
+      return values.includes(value) ? value : fallback
     } catch {
       return fallback
     }
   }
+
   const remember = (key, value) => {
     try {
       localStorage.setItem(`xoboro.epub.${key}`, value)
     } catch {
-      // A refused write costs the preference, not the reading session.
+      // A refused preference write must not interrupt reading.
     }
   }
 
-  let columnWidth = $state(stored('width', '42'))
-  let margin = $state(stored('margin', '32'))
+  let fontSize = $state(stored('font-size', FONT_SIZES, '100'))
+  let lineHeight = $state(stored('line-height', LINE_HEIGHTS, '1.6'))
+  let columnWidth = $state(stored('width', WIDTHS, '42'))
+  let margin = $state(stored('margin', MARGINS, '32'))
+  let theme = $state(stored('theme', THEMES, 'dark'))
 
+  $effect(() => remember('font-size', fontSize))
+  $effect(() => remember('line-height', lineHeight))
   $effect(() => remember('width', columnWidth))
   $effect(() => remember('margin', margin))
+  $effect(() => remember('theme', theme))
 
   let item = $state(null)
   let positions = $state([])
@@ -71,76 +58,124 @@
   let chrome = $state(false)
   let settingsOpen = $state(false)
   let error = $state(null)
+  let progressError = $state(null)
   let retryable = $state(false)
+  let previousId = $state(null)
+  let nextId = $state(null)
   let loadedId = $state('')
+  let restoreProgression = $state(0)
+  let restoreFragment = $state(null)
+  let locatorHref = $state(null)
+  let restoreKey = $state(0)
 
   let saveTimer = null
-  let pending = null
+  let pendingProgress = null
   let loadController = null
+  let loadToken = 0
+  let progressWriteToken = 0
 
   const position = $derived(positions[at] ?? null)
   const total = $derived(positions.length)
+  const pageCount = $derived(item?.media?.pageCount ?? 1)
   const source = $derived(
     loadedId && position ? resourceUrlFor(loadedId, position.href) : null,
   )
+  const frameOptions = $derived({
+    restoreKey,
+    progression: restoreProgression,
+    fragment: restoreFragment,
+    styles: { fontSize, lineHeight, margin, width: columnWidth, theme },
+    onProgress: noteFrameProgress,
+    onNavigate: followLink,
+    onToggleChrome: toggleChrome,
+    onKeydown,
+  })
 
-  function flushProgress() {
+  function flushProgress({ keepalive = false } = {}) {
     clearTimeout(saveTimer)
     saveTimer = null
-    if (!pending || !loadedId) return
-    const write = pending
-    pending = null
-    writeProgress(loadedId, write).catch((caught) => (error = caught))
+    if (!pendingProgress) return
+    const write = pendingProgress
+    const token = ++progressWriteToken
+    writeProgress(write.id, { ...write.progress, keepalive })
+      .then(() => {
+        if (token !== progressWriteToken || pendingProgress !== write) return
+        pendingProgress = null
+        if (loadedId === write.id) progressError = null
+      })
+      .catch((caught) => {
+        if (token === progressWriteToken && pendingProgress === write && loadedId === write.id) {
+          progressError = caught
+        }
+      })
   }
 
-  function noteProgress(index) {
-    const entry = positions[index]
-    if (!entry || !loadedId) return
+  function noteProgress(progress) {
+    if (!loadedId) return
     clearTimeout(saveTimer)
-    // Both, because the endpoint stores a page position and an opaque locator, and a
-    // client that sent only one would lose whichever the other reader relies on.
-    pending = {
-      page: entry.position,
-      locator: {
-        href: entry.href,
-        locations: {
-          progression: entry.progression,
-          totalProgression: entry.totalProgression,
-          position: entry.position,
-        },
-      },
-    }
+    pendingProgress = { id: loadedId, progress }
     saveTimer = setTimeout(flushProgress, PROGRESS_DEBOUNCE_MILLIS)
   }
 
+  function noteFrameProgress({ progression, atBottom }) {
+    if (!position) return
+    const exactLocatorHref = locatorHref
+    const progress = epubProgressFor(
+      positions,
+      position.href,
+      progression,
+      pageCount,
+      atBottom,
+      exactLocatorHref,
+    )
+    at = progress.index
+    noteProgress(progress)
+    // A fragment is an instruction for this navigation, not a permanent resume pin.
+    // Once the frame reports the restored anchor, later scrolling must persist its
+    // numeric progression against the resource itself.
+    if (exactLocatorHref) {
+      locatorHref = null
+      restoreFragment = null
+    }
+  }
+
   async function load(id) {
+    const token = ++loadToken
     loadController?.abort()
     const controller = new AbortController()
     loadController = controller
+    flushProgress()
+    item = null
+    positions = []
+    previousId = null
+    nextId = null
+    loadedId = ''
     error = null
+    progressError = null
     retryable = false
+    restoreFragment = null
+    locatorHref = null
+
     try {
-      const detailRequest =
-        initialItem?.id === id
-          ? Promise.resolve(initialItem)
-          : readMediaItem(id, { signal: controller.signal })
-      const [detail, order] = await Promise.all([
-        detailRequest,
-        listPositions(id, { signal: controller.signal }),
-      ])
-      if (controller.signal.aborted) return
+      const context =
+        initialContext?.item?.id === id
+          ? initialContext
+          : await readMediaItemReaderContext(id, { signal: controller.signal })
+      if (token !== loadToken || controller.signal.aborted) return
+      const detail = context.item
+      const order = context.positions ?? []
+      const resume = epubResume(detail.progress, order, detail.media?.pageCount)
       item = detail
       positions = order
+      previousId = context.previousId ?? null
+      nextId = context.nextId ?? null
+      at = resume.index
+      restoreProgression = resume.progression
+      restoreKey += 1
       loadedId = id
-      // Positions are one-based and contiguous, so a stored page maps straight onto an
-      // index. resumePage also handles a finished book and a page past the end.
-      at = resumePage(detail.progress, order.length) - 1
     } catch (caught) {
-      if (controller.signal.aborted) return
+      if (token !== loadToken || controller.signal.aborted) return
       error = caught
-      // Only one of the three delivery failures is worth retrying, so the offer is made
-      // only for that one — a retry button on an encrypted file is a button that will
-      // never work.
       retryable = isRetryableDeliveryFailure(caught)
     } finally {
       if (loadController === controller) loadController = null
@@ -148,23 +183,59 @@
   }
 
   $effect(() => {
-    load(params.id)
+    const id = params.id
+    untrack(() => load(id))
   })
 
   function go(delta) {
     const next = at + delta
-    if (next < 0 || next >= positions.length) return
+    if (next < 0) {
+      if (previousId) replace(`/read/${previousId}`)
+      return
+    }
+    if (next >= positions.length) {
+      if (nextId) replace(`/read/${nextId}`)
+      return
+    }
     at = next
-    noteProgress(at)
+    locatorHref = null
+    restoreFragment = null
+    restoreProgression = Number(positions[next].progression) || 0
+    restoreKey += 1
+    noteProgress(
+      epubProgressFor(positions, positions[next].href, restoreProgression, pageCount, false),
+    )
+  }
+
+  function followLink(destination) {
+    const navigation = epubNavigationFor(positions, at, destination)
+    if (!navigation) return false
+    at = navigation.index
+    locatorHref = navigation.href
+    restoreFragment = navigation.fragment
+    restoreProgression = navigation.progression
+    restoreKey += 1
+    noteProgress(
+      epubProgressFor(
+        positions,
+        navigation.resourceHref,
+        navigation.progression,
+        pageCount,
+        false,
+        navigation.href,
+      ),
+    )
+    return true
+  }
+
+  function toggleChrome() {
+    chrome = !chrome
+    if (!chrome) settingsOpen = false
   }
 
   function fromChrome(event) {
     if (event.altKey || event.ctrlKey || event.metaKey) return true
-    const target = event.target
-    return (
-      target instanceof Element &&
-      Boolean(target.closest('input, textarea, select, button, a, [role="dialog"]'))
-    )
+    return Boolean(event.target?.closest?.('input, textarea, select, button, a, [role="dialog"]'))
   }
 
   function onKeydown(event) {
@@ -178,34 +249,45 @@
     go(event.key === 'ArrowRight' ? 1 : -1)
   }
 
+  function leaveFor(event, path) {
+    event.preventDefault()
+    replace(path)
+  }
+
   onMount(() => {
+    const onPageHide = () => flushProgress({ keepalive: true })
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushProgress({ keepalive: true })
+    }
     window.addEventListener('keydown', onKeydown)
-    return () => window.removeEventListener('keydown', onKeydown)
+    window.addEventListener('pagehide', onPageHide)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('keydown', onKeydown)
+      window.removeEventListener('pagehide', onPageHide)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   })
 
   onDestroy(() => {
     flushProgress()
     loadController?.abort()
   })
-
 </script>
 
 <button
-  class="chrome-toggle"
+  class="visually-hidden"
   type="button"
-  data-testid="toggle-chrome"
+  data-testid="keyboard-chrome-toggle"
   aria-expanded={chrome}
   aria-label={$_('reader.controls')}
-  onclick={() => {
-    chrome = !chrome
-    if (!chrome) settingsOpen = false
-  }}
+  onclick={toggleChrome}
 >
-  <SlidersHorizontal size={18} aria-hidden="true" />
+  {$_('reader.controls')}
 </button>
 
 {#if total > 0}
-  <p class="position" role="status" aria-live="polite" data-testid="position">
+  <p class="visually-hidden" role="status" aria-live="polite" data-testid="position">
     {$_('reader.position', { values: { page: at + 1, total } })}
   </p>
 {/if}
@@ -216,6 +298,7 @@
       class="ic"
       href={item?.seriesId ? `#/series/${item.seriesId}` : '#/'}
       aria-label={$_('common.back')}
+      onclick={(event) => leaveFor(event, item?.seriesId ? `/series/${item.seriesId}` : '/')}
     >
       <ChevronLeft size={22} aria-hidden="true" />
     </a>
@@ -238,7 +321,7 @@
         class="ic"
         type="button"
         data-testid="previous-position"
-        disabled={at === 0}
+        disabled={at === 0 && !previousId}
         aria-label={$_('reader.previousItem')}
         onclick={() => go(-1)}
       >
@@ -248,6 +331,7 @@
         class="ic"
         href={item?.seriesId ? `#/series/${item.seriesId}` : '#/'}
         aria-label={$_('common.list')}
+        onclick={(event) => leaveFor(event, item?.seriesId ? `/series/${item.seriesId}` : '/')}
       >
         <List size={20} aria-hidden="true" />
       </a>
@@ -255,7 +339,7 @@
         class="ic"
         type="button"
         data-testid="next-position"
-        disabled={at >= total - 1}
+        disabled={at >= total - 1 && !nextId}
         aria-label={$_('reader.nextItem')}
         onclick={() => go(1)}
       >
@@ -266,28 +350,64 @@
 {/if}
 
 <ErrorNotice {error} onretry={retryable ? () => load(params.id) : null} />
+{#if progressError}
+  <div class="progress-error" style="position: fixed">
+    <ErrorNotice error={progressError} />
+  </div>
+{/if}
 
 {#if source}
-  <div
-    class="page"
-    style={`--epub-width:${columnWidth === 'full' ? '100%' : `${columnWidth}rem`}; --epub-margin:${margin}px`}
-  >
-    <!-- Sandboxed: user-supplied markup, same-origin so it can be styled and read, but
-         with scripts and navigation withheld. The server already sends
-         script-src 'none'; this is the other half of that decision. -->
-    <iframe
-      src={source}
-      title={item?.title ?? $_('reader.chapter')}
-      data-testid="chapter-frame"
-      sandbox="allow-same-origin"
-      referrerpolicy="no-referrer"
-    ></iframe>
+  <div class="page">
+    {#key source}
+      <iframe
+        src={source}
+        title={item?.title ?? $_('reader.chapter')}
+        data-testid="chapter-frame"
+        sandbox="allow-same-origin"
+        referrerpolicy="no-referrer"
+        use:bindEpubFrame={frameOptions}
+      ></iframe>
+    {/key}
   </div>
 {/if}
 
 {#if settingsOpen}
   <Dialog title={$_('common.settings')} onclose={() => (settingsOpen = false)}>
     {#snippet children()}
+      <fieldset>
+        <legend>{$_('reader.fontSize')}</legend>
+        <div class="options">
+          {#each FONT_SIZES as value (value)}
+            <button
+              type="button"
+              class:on={fontSize === value}
+              data-testid={`font-${value}`}
+              aria-pressed={fontSize === value}
+              onclick={() => (fontSize = value)}
+            >
+              {value}%
+            </button>
+          {/each}
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>{$_('reader.lineHeight')}</legend>
+        <div class="options">
+          {#each LINE_HEIGHTS as value (value)}
+            <button
+              type="button"
+              class:on={lineHeight === value}
+              data-testid={`line-height-${value}`}
+              aria-pressed={lineHeight === value}
+              onclick={() => (lineHeight = value)}
+            >
+              {value}
+            </button>
+          {/each}
+        </div>
+      </fieldset>
+
       <fieldset>
         <legend>{$_('reader.displayWidth')}</legend>
         <div class="options">
@@ -305,10 +425,6 @@
         </div>
       </fieldset>
 
-      <p class="typography-note" data-testid="typography-note">
-        {$_('reader.typographyNote')}
-      </p>
-
       <fieldset>
         <legend>{$_('reader.margin')}</legend>
         <div class="options">
@@ -324,39 +440,28 @@
           {/each}
         </div>
       </fieldset>
+
+      <fieldset>
+        <legend>{$_('reader.theme')}</legend>
+        <div class="options">
+          {#each THEMES as value (value)}
+            <button
+              type="button"
+              class:on={theme === value}
+              data-testid={`theme-${value}`}
+              aria-pressed={theme === value}
+              onclick={() => (theme = value)}
+            >
+              {$_(`reader.themes.${value}`)}
+            </button>
+          {/each}
+        </div>
+      </fieldset>
     {/snippet}
   </Dialog>
 {/if}
 
 <style>
-  .chrome-toggle {
-    position: fixed;
-    top: max(var(--space-2), var(--inset-top));
-    right: max(var(--space-2), var(--inset-right));
-    z-index: 22;
-    display: grid;
-    width: var(--touch-target);
-    height: var(--touch-target);
-    place-items: center;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-overlay);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .position {
-    position: fixed;
-    top: max(var(--space-2), var(--inset-top));
-    left: max(var(--space-2), var(--inset-left));
-    z-index: 22;
-    margin: 0;
-    padding: var(--space-1) var(--space-3);
-    border-radius: var(--radius-pill);
-    background: var(--surface-overlay);
-    color: var(--text-muted);
-    font-size: var(--font-xs);
-    font-variant-numeric: tabular-nums;
-  }
   .topbar,
   .bottombar {
     position: fixed;
@@ -367,29 +472,13 @@
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
+    padding-right: max(var(--space-3), calc(var(--inset-right) + var(--space-2)));
+    padding-left: max(var(--space-3), calc(var(--inset-left) + var(--space-2)));
     background: var(--surface-overlay);
   }
   .topbar {
     top: 0;
     padding-top: max(var(--space-2), calc(var(--inset-top) + var(--space-2)));
-    /*
-     * Room for `.chrome-toggle`, which is fixed in this same corner and always rendered so the
-     * chrome keeps a keyboard path. It outranks this bar on `z-index`, so without this padding it
-     * sits on top of the settings button at the bar's right edge: both are painted, both look
-     * clickable, and every click lands on the toggle.
-     *
-     * The identical defect existed in `Reader.svelte` and was found there first by measuring
-     * reachability in a real browser. It is here too because the two readers each carry their own
-     * copy of this chrome CSS — which is the reason a fix to one silently leaves the other broken,
-     * and worth remembering the next time either bar changes.
-     *
-     * Not covered by the suite, and cannot be: this is hit-testing over real layout, which jsdom
-     * does not have. See the "Checking the web UI against a real server" section of
-     * `docs/testing.md`.
-     */
-    padding-right: calc(
-      var(--touch-target) + max(var(--space-2), var(--inset-right)) + var(--space-2)
-    );
     border-bottom: 1px solid var(--line-subtle);
   }
   .bottombar {
@@ -435,25 +524,18 @@
   .page {
     display: flex;
     min-height: 100dvh;
-    justify-content: center;
-    padding: var(--space-6) var(--epub-margin);
   }
-  /* Only the frame box is styleable from here. The chapter inside is a separate
-     document that inherits nothing, so width and margin are real controls and text size
-     is not — the document's own stylesheet decides that, and changing it would need
-     script inside the frame. */
   iframe {
     width: 100%;
-    max-width: var(--epub-width);
-    min-height: calc(100dvh - var(--space-7));
+    min-height: 100dvh;
     border: 0;
     background: var(--surface);
-    color-scheme: dark;
   }
-  .typography-note {
-    margin: 0 0 var(--space-3);
-    color: var(--text-muted);
-    font-size: var(--font-xs);
+  .progress-error {
+    right: max(var(--space-3), var(--inset-right));
+    bottom: calc(var(--touch-target) + max(var(--space-3), var(--inset-bottom)));
+    z-index: 24;
+    max-width: min(28rem, calc(100vw - var(--space-6)));
   }
   fieldset {
     margin: 0 0 var(--space-3);

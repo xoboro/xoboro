@@ -77,24 +77,35 @@ describe('writeProgress', () => {
     expect('locator' in JSON.parse(fetchImpl.mock.calls[0][1].body)).toBe(false)
   })
 
-  it('absorbs a stale write and advances the next timestamp past the server', async () => {
+  it('sends explicit completion and keepalive for a final flush', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(reply(null, 204))
+    globalThis.fetch = fetchImpl
+
+    await writeProgress('m1', { page: 10, completed: false, keepalive: true })
+
+    const sent = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    expect(sent.completed).toBe(false)
+    expect(fetchImpl.mock.calls[0][1].keepalive).toBe(true)
+  })
+
+  it('uses stale response details for the next timestamp without a follow-up read', async () => {
     // A stale response can be an out-of-order request from this same reader. It must
     // not interrupt reading with a modal, and the stored timestamp still has to seed
     // the next write so a clock correction does not make every later update stale.
     vi.spyOn(Date, 'now').mockReturnValue(100)
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(reply({ code: 'stale_progress', message: 'stale' }, 409))
       .mockResolvedValueOnce(
         reply({
-          id: 'm1',
+          code: 'stale_progress',
+          message: 'stale',
           progress: {
             page: 42,
             completed: false,
             readAtMillis: 500,
             updatedAtMillis: 500,
           },
-        }),
+        }, 409),
       )
       .mockResolvedValueOnce(reply(null, 204))
     globalThis.fetch = fetchImpl
@@ -102,7 +113,9 @@ describe('writeProgress', () => {
     expect(await writeProgress('m1', { page: 7 })).toBeNull()
     expect(await writeProgress('m1', { page: 8 })).toBeNull()
 
-    const nextWrite = JSON.parse(fetchImpl.mock.calls[2][1].body)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl.mock.calls.some(([url]) => /\/media-items\/m1$/.test(url))).toBe(false)
+    const nextWrite = JSON.parse(fetchImpl.mock.calls[1][1].body)
     expect(nextWrite.modifiedAtMillis).toBe(501)
   })
 

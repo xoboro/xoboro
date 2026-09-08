@@ -2240,6 +2240,50 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroApiError" }
+  /api/xoboro/v1/media-items/{mediaItemId}/reader-context:
+    parameters:
+      - name: mediaItemId
+        in: path
+        required: true
+        description: Media-item identifier.
+        schema:
+          type: string
+    get:
+      tags: [Media items]
+      operationId: get_media_items_mediaItemId_reader_context
+      description: >-
+        Returns one hydrated media item, adjacent visible item identifiers, and only
+        the bounded manifest appropriate to its media kind. Comic and PDF items carry
+        pages; EPUB items carry spine-derived positions. No media bytes or series list
+        are included.
+      responses:
+        "200":
+          description: Reader context is ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroMediaItemReaderContext" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "403":
+          description: Page streaming permission is required.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "404":
+          description: >-
+            Not found, or not visible to this user. An unauthorised identifier
+            returns 404 rather than 403 so grants cannot be enumerated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
+        "409":
+          description: The media item is not ready or cannot be read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/XoboroApiError" }
   /api/xoboro/v1/media-items/{mediaItemId}/pages:
     parameters:
       - name: mediaItemId
@@ -2296,6 +2340,32 @@ paths:
     get:
       tags: [Media items]
       operationId: get_media_items_mediaItemId_pages_pageNumber
+      description: >-
+        Returns one page. `maxDimension` and `maxWidth` are mutually exclusive,
+        and neither resize option can be combined with `format=source`.
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [jpeg, png, source]
+        - name: maxDimension
+          in: query
+          required: false
+          description: Positive maximum width or height, capped at 4096.
+          schema:
+            type: integer
+            minimum: 1
+        - name: maxWidth
+          in: query
+          required: false
+          description: >-
+            Positive maximum width, capped at 4096. Preserves the full aspect ratio
+            and does not upscale a narrower source.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
           description: Binary content.
@@ -2379,12 +2449,18 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/XoboroMediaProgressRequest" }
+            example:
+              page: 10
+              completed: false
+              deviceId: synthetic-device
+              deviceName: Synthetic reader
+              modifiedAtMillis: 1735689600000
       responses:
         "200":
           description: >-
             Applied. The body is the stored progress, not an echo of the request:
-            `completed` is derived from the page and the analyzed page count, and
-            `updatedAtMillis` is the server's write time rather than the client clock.
+            explicit completion is preserved, and `updatedAtMillis` is the server's
+            write time rather than the client clock.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroMediaProgressResponse" }
@@ -2396,7 +2472,17 @@ paths:
             silently rewind a reader's place.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/XoboroApiError" }
+              schema: { $ref: "#/components/schemas/XoboroStaleProgressResponse" }
+              example:
+                code: stale_progress
+                message: Read progress is not newer than the stored progress
+                progress:
+                  page: 7
+                  completed: false
+                  readAtMillis: 1735689601000
+                  updatedAtMillis: 1735689601100
+                  deviceId: synthetic-device
+                  deviceName: Synthetic reader
         "400":
           description: Invalid request body or query parameter.
           content:
@@ -4146,6 +4232,119 @@ components:
       name: X-API-Key
       description: API key issued through the self-service endpoints.
   schemas:
+    XoboroMediaPage:
+      type: object
+      required: [number, mediaType]
+      properties:
+        number: { type: integer, minimum: 1 }
+        mediaType: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        sizeBytes: { type: integer, format: int64, minimum: 0 }
+    XoboroAuthor:
+      type: object
+      required: [name, role]
+      properties:
+        name: { type: string }
+        role: { type: string }
+    XoboroWebLink:
+      type: object
+      required: [label, url]
+      properties:
+        label: { type: string }
+        url: { type: string }
+    XoboroMedia:
+      type: object
+      required: [status, pageCount]
+      properties:
+        status:
+          type: string
+          enum: [UNKNOWN, ERROR, READY, UNSUPPORTED, OUTDATED]
+        mediaType: { type: string }
+        profile:
+          type: string
+          enum: [DIVINA, PDF, EPUB]
+        pageCount: { type: integer, minimum: 0 }
+        message: { type: string }
+    XoboroMediaItem:
+      type: object
+      required:
+        - id
+        - libraryId
+        - seriesId
+        - type
+        - title
+        - seriesTitle
+        - summary
+        - number
+        - sortNumber
+        - authors
+        - tags
+        - isbn
+        - links
+        - media
+        - fileSize
+        - oneShot
+        - deleted
+        - createdAtMillis
+        - updatedAtMillis
+        - sourceModifiedAtMillis
+      properties:
+        id: { type: string }
+        libraryId: { type: string }
+        seriesId: { type: string }
+        type:
+          type: string
+          enum: [COMIC, NOVEL, BOOK, VIDEO, AUDIO]
+        title: { type: string }
+        seriesTitle: { type: string }
+        summary: { type: string }
+        number: { type: string }
+        sortNumber: { type: number, format: float }
+        releaseDate: { type: string }
+        authors:
+          type: array
+          items: { $ref: "#/components/schemas/XoboroAuthor" }
+        tags:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        isbn: { type: string }
+        links:
+          type: array
+          items: { $ref: "#/components/schemas/XoboroWebLink" }
+        media: { $ref: "#/components/schemas/XoboroMedia" }
+        progress: { $ref: "#/components/schemas/XoboroMediaProgressResponse" }
+        fileSize: { type: integer, format: int64, minimum: 0 }
+        oneShot: { type: boolean }
+        deleted: { type: boolean }
+        createdAtMillis: { type: integer, format: int64 }
+        updatedAtMillis: { type: integer, format: int64 }
+        sourceModifiedAtMillis: { type: integer, format: int64 }
+    XoboroMediaItemReaderContext:
+      type: object
+      required: [item, pages, positions]
+      properties:
+        item:
+          $ref: "#/components/schemas/XoboroMediaItem"
+        previousId:
+          type: string
+          description: >-
+            Previous visible sibling in stable catalogue order. Omitted when the
+            current item is first.
+        nextId:
+          type: string
+          description: >-
+            Next visible sibling in stable catalogue order. Omitted when the
+            current item is last.
+        pages:
+          type: array
+          description: Populated for comic and PDF items; empty for EPUB.
+          items: { $ref: "#/components/schemas/XoboroMediaPage" }
+        positions:
+          type: array
+          description: Populated for EPUB; empty for comic and PDF items.
+          items: { $ref: "#/components/schemas/XoboroMediaPosition" }
     XoboroMediaProgressRequest:
       type: object
       required: [page, deviceId, deviceName, modifiedAtMillis]
@@ -4162,6 +4361,12 @@ components:
             One-based page, within the analyzed page count. A value outside that range is
             `400` rather than being clamped, so a client cannot quietly store a position
             the item does not have.
+        completed:
+          type: boolean
+          description: >-
+            Optional explicit completion state. `false` keeps the final page resumable;
+            `true` is accepted only with the final page. When omitted, the historical
+            `page == pageCount` completion rule is retained.
         locator:
           type: object
           additionalProperties: true
@@ -4196,8 +4401,8 @@ components:
         completed:
           type: boolean
           description: >-
-            Derived from the page and the analyzed page count rather than sent by the
-            client, so it cannot disagree with the position it accompanies.
+            The caller's explicit value when supplied; otherwise derived from the page
+            and analyzed page count. `true` can accompany only the final page.
         readAtMillis:
           type: integer
           format: int64
@@ -4217,6 +4422,20 @@ components:
           additionalProperties: true
           nullable: true
           description: Absent when the reader that wrote this had no locator.
+    XoboroStaleProgressResponse:
+      type: object
+      required: [code, message, progress]
+      description: >-
+        A stale-progress error carrying the row that won conflict ordering, so a client
+        can advance its local clock without a follow-up media-item request.
+      properties:
+        code:
+          type: string
+          enum: [stale_progress]
+        message:
+          type: string
+        progress:
+          $ref: "#/components/schemas/XoboroMediaProgressResponse"
     XoboroMediaPosition:
       type: object
       required: [position, href, mediaType, progression, totalProgression]
@@ -4224,11 +4443,11 @@ components:
         One EPUB reading position. `position` is one-based and ascending order *is*
         reading order, which no other response carries. `href` matches a resource-manifest
         `path` and is what the resource route is asked for verbatim. `totalProgression` is
-        `position / count`, so it reports progress at the end of the position rather than
-        at its start — one position ahead of the Readium convention, which
-        `docs/api/native-v1.md` explains. Spelled out as an array of this schema rather
-        than the bare `type: object` used elsewhere in this file, because being an ordered
-        list is the entire value of this endpoint.
+        `(position - 1) / count`, so it reports progress at the start of the position and
+        follows the Readium convention: the first position is zero and no position reports
+        one. Spelled out as an array of this schema rather than the bare `type: object` used
+        elsewhere in this file, because being an ordered list is the entire value of this
+        endpoint.
       properties:
         position: { type: integer }
         href: { type: string }

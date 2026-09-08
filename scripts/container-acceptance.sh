@@ -113,9 +113,11 @@ Standard library only: this runs inside the container workflow, where adding a P
 would mean a pip install in CI for a check this small.
 """
 
+import json
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 plain_port, context_port, context_path = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -129,6 +131,67 @@ def fetch(port, path):
             return response.status, response.headers.get("Content-Type", ""), response.read()
     except urllib.error.HTTPError as failure:
         return failure.code, "", b""
+
+
+def expected_content_types(path):
+    suffix = urllib.parse.urlparse(path).path.rsplit(".", 1)[-1].lower()
+    return {
+        "css": {"text/css"},
+        "js": {"application/javascript", "text/javascript"},
+        "png": {"image/png"},
+        "svg": {"image/svg+xml"},
+        "webmanifest": {"application/json", "application/manifest+json"},
+    }.get(suffix)
+
+
+def check_asset(port, path, label):
+    asset_status, asset_type, asset_body = fetch(port, path)
+    if asset_status != 200 or not asset_body:
+        failures.append(f"{label}: asset {path} answered {asset_status}")
+        return None
+
+    media_type = asset_type.partition(";")[0].strip().lower()
+    expected_types = expected_content_types(path)
+    if expected_types and media_type not in expected_types:
+        failures.append(
+            f"{label}: asset {path} answered {media_type!r}, expected one of {sorted(expected_types)}"
+        )
+        return None
+
+    print(f"    {path} -> {asset_status} {asset_type} {len(asset_body)}B")
+    return media_type, asset_body
+
+
+def check_manifest_icons(port, manifest_path, manifest_body, label):
+    try:
+        manifest = json.loads(manifest_body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as failure:
+        failures.append(f"{label}: manifest {manifest_path} is not valid JSON: {failure}")
+        return
+
+    icons = manifest.get("icons")
+    if not isinstance(icons, list) or not icons:
+        failures.append(f"{label}: manifest {manifest_path} declares no icons")
+        return
+
+    for icon in icons:
+        source = icon.get("src") if isinstance(icon, dict) else None
+        if not source:
+            failures.append(f"{label}: manifest {manifest_path} contains an icon without src")
+            continue
+        icon_path = urllib.parse.urljoin(manifest_path, source)
+        result = check_asset(port, icon_path, label)
+        if result is None:
+            continue
+        media_type, icon_body = result
+        declared_type = icon.get("type", "").lower()
+        if declared_type and media_type != declared_type:
+            failures.append(
+                f"{label}: manifest icon {icon_path} declares {declared_type!r} "
+                f"but answered {media_type!r}"
+            )
+        if media_type == "image/png" and not icon_body.startswith(b"\x89PNG\r\n\x1a\n"):
+            failures.append(f"{label}: manifest icon {icon_path} is not a valid PNG payload")
 
 
 def check_ui(port, prefix, label):
@@ -153,12 +216,13 @@ def check_ui(port, prefix, label):
     for reference in references:
         if reference.startswith(("http://", "https://", "data:", "#")):
             continue
-        resolved = f"{prefix}/{reference.removeprefix('./').lstrip('/')}"
-        asset_status, asset_type, asset_body = fetch(port, resolved)
-        if asset_status != 200 or not asset_body:
-            failures.append(f"{label}: asset {resolved} answered {asset_status}")
+        resolved = urllib.parse.urljoin(f"{prefix}/", reference)
+        result = check_asset(port, resolved, label)
+        if result is None:
             continue
-        print(f"    {resolved} -> {asset_status} {asset_type} {len(asset_body)}B")
+        media_type, asset_body = result
+        if media_type in {"application/json", "application/manifest+json"}:
+            check_manifest_icons(port, resolved, asset_body, label)
 
 
 check_ui(plain_port, "", "root path")

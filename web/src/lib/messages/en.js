@@ -305,8 +305,10 @@ export default {
     title: 'My library',
     controls: 'Reader controls',
     chapter: 'Chapter',
-    typographyNote:
-      'Text size and line spacing are set by the chapter document itself and cannot be changed from here. Use the browser\u2019s zoom.',
+    fontSize: 'Text size',
+    lineHeight: 'Line spacing',
+    theme: 'Publication theme',
+    themes: { dark: 'Dark', light: 'Light' },
     epubWidths: { '34': 'Narrow', '42': 'Normal', '52': 'Wide', full: 'Full' },
     margin: 'Margin',
     position: 'Page {page} of {total}',

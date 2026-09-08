@@ -12,6 +12,7 @@ import io.xoboro.server.api.XOBORO_API_PREFIX
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.io.TempDir
 
@@ -83,15 +84,24 @@ class XoboroNativeOpenApiContractTest {
     }
   }
 
+  @Test
+  fun `documents total progression at the start of each EPUB position`() {
+    val specification = specificationText()
+    val mediaPositionSchema =
+      specification
+        .substringAfter("    XoboroMediaPosition:\n")
+        .substringBefore("    XoboroApiError:\n")
+
+    assertTrue("`(position - 1) / count`" in mediaPositionSchema)
+    assertFalse("`position / count`" in mediaPositionSchema)
+  }
+
   /**
    * Reads the `paths:` section without a YAML parser. Adding a YAML dependency to a single test
    * would be a poor trade, and the file's own indentation is fixed by the generator that writes it.
    */
   private fun documentedOperations(): Set<String> {
-    val text =
-      requireNotNull(javaClass.classLoader.getResourceAsStream(SPEC_RESOURCE)) {
-        "$SPEC_RESOURCE is missing from the runtime classpath"
-      }.use { it.readBytes().decodeToString() }
+    val text = specificationText()
     val operations = mutableSetOf<String>()
     var path: String? = null
     var insidePaths = false
@@ -107,6 +117,11 @@ class XoboroNativeOpenApiContractTest {
     require(operations.isNotEmpty()) { "no operations parsed from $SPEC_RESOURCE" }
     return operations
   }
+
+  private fun specificationText(): String =
+    requireNotNull(javaClass.classLoader.getResourceAsStream(SPEC_RESOURCE)) {
+      "$SPEC_RESOURCE is missing from the runtime classpath"
+    }.use { it.readBytes().decodeToString() }
 
   private fun registeredOperations(): Set<String> {
     val runtime = openRuntime("openapi-contract.sqlite")

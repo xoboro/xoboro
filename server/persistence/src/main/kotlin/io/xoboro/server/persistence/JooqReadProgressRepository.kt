@@ -3,25 +3,27 @@ package io.xoboro.server.persistence
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadProgressRepository
+import io.xoboro.core.domain.ReadProgressUpsertResult
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesReadProgress
 import io.xoboro.core.domain.UserId
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqReadProgressRepository(
+class JooqReadProgressRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : ReadProgressRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqReadProgressRepository =
+    JooqReadProgressRepository(database, readDsl)
+
   override fun findByBookIdAndUserIdOrNull(
     bookId: BookId,
     userId: UserId,
   ): ReadProgress? =
-    database.dsl
-      .fetchOne(
-        "$SELECT_PROGRESS WHERE book_id = ? AND user_id = ?",
-        bookId.value,
-        userId.value,
-      )?.toProgress()
+    readDsl.findProgressByBookIdAndUserIdOrNull(bookId, userId)
 
   override fun findAllByBookIdsAndUserId(
     bookIds: Collection<BookId>,
@@ -29,7 +31,7 @@ class JooqReadProgressRepository(
   ): List<ReadProgress> {
     if (bookIds.isEmpty()) return emptyList()
     val bindings = bookIds.map { it.value } + userId.value
-    return database.dsl
+    return readDsl
       .fetch(
         """
         $SELECT_PROGRESS
@@ -44,7 +46,7 @@ class JooqReadProgressRepository(
     seriesId: SeriesId,
     userId: UserId,
   ): SeriesReadProgress? =
-    database.dsl
+    readDsl
       .fetchOne(
         """
         SELECT read_progress_series.*,
@@ -67,7 +69,7 @@ class JooqReadProgressRepository(
       .chunked(QUERY_BATCH_SIZE)
       .flatMap { batch ->
         val bindings = batch.map { it.value } + userId.value
-        database.dsl
+        readDsl
           .fetch(
             """
             SELECT read_progress_series.*,
@@ -89,13 +91,17 @@ class JooqReadProgressRepository(
     }
   }
 
-  override fun upsertIfNewer(progress: ReadProgress): Boolean =
+  override fun upsertIfNewer(progress: ReadProgress): ReadProgressUpsertResult =
     database.transaction { transaction ->
-      val changed = transaction.upsertProgressIfNewer(progress)
-      if (changed) {
+      val applied = transaction.upsertProgressIfNewer(progress)
+      if (applied) {
         transaction.recomputeSeriesForBooks(listOf(progress.bookId), progress.userId)
       }
-      changed
+      val stored =
+        requireNotNull(
+          transaction.findProgressByBookIdAndUserIdOrNull(progress.bookId, progress.userId),
+        ) { "Conditional progress upsert must leave a winning persisted row" }
+      ReadProgressUpsertResult(applied = applied, stored = stored)
     }
 
   override fun upsertAll(progresses: Collection<ReadProgress>) {
@@ -172,6 +178,16 @@ class JooqReadProgressRepository(
       progress.updatedAtMillis,
     )
   }
+
+  private fun DSLContext.findProgressByBookIdAndUserIdOrNull(
+    bookId: BookId,
+    userId: UserId,
+  ): ReadProgress? =
+    fetchOne(
+      "$SELECT_PROGRESS WHERE book_id = ? AND user_id = ?",
+      bookId.value,
+      userId.value,
+    )?.toProgress()
 
   private fun DSLContext.upsertProgressIfNewer(progress: ReadProgress): Boolean =
     execute(

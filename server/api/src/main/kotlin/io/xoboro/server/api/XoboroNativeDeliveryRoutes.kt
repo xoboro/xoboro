@@ -36,6 +36,28 @@ fun Route.xoboroNativeDeliveryRoutes(
     ) {
       install(XoboroCookieCsrfProtection)
       route("/media-items") {
+        get("/{mediaItemId}/reader-context") {
+          val user = call.nativeUser()
+          if (UserRole.PAGE_STREAMING !in user.roles) {
+            call.respondPageStreamingForbidden()
+            return@get
+          }
+          val context =
+            catalog.findBookReaderContextByIdOrNull(
+              BookId(call.requiredParameter("mediaItemId")),
+              user.catalogAccess(),
+            )
+          if (context == null) {
+            call.respondNativeNotFound("media_item_not_found", "Media item was not found")
+            return@get
+          }
+          val media = context.item.media
+          if (media == null || media.status != MediaStatus.READY) {
+            call.respondMediaUnusable(media?.status)
+            return@get
+          }
+          call.respond(context.toNativeResponse())
+        }
         get("/{mediaItemId}/pages") {
           val user = call.nativeUser()
           if (UserRole.PAGE_STREAMING !in user.roles) {
@@ -55,15 +77,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             item.media
               ?.pages
               .orEmpty()
-              .map { page ->
-                XoboroMediaPageResponse(
-                  number = page.number,
-                  mediaType = page.mediaType,
-                  width = page.dimension?.width,
-                  height = page.dimension?.height,
-                  sizeBytes = page.fileSize,
-                )
-              },
+              .map { it.toNativeResponse() },
           )
         }
         get("/{mediaItemId}/pages/{pageNumber}") {
@@ -101,6 +115,7 @@ fun Route.xoboroNativeDeliveryRoutes(
               pageNumber,
               request.format,
               request.maximumDimension,
+              request.maximumWidth,
               request.raw,
             )
           if (call.respondNativeNotModified(entityTag, mediaUpdatedAtMillis)) return@get
@@ -190,16 +205,7 @@ fun Route.xoboroNativeDeliveryRoutes(
             item.media
               ?.positions
               .orEmpty()
-              .map { position ->
-                XoboroMediaPositionResponse(
-                  position = position.position,
-                  href = position.href,
-                  mediaType = position.mediaType,
-                  progression = position.progression,
-                  totalProgression = position.totalProgression,
-                  koboSpan = position.koboSpan,
-                )
-              },
+              .map { it.toNativeResponse() },
           )
         }
         get("/{mediaItemId}/resources/{resource...}") {
@@ -247,7 +253,17 @@ fun Route.xoboroNativeDeliveryRoutes(
           }
           call.response.header(
             "Content-Security-Policy",
-            "script-src 'none'; object-src 'none';",
+            "default-src 'none'; " +
+              "script-src 'none'; " +
+              "style-src 'self' 'unsafe-inline'; " +
+              "img-src 'self' data:; " +
+              "font-src 'self' data:; " +
+              "media-src 'self' data:; " +
+              "connect-src 'none'; " +
+              "frame-src 'none'; " +
+              "object-src 'none'; " +
+              "form-action 'none'; " +
+              "base-uri 'none';",
           )
           call.respondNativeContent(stream)
         }
@@ -355,20 +371,39 @@ private fun ApplicationCall.nativePageImageRequest(): PageImageRequest {
       }
       minOf(parsed, MAXIMUM_PAGE_DIMENSION.toLong()).toInt()
     }
-  if (format == "source" && maximumDimension != null) {
-    throw XoboroInvalidQueryException("format=source cannot be combined with maxDimension")
+  val maximumWidth =
+    request.queryParameters["maxWidth"]?.let { value ->
+      val parsed = value.toLongOrNull()
+      if (parsed == null || parsed <= 0) {
+        throw XoboroInvalidQueryException("maxWidth must be a positive integer")
+      }
+      minOf(parsed, MAXIMUM_PAGE_DIMENSION.toLong()).toInt()
+    }
+  if (maximumDimension != null && maximumWidth != null) {
+    throw XoboroInvalidQueryException("maxDimension and maxWidth are mutually exclusive")
+  }
+  if (format == "source" && (maximumDimension != null || maximumWidth != null)) {
+    throw XoboroInvalidQueryException(
+      "format=source cannot be combined with maxDimension or maxWidth",
+    )
   }
   return when (format) {
-    null -> PageImageRequest(maximumDimension = maximumDimension)
+    null ->
+      PageImageRequest(
+        maximumDimension = maximumDimension,
+        maximumWidth = maximumWidth,
+      )
     "jpeg" ->
       PageImageRequest(
         format = PageImageFormat.JPEG,
         maximumDimension = maximumDimension,
+        maximumWidth = maximumWidth,
       )
     "png" ->
       PageImageRequest(
         format = PageImageFormat.PNG,
         maximumDimension = maximumDimension,
+        maximumWidth = maximumWidth,
       )
     "source" -> PageImageRequest(raw = true)
     else -> error("Validated page format was not handled")

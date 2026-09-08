@@ -7,6 +7,7 @@ import {
   viewKey,
 } from '../src/reader/views.js'
 import { createPriorityLoader } from '../src/reader/priorityLoader.js'
+import { maximumPageWidth } from '../src/reader/imageRequest.js'
 
 const PORTRAIT = { number: 1, width: 800, height: 1200 }
 const LANDSCAPE = { number: 2, width: 1600, height: 1200 }
@@ -115,12 +116,44 @@ describe('aspectRatio', () => {
   })
 })
 
+describe('maximumPageWidth', () => {
+  it('uses CSS width and DPR without transforming an already-small source', () => {
+    expect(maximumPageWidth({ sourceWidth: 1600, displayWidth: 400, devicePixelRatio: 3 })).toBe(
+      1200,
+    )
+    expect(maximumPageWidth({ sourceWidth: 800, displayWidth: 400, devicePixelRatio: 3 })).toBeNull()
+  })
+
+  it('doubles split spreads and caps the server request at 4096', () => {
+    expect(
+      maximumPageWidth({
+        sourceWidth: 5000,
+        displayWidth: 400,
+        devicePixelRatio: 3,
+        split: true,
+      }),
+    ).toBe(2400)
+    expect(
+      maximumPageWidth({ sourceWidth: 9000, displayWidth: 2000, devicePixelRatio: 3 }),
+    ).toBe(4096)
+  })
+})
+
 /** A stand-in for an image element, since jsdom never actually loads one. */
 function fakeImage() {
   const listeners = new Map()
+  let source = ''
   return {
-    src: '',
+    requests: [],
+    get src() {
+      return source
+    },
+    set src(value) {
+      source = value
+      if (value) this.requests.push(value)
+    },
     complete: false,
+    naturalWidth: 100,
     addEventListener(name, handler) {
       if (!listeners.has(name)) listeners.set(name, new Set())
       listeners.get(name).add(handler)
@@ -128,11 +161,17 @@ function fakeImage() {
     removeEventListener(name, handler) {
       listeners.get(name)?.delete(handler)
     },
-    removeAttribute() {
-      this.src = ''
+    removeAttribute(name) {
+      if (name === 'src') source = ''
     },
     finishLoad() {
       for (const handler of listeners.get('load') ?? []) handler()
+    },
+    failLoad() {
+      for (const handler of listeners.get('error') ?? []) handler()
+    },
+    handlers(name) {
+      return [...(listeners.get(name) ?? [])]
     },
   }
 }
@@ -145,6 +184,30 @@ function manualSchedule() {
     while (queue.length) queue.shift()()
   }
   return { schedule, flush }
+}
+
+function manualTimers() {
+  let sequence = 0
+  const timers = new Map()
+  return {
+    setTimer(fn) {
+      const id = sequence++
+      timers.set(id, fn)
+      return id
+    },
+    clearTimer(id) {
+      timers.delete(id)
+    },
+    fireNext() {
+      const [id, fn] = timers.entries().next().value ?? []
+      if (id === undefined) throw new Error('no timer to fire')
+      timers.delete(id)
+      fn()
+    },
+    get pending() {
+      return timers.size
+    },
+  }
 }
 
 describe('priority loader', () => {
@@ -201,6 +264,22 @@ describe('priority loader', () => {
     expect(loader.pending).toBe(1)
   })
 
+  it('clears a completed source before queueing a replacement URL', () => {
+    const { schedule, flush } = manualSchedule()
+    const loader = createPriorityLoader({ schedule })
+    const image = fakeImage()
+    const handle = loader.load(image, { url: '/old', priority: 0 })
+    flush()
+    image.finishLoad()
+    flush()
+    expect(image.src).toBe('/old')
+
+    handle.update({ url: '/new', priority: 0 })
+    expect(image.src).toBe('')
+    flush()
+    expect(image.src).toBe('/new')
+  })
+
   it('does not stall on an image the browser had cached', () => {
     // A cached image can be complete the moment src is set, and then no load event ever
     // fires. Without the completeness check the queue would stop on a finished task.
@@ -217,13 +296,40 @@ describe('priority loader', () => {
     expect(next.src).toBe('/next')
   })
 
+  it('retries a cached broken image instead of treating complete as success', () => {
+    const { schedule, flush } = manualSchedule()
+    const timers = manualTimers()
+    const failures = []
+    const loader = createPriorityLoader({
+      schedule,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      timeoutMillis: 25,
+    })
+    const broken = fakeImage()
+    broken.complete = true
+    broken.naturalWidth = 0
+    const next = fakeImage()
+
+    loader.load(broken, { url: '/broken', priority: 0, onFailure: (url) => failures.push(url) })
+    loader.load(next, { url: '/next', priority: 1 })
+    flush()
+
+    expect(broken.requests).toEqual(['/broken', '/broken'])
+    expect(failures).toEqual(['/broken'])
+    expect(next.src).toBe('/next')
+  })
+
   it('drops work queued for a previous media item', () => {
     const { schedule, flush } = manualSchedule()
     const loader = createPriorityLoader({ schedule })
 
     const stale = fakeImage()
     loader.load(stale, { url: '/old', priority: 0 })
+    flush()
+    expect(stale.src).toBe('/old')
     loader.reset()
+    expect(stale.src).toBe('')
 
     const fresh = fakeImage()
     loader.load(fresh, { url: '/new', priority: 0 })
@@ -245,8 +351,64 @@ describe('priority loader', () => {
 
     expect(first.src).toBe('/p1')
     handle.destroy()
+    expect(first.src).toBe('')
     flush()
     // Scrolling a loading page out of view must not block every later page behind it.
     expect(second.src).toBe('/p2')
+  })
+
+  it('retries one timed-out image once, then reports failure and starts the next image', () => {
+    const { schedule, flush } = manualSchedule()
+    const timers = manualTimers()
+    const failures = []
+    const loader = createPriorityLoader({
+      schedule,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      timeoutMillis: 25,
+    })
+    const stalled = fakeImage()
+    const next = fakeImage()
+
+    loader.load(stalled, { url: '/stalled', priority: 0, onFailure: (url) => failures.push(url) })
+    loader.load(next, { url: '/next', priority: 1 })
+    flush()
+
+    timers.fireNext()
+    flush()
+    expect(stalled.requests).toEqual(['/stalled', '/stalled'])
+    expect(failures).toEqual([])
+
+    timers.fireNext()
+    flush()
+    expect(stalled.src).toBe('')
+    expect(failures).toEqual(['/stalled'])
+    expect(next.src).toBe('/next')
+  })
+
+  it('ignores an obsolete callback after an automatic retry has started', () => {
+    const { schedule, flush } = manualSchedule()
+    const timers = manualTimers()
+    const loader = createPriorityLoader({
+      schedule,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      timeoutMillis: 25,
+    })
+    const stalled = fakeImage()
+    const next = fakeImage()
+
+    loader.load(stalled, { url: '/stalled', priority: 0 })
+    loader.load(next, { url: '/next', priority: 1 })
+    flush()
+    const obsoleteLoad = stalled.handlers('load')[0]
+
+    timers.fireNext()
+    flush()
+    obsoleteLoad()
+    flush()
+
+    expect(stalled.requests).toEqual(['/stalled', '/stalled'])
+    expect(next.src).toBe('')
   })
 })

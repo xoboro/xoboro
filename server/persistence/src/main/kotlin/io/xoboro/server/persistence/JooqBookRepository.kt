@@ -9,18 +9,24 @@ import io.xoboro.core.domain.SeriesId
 import org.jooq.DSLContext
 import org.jooq.Record
 
-class JooqBookRepository(
+class JooqBookRepository private constructor(
   private val database: XoboroDatabase,
+  private val readDsl: DSLContext,
 ) : BookRepository {
+  constructor(database: XoboroDatabase) : this(database, database.dsl)
+
+  internal fun readingWith(readDsl: DSLContext): JooqBookRepository =
+    JooqBookRepository(database, readDsl)
+
   override fun findByIdOrNull(id: BookId): Book? =
-    database.dsl.fetchOne("$SELECT_BOOK WHERE id = ?", id.value)?.toBook()
+    readDsl.fetchOne("$SELECT_BOOK WHERE id = ?", id.value)?.toBook()
 
   override fun findAllByIds(ids: Collection<BookId>): List<Book> =
     ids
       .distinct()
       .chunked(QUERY_BATCH_SIZE)
       .flatMap { batch ->
-        database.dsl
+        readDsl
           .fetch(
             "$SELECT_BOOK WHERE id IN (${batch.placeholders()}) ORDER BY id",
             *batch.map { it.value }.toTypedArray(),
@@ -28,7 +34,7 @@ class JooqBookRepository(
       }
 
   override fun findAllByLibraryId(libraryId: LibraryId): List<Book> =
-    database.dsl
+    readDsl
       .fetch(
         "$SELECT_BOOK WHERE library_id = ? ORDER BY relative_uri, id",
         libraryId.value,
@@ -36,7 +42,7 @@ class JooqBookRepository(
       .map { it.toBook() }
 
   override fun findAllBySeriesId(seriesId: SeriesId): List<Book> =
-    database.dsl
+    readDsl
       .fetch(
         "$SELECT_BOOK WHERE series_id = ? ORDER BY number, relative_uri, id",
         seriesId.value,
@@ -48,7 +54,7 @@ class JooqBookRepository(
     relativePath: String,
   ): Book? {
     require(relativePath.isNotBlank()) { "Book relative path must not be blank" }
-    return database.dsl
+    return readDsl
       .fetchOne(
         "$SELECT_BOOK WHERE library_id = ? AND relative_uri = ?",
         libraryId.value,
@@ -90,7 +96,7 @@ class JooqBookRepository(
   }
 
   override fun count(): Long =
-    database.dsl.fetchOne("SELECT count(*) FROM book")?.get(0)?.let { it as Number }?.toLong()
+    readDsl.fetchOne("SELECT count(*) FROM book")?.get(0)?.let { it as Number }?.toLong()
       ?: 0L
 
   private fun DSLContext.insertBook(book: Book) {

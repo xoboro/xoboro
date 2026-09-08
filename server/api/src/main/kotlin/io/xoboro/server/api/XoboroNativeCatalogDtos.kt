@@ -129,6 +129,7 @@ data class XoboroMediaResponse(
 @Serializable
 data class XoboroMediaProgressRequest(
   val page: Int,
+  val completed: Boolean? = null,
   /**
    * An opaque Readium locator, stored as given, for a reader that has one.
    *
@@ -156,6 +157,13 @@ data class XoboroMediaProgressResponse(
   val deviceId: String? = null,
   val deviceName: String? = null,
   val locator: JsonObject? = null,
+)
+
+@Serializable
+data class XoboroStaleProgressResponse(
+  val code: String,
+  val message: String,
+  val progress: XoboroMediaProgressResponse,
 )
 
 @Serializable
@@ -262,15 +270,7 @@ internal fun CatalogBook.toNativeResponse(): XoboroMediaItemResponse =
         pageCount = media?.pageCount ?: 0,
         message = media?.comment,
       ),
-    progress =
-      readProgress?.let {
-        XoboroMediaProgressResponse(
-          page = it.page,
-          completed = it.completed,
-          readAtMillis = it.readAtMillis,
-          updatedAtMillis = it.updatedAtMillis,
-        )
-      },
+    progress = readProgress?.toNativeProgressResponse(),
     fileSize = book.fileSize,
     oneShot = book.oneshot,
     deleted = book.deletedAtMillis != null,

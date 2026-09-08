@@ -331,4 +331,18 @@ describe('facet-backed filter choices', () => {
     expect(Object.keys(choices).sort()).toEqual(['genre', 'language', 'tag'])
     expect(choices.tag).toEqual(['seriesTag-value'])
   })
+
+  it('uses one abort signal for every facet choice request', async () => {
+    const controller = new AbortController()
+    const signals = []
+    globalThis.fetch = vi.fn(async (url, init = {}) => {
+      if (url.includes('/facets')) signals.push(init.signal)
+      return reply([])
+    })
+
+    await readSeriesFilterChoices({ signal: controller.signal })
+
+    expect(signals).toHaveLength(SERIES_FACET_FILTERS.length)
+    expect(signals.every((signal) => signal === controller.signal)).toBe(true)
+  })
 })

@@ -15,11 +15,13 @@ import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.route
+import io.ktor.server.sse.ServerSSESession
 import io.ktor.server.sse.sse
 import io.ktor.sse.ServerSentEvent
 import io.ktor.util.AttributeKey
 import io.ktor.util.cio.ChannelWriteException
 import io.ktor.util.pipeline.PipelineContext
+import io.ktor.utils.io.ClosedWriteChannelException
 import io.xoboro.core.application.UserSessionLifecycle
 import io.xoboro.core.domain.User
 import kotlin.time.Duration
@@ -76,6 +78,7 @@ fun Route.xoboroNativeEventRoutes(
   heartbeatPeriod: Duration = DEFAULT_HEARTBEAT_PERIOD,
   reauthenticationPeriod: Duration = heartbeatPeriod,
   maxStreamLifetime: Duration = DEFAULT_MAX_STREAM_LIFETIME,
+  sendEvent: suspend ServerSSESession.(ServerSentEvent) -> Unit = { send(it) },
 ) {
   require(heartbeatPeriod.isPositive()) { "Native event heartbeat period must be positive" }
   require(reauthenticationPeriod.isPositive()) {
@@ -142,22 +145,24 @@ fun Route.xoboroNativeEventRoutes(
                 if (nextReauthentication.hasPassedNow()) {
                   val current = sessions.authenticate(principal.plainToken)
                   if (current == null || current.invalidatesXoboroStreamFrom(principal.user)) {
-                    send(STREAM_REVOKED_EVENT)
+                    sendEvent(STREAM_REVOKED_EVENT)
                     return@sse
                   }
                   nextReauthentication = TimeSource.Monotonic.markNow() + reauthenticationPeriod
                 }
 
                 if (envelope != null) {
-                  send(envelope.toServerSentEvent())
+                  sendEvent(envelope.toServerSentEvent())
                 } else {
-                  send(ServerSentEvent(comments = HEARTBEAT_COMMENT))
+                  sendEvent(ServerSentEvent(comments = HEARTBEAT_COMMENT))
                 }
               }
             }
           } catch (_: XoboroNativeEventHubClosedException) {
             // The hub already delivered its own final resync-required frame (overflow or
             // superseded) through receive() before closing the channel; nothing more to send.
+          } catch (_: ClosedWriteChannelException) {
+            // The response channel is already closed when a browser replaces this EventSource.
           } catch (_: ChannelWriteException) {
             // EventSource closes the socket whenever navigation replaces this stream. Ktor
             // reports that ordinary client disconnect as a failed write; it is not a server

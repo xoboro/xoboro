@@ -186,7 +186,11 @@ class BookContentService(
       } catch (_: SecurityException) {
         return null
       }
-    if (request.format == null && request.maximumDimension == null) {
+    if (
+      request.format == null &&
+        request.maximumDimension == null &&
+        request.maximumWidth == null
+    ) {
       return OpenBookContent(
         input = ByteArrayInputStream(bytes),
         fileName = page.fileName.substringAfterLast('/'),
@@ -219,7 +223,11 @@ class BookContentService(
           archive.getEntry(page.fileName)
             ?: throw IllegalStateException("Indexed page is missing from the archive")
         require(!entry.isDirectory) { "Indexed page must not be a directory" }
-        if (request.format != null || request.maximumDimension != null) {
+        if (
+          request.format != null ||
+            request.maximumDimension != null ||
+            request.maximumWidth != null
+        ) {
           val converted =
             archive.getInputStream(entry).use { input ->
               convertImage(input, request)
@@ -298,9 +306,17 @@ class BookContentService(
             ) {
               "PDF page dimensions are invalid"
             }
+            val maximumDimension = request.maximumDimension
+            val maximumWidth = request.maximumWidth
             val requestedDpi =
-              request.maximumDimension?.let { maximum ->
-                maximum * PDF_POINTS_PER_INCH / maxOf(widthPoints, heightPoints)
+              when {
+                maximumDimension != null ->
+                  maximumDimension *
+                    PDF_POINTS_PER_INCH /
+                    maxOf(widthPoints, heightPoints)
+                maximumWidth != null ->
+                  maximumWidth * PDF_POINTS_PER_INCH / widthPoints
+                else -> null
               }
             val renderDpi =
               requestedDpi?.coerceIn(MINIMUM_PDF_RENDER_DPI, PDF_RENDER_DPI)
@@ -378,7 +394,11 @@ class BookContentService(
           archive.fileHeaders.firstOrNull { it.fileName == page.fileName }
             ?: throw IllegalStateException("Indexed page is missing from the RAR archive")
         require(!header.isDirectory) { "Indexed page must not be a directory" }
-        if (request.format != null || request.maximumDimension != null) {
+        if (
+          request.format != null ||
+            request.maximumDimension != null ||
+            request.maximumWidth != null
+        ) {
           val converted =
             archive.getInputStream(header).use { input ->
               convertImage(input, request)
@@ -460,6 +480,8 @@ class BookContentService(
     input: InputStream,
     request: PageImageRequest,
   ): ConvertedImage {
+    val maximumDimension = request.maximumDimension
+    val maximumWidth = request.maximumWidth
     val source =
       requireNotNull(ImageIO.createImageInputStream(input)) {
         "Book page is not a supported image"
@@ -476,12 +498,17 @@ class BookContentService(
           }
           val readParameters =
             reader.defaultReadParam.apply {
-              request.maximumDimension
-                ?.let { maximum ->
-                  ceil(maxOf(width, height).toDouble() / maximum)
-                    .toInt()
-                    .coerceAtLeast(1)
-                }?.takeIf { it > 1 }
+              val subsampling =
+                when {
+                  maximumDimension != null ->
+                    ceil(maxOf(width, height).toDouble() / maximumDimension)
+                      .toInt()
+                      .coerceAtLeast(1)
+                  maximumWidth != null -> (width / maximumWidth).coerceAtLeast(1)
+                  else -> 1
+                }
+              subsampling
+                .takeIf { it > 1 }
                 ?.let { subsampling ->
                   setSourceSubsampling(subsampling, subsampling, 0, 0)
                 }
@@ -491,11 +518,18 @@ class BookContentService(
           reader.dispose()
         }
       }
+    val resizeScale =
+      when {
+        maximumDimension != null &&
+          (source.width > maximumDimension || source.height > maximumDimension) ->
+          maximumDimension.toDouble() / maxOf(source.width, source.height)
+        maximumWidth != null && source.width > maximumWidth ->
+          maximumWidth.toDouble() / source.width
+        else -> null
+      }
     val target =
-      request.maximumDimension
-        ?.takeIf { source.width > it || source.height > it }
-        ?.let { maximum ->
-          val scale = maximum.toDouble() / maxOf(source.width, source.height)
+      resizeScale
+        ?.let { scale ->
           val width = maxOf(1, (source.width * scale).toInt())
           val height = maxOf(1, (source.height * scale).toInt())
           BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB).also { resized ->

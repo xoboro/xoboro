@@ -1,80 +1,158 @@
+/** A stalled page cannot occupy the single-flight slot indefinitely. */
+export const IMAGE_LOAD_TIMEOUT_MILLIS = 15_000
+
 /**
  * A single-flight image loader.
  *
- * The reason this exists rather than plain `<img src>`: a browser given fifty image
- * URLs at once opens as many connections as it is willing to and the page the reader
- * is actually looking at competes with forty-nine prefetches. On a long chapter that
- * looks like a slow server. Here exactly one request is in flight, and the queue is
- * re-sorted every time a priority changes, so the current page always goes next.
- *
- * Ported from the base UI, where it was the single most valuable piece of the reader.
+ * The loader owns both its queue and the one active image. Cancelling an action or
+ * resetting for another item removes the active source as well as its listeners and
+ * timer, so obsolete bytes cannot keep downloading behind the next route.
  */
+export function createPriorityLoader({
+  schedule = queueMicrotask,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+  timeoutMillis = IMAGE_LOAD_TIMEOUT_MILLIS,
+} = {}) {
+  if (!Number.isFinite(timeoutMillis) || timeoutMillis <= 0) {
+    throw new Error('timeoutMillis must be a positive finite number')
+  }
 
-export function createPriorityLoader({ schedule = queueMicrotask } = {}) {
-  /** Bumped to invalidate everything queued for a previous media item. */
   let generation = 0
   let queue = []
-  let inFlight = 0
+  let active = null
   let sequence = 0
   let pumpScheduled = false
+
+  function clearAttempt(task, clearSource) {
+    if (task.timer !== null) {
+      clearTimer(task.timer)
+      task.timer = null
+    }
+    if (task.onLoad) task.node.removeEventListener('load', task.onLoad)
+    if (task.onError) task.node.removeEventListener('error', task.onError)
+    task.onLoad = null
+    task.onError = null
+    if (clearSource) task.node.removeAttribute('src')
+  }
+
+  function isCurrent(task, attempt) {
+    return (
+      active === task &&
+      task.generation === generation &&
+      !task.cancelled &&
+      !task.finished &&
+      task.attempt === attempt
+    )
+  }
+
+  function release(task) {
+    if (task.finished) return false
+    task.finished = true
+    if (active === task) active = null
+    pump()
+    return true
+  }
+
+  function succeed(task, attempt) {
+    if (!isCurrent(task, attempt)) return
+    clearAttempt(task, false)
+    const onSuccess = task.onSuccess
+    const url = task.url
+    if (release(task)) onSuccess?.(url)
+  }
+
+  function fail(task, attempt) {
+    if (!isCurrent(task, attempt)) return
+    clearAttempt(task, true)
+    if (task.retries === 0) {
+      task.retries = 1
+      schedule(() => {
+        if (active === task && !task.cancelled && task.generation === generation) startAttempt(task)
+      })
+      return
+    }
+    const onFailure = task.onFailure
+    const url = task.url
+    if (release(task)) onFailure?.(url)
+  }
+
+  function startAttempt(task) {
+    if (active !== task || task.cancelled || task.generation !== generation) return
+    const attempt = ++task.attempt
+    task.onLoad = () => succeed(task, attempt)
+    task.onError = () => fail(task, attempt)
+    task.node.addEventListener('load', task.onLoad)
+    task.node.addEventListener('error', task.onError)
+    task.node.src = task.url
+    task.timer = setTimer(() => fail(task, attempt), timeoutMillis)
+    if (task.node.complete) {
+      schedule(() =>
+        task.node.naturalWidth > 0 ? succeed(task, attempt) : fail(task, attempt),
+      )
+    }
+  }
 
   function pump() {
     if (pumpScheduled) return
     pumpScheduled = true
     schedule(() => {
       pumpScheduled = false
-      // Sorted at pump time, not at insert time: a task's priority changes as the
-      // reader moves, and a queue ordered on insertion would keep serving the page
-      // they have already left.
+      if (active) return
       queue.sort((left, right) => left.priority - right.priority || left.sequence - right.sequence)
-      if (inFlight || queue.length === 0) return
-
       const task = queue.shift()
+      if (!task) return
       if (task.cancelled || task.generation !== generation) {
         pump()
         return
       }
+      active = task
       task.started = true
-      inFlight = 1
-
-      const finish = () => {
-        if (task.finished) return
-        task.finished = true
-        task.node.removeEventListener('load', finish)
-        task.node.removeEventListener('error', finish)
-        // Only release the slot if this task still belongs to the current generation;
-        // otherwise a stale completion would let two loads run at once.
-        if (task.generation === generation) inFlight = 0
-        pump()
-      }
-      task.finish = finish
-      task.node.addEventListener('load', finish)
-      task.node.addEventListener('error', finish)
-      task.node.src = task.url
-      // A cached image can be complete the moment src is set, and then no load event
-      // ever fires — the queue would stall on a task that already finished.
-      if (task.node.complete) schedule(finish)
+      startAttempt(task)
     })
   }
 
-  return {
-    /** Discards everything queued. Used when the reader opens a different item. */
-    reset() {
-      generation += 1
-      queue = []
-      inFlight = 0
-    },
+  function cancel(task) {
+    if (!task || task.finished || task.cancelled) return
+    task.cancelled = true
+    queue = queue.filter((candidate) => candidate !== task)
+    if (active === task) {
+      clearAttempt(task, true)
+      active = null
+    }
+    task.finished = true
+    pump()
+  }
 
-    /** For assertions and diagnostics: how many tasks are waiting. */
+  function clearAll() {
+    generation += 1
+    for (const task of queue) {
+      task.cancelled = true
+      task.finished = true
+    }
+    queue = []
+    if (active) {
+      const task = active
+      active = null
+      task.cancelled = true
+      clearAttempt(task, true)
+      task.finished = true
+    }
+  }
+
+  return {
+    reset: clearAll,
+    destroy: clearAll,
+
     get pending() {
       return queue.length
     },
 
     /**
-     * A Svelte action: attaches an image to the queue and keeps its priority current.
+     * A Svelte action that queues one image and updates it without restarting the same URL.
      *
      * @param {HTMLImageElement} node
-     * @param {{url: string, priority: number}} initial
+     * @param {{url: string, priority: number, onSuccess?: (url: string) => void, onFailure?: (url: string) => void}} initial
      */
     load(node, initial) {
       let task
@@ -84,24 +162,20 @@ export function createPriorityLoader({ schedule = queueMicrotask } = {}) {
           node,
           url: config.url,
           priority: config.priority,
+          onSuccess: config.onSuccess,
+          onFailure: config.onFailure,
           sequence: sequence++,
           generation,
           started: false,
           finished: false,
           cancelled: false,
+          retries: 0,
+          attempt: 0,
+          timer: null,
+          onLoad: null,
+          onError: null,
         }
         queue.push(task)
-        pump()
-      }
-
-      function cancel() {
-        if (!task || task.finished || task.cancelled) return
-        task.cancelled = true
-        if (task.started) {
-          task.node.removeEventListener('load', task.finish)
-          task.node.removeEventListener('error', task.finish)
-          if (task.generation === generation) inFlight = 0
-        }
         pump()
       }
 
@@ -109,18 +183,20 @@ export function createPriorityLoader({ schedule = queueMicrotask } = {}) {
 
       return {
         update(config) {
-          // Same image, new priority: reprioritise instead of restarting, or scrolling
-          // would cancel and re-request every visible page.
           if (task.url === config.url) {
             task.priority = config.priority
+            task.onSuccess = config.onSuccess
+            task.onFailure = config.onFailure
             pump()
             return
           }
-          cancel()
+          cancel(task)
           node.removeAttribute('src')
           enqueue(config)
         },
-        destroy: cancel,
+        destroy() {
+          cancel(task)
+        },
       }
     },
   }

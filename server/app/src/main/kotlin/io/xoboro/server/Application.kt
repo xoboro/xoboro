@@ -22,6 +22,8 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.sse.SSE
+import io.ktor.util.cio.ChannelWriteException
+import io.ktor.utils.io.ClosedWriteChannelException
 import io.xoboro.compatibility.komga.api.KepubContentAccess
 import io.xoboro.compatibility.komga.api.KomgaSseEventHub
 import io.xoboro.compatibility.komga.api.KomgaSseUserSnapshot
@@ -454,6 +456,13 @@ fun Application.xoboroModule(
         code = "invalid_query",
         message = requireNotNull(cause.message),
       )
+    }
+    exception<ClosedWriteChannelException> { _, _ ->
+      // A streaming response can outlive its browser. The response is already committed, so an
+      // ordinary disconnect is complete: do not log it as a server failure or attempt a 500 body.
+    }
+    exception<ChannelWriteException> { _, _ ->
+      // Netty can wrap the same closed response in its CIO write exception.
     }
     exception<Throwable> { call, cause ->
       call.application.environment.log.error("Unhandled request failure", cause)

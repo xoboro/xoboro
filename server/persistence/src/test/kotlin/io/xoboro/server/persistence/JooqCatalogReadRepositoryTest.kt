@@ -16,6 +16,7 @@ import io.xoboro.core.domain.AlternateTitle
 import io.xoboro.core.domain.Author
 import io.xoboro.core.domain.Book
 import io.xoboro.core.domain.BookId
+import io.xoboro.core.domain.BookRepository
 import io.xoboro.core.domain.ContentRestrictions
 import io.xoboro.core.domain.CollectionId
 import io.xoboro.core.domain.Library
@@ -126,6 +127,90 @@ class JooqCatalogReadRepositoryTest {
           ?.value,
       )
       assertNull(catalog.findPreviousBookOrNull(BookId("book-1"), CatalogAccess()))
+    }
+  }
+
+  @Test
+  fun `reader context resolves stable visible sibling ids and hydrates only the current book`() {
+    withCatalog("reader-context") { database ->
+      val metadata = JooqBookMetadataRepository(database)
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-1"))).copy(numberSort = 2F),
+      )
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-2"))).copy(numberSort = 2F),
+      )
+      metadata.upsert(
+        requireNotNull(metadata.findByBookIdOrNull(BookId("book-3"))).copy(numberSort = 1F),
+      )
+      val storedBooks = JooqBookRepository(database)
+      val recordingBooks =
+        object : BookRepository by storedBooks {
+          val hydratedIds = mutableListOf<List<BookId>>()
+
+          override fun findAllByIds(ids: Collection<BookId>): List<Book> {
+            hydratedIds += ids.toList()
+            return storedBooks.findAllByIds(ids)
+          }
+        }
+      val catalog = JooqCatalogReadRepository(database, books = recordingBooks)
+
+      val context =
+        requireNotNull(
+          catalog.findBookReaderContextByIdOrNull(BookId("book-1"), CatalogAccess()),
+        )
+
+      assertEquals(BookId("book-1"), context.item.book.id)
+      assertEquals(BookId("book-3"), context.previousId)
+      assertEquals(BookId("book-2"), context.nextId)
+      assertEquals(listOf(listOf(BookId("book-1"))), recordingBooks.hydratedIds)
+      assertNull(
+        catalog.findBookReaderContextByIdOrNull(
+          BookId("book-1"),
+          CatalogAccess(libraryIds = setOf(LibraryId("library-hidden"))),
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `reader context never returns an item moved outside the caller access during hydration`() {
+    withCatalog("reader-context-concurrent-move") { database ->
+      val hiddenLibraryId = LibraryId("library-hidden")
+      JooqLibraryRepository(database).insert(
+        Library(
+          id = hiddenLibraryId,
+          name = "Synthetic hidden library",
+          root = SourceLocation("local", "file:///synthetic-hidden"),
+          createdAtMillis = 1,
+        ),
+      )
+      val storedBooks = JooqBookRepository(database)
+      val movingBooks =
+        object : BookRepository by storedBooks {
+          private var moved = false
+
+          override fun findAllByIds(ids: Collection<BookId>): List<Book> {
+            if (!moved) {
+              moved = true
+              database.dsl.execute(
+                "UPDATE book SET library_id = ? WHERE id = ?",
+                hiddenLibraryId.value,
+                "book-1",
+              )
+            }
+            return storedBooks.findAllByIds(ids)
+          }
+        }
+      val catalog = JooqCatalogReadRepository(database, books = movingBooks)
+
+      val context =
+        catalog.findBookReaderContextByIdOrNull(
+          BookId("book-1"),
+          CatalogAccess(libraryIds = setOf(LibraryId("library-1"))),
+        )
+
+      assertNull(context)
     }
   }
 

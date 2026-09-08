@@ -7,7 +7,8 @@ not reproduce Komga DTOs or endpoint shapes.
 This document covers authentication, catalog discovery, page and resource
 discovery, page and resource delivery, original file and archive download, and read progress
 mutation, settings, authentication activity, history, and the native event
-stream. OpenAPI contracts remain pending.
+stream. The OpenAPI contract is served verbatim from the checked-in native-v1
+description, and its method/path surface is drift-tested against the application.
 
 ## Errors
 
@@ -24,7 +25,8 @@ Clients must branch on `code`, not the human-readable `message`. Malformed JSON
 returns `400 invalid_request`, missing or invalid authentication returns
 `401 authentication_required`, and login throttling returns
 `429 rate_limit_exceeded` with a `Retry-After` header.
-Read progress conflicts return `409 stale_progress`.
+Read progress conflicts return `409 stale_progress` with the stored native
+progress embedded as `progress`.
 
 ## Session transports
 
@@ -327,6 +329,75 @@ delivery require the `PAGE_STREAMING` role; original file download requires
 `FILE_DOWNLOAD`. Page numbers are one-based. There is no `zero_based` query
 parameter on the native surface.
 
+`GET /api/xoboro/v1/media-items/{mediaItemId}/reader-context` returns the
+hydrated current item, optional adjacent item identifiers, and one bounded
+manifest. Comic and PDF responses populate `pages` and return empty
+`positions`; EPUB responses populate `positions` and return empty `pages`.
+The item's progress is the complete stored response, including its opaque
+locator and device identity when present. Authorized selection and current-item
+hydration run in one database transaction snapshot; a concurrent catalog move
+cannot make authorization and returned details describe different states.
+Adjacent values are identifiers rather than embedded media items, and the
+response includes no page bytes, EPUB resource bytes, artwork, or series list.
+`previousId` is omitted for the first visible item and `nextId` is omitted for
+the last visible item; production JSON serialization does not emit those keys
+with null values.
+
+For example:
+
+```http
+GET /api/xoboro/v1/media-items/item-1/reader-context
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "item": {
+    "id": "item-1",
+    "libraryId": "library-1",
+    "seriesId": "series-1",
+    "type": "COMIC",
+    "title": "Synthetic chapter 1",
+    "seriesTitle": "Synthetic series",
+    "summary": "",
+    "number": "1",
+    "sortNumber": 1.0,
+    "authors": [],
+    "tags": [],
+    "isbn": "",
+    "links": [],
+    "media": {
+      "status": "READY",
+      "mediaType": "application/zip",
+      "profile": "DIVINA",
+      "pageCount": 2
+    },
+    "fileSize": 123456,
+    "oneShot": false,
+    "deleted": false,
+    "createdAtMillis": 1,
+    "updatedAtMillis": 1,
+    "sourceModifiedAtMillis": 1
+  },
+  "previousId": "item-0",
+  "nextId": "item-2",
+  "pages": [
+    {
+      "number": 1,
+      "mediaType": "image/jpeg",
+      "width": 1600,
+      "height": 6000,
+      "sizeBytes": 345678
+    }
+  ],
+  "positions": []
+}
+```
+
+A missing or unauthorized item returns `404 media_item_not_found`. An item
+whose analyzed media is not ready returns `409 media_not_ready`; unsupported
+media returns `409 media_unsupported`.
+
 `GET /api/xoboro/v1/media-items/{mediaItemId}/pages` returns the indexed page
 manifest as a JSON list. Each entry contains its one-based `number`,
 `mediaType`, optional `width` and `height`, and optional raw `sizeBytes`.
@@ -339,10 +410,16 @@ page bytes. It accepts:
   kind and returns the stored or embedded page bytes without re-encoding.
 - `maxDimension=<positive integer>`, capped at 4096. It can be used without an
   explicit format, or with `jpeg` or `png`.
+- `maxWidth=<positive integer>`, capped at 4096. It preserves the complete
+  height-to-width ratio and never upscales a source that is already narrower.
+  For example, requesting
+  `/api/xoboro/v1/media-items/item-1/pages/1?maxWidth=800` for a `1600x6000`
+  page returns an `800x3000` image.
 
-`format=source` cannot be combined with `maxDimension`. The endpoint does not
-perform `Accept`-header format negotiation and deliberately has no
-`contentNegotiation` query parameter.
+`maxWidth` and `maxDimension` are mutually exclusive. `format=source` cannot
+be combined with either resize option. The endpoint does not perform
+`Accept`-header format negotiation and deliberately has no `contentNegotiation`
+query parameter.
 
 Successful page responses include a weak metadata-derived `ETag`,
 `Last-Modified` from the indexed media update timestamp, and
@@ -412,9 +489,12 @@ CBZ/DiViNa content is represented by its pages and has no separate resources.
 Resource resolution is an exact archive-path index lookup, not a filesystem
 join, so path traversal is structurally impossible.
 
-Successful resource responses set
-`Content-Security-Policy: script-src 'none'; object-src 'none';` because EPUB
-resources are user-supplied same-origin content. They do not set
+Successful resource responses set a closed-by-default policy:
+`default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none';`.
+EPUB resources are user-supplied same-origin content: their own inline and
+same-origin styles plus same-origin/data images, fonts, and media may render,
+while scripts, network connections, nested frames, plugins, forms, and base-URL
+rewrites are blocked. They do not set
 `Content-Disposition`, since resources can be iframe subresources. Resource
 bytes use the same weak metadata-derived ETag, private conditional caching,
 and early 304 behavior as page bytes. They do not support byte ranges.
@@ -523,6 +603,7 @@ that same identifier.
 ```json
 {
   "page": 4,
+  "completed": false,
   "locator": {
     "href": "chapter-2.xhtml",
     "locations": {
@@ -535,11 +616,51 @@ that same identifier.
 }
 ```
 
-`locator` is an opaque JSON object stored with the page position.
+`locator` is an optional opaque JSON object stored with the page position. A
+comic sends the required page and omits `locator`; an EPUB sends both.
+`completed` is optional. An explicit `false` is authoritative even on the final
+page, allowing a split spread or scrolling view to remain resumable until its
+final logical view is reached. An explicit `true` is accepted only with the
+final page. Omitting the field preserves the historical behaviour where
+`page == pageCount` marks the item complete.
 `modifiedAtMillis` is the client's own clock and is the sole conflict-ordering
 key; the server does not substitute its own clock. A value older than or equal
 to the currently stored progress returns `409 stale_progress` without applying
-the write.
+the write. The conflict body is self-contained:
+
+```json
+{
+  "code": "stale_progress",
+  "message": "Read progress is not newer than the stored progress",
+  "progress": {
+    "page": 7,
+    "completed": false,
+    "readAtMillis": 1735689601000,
+    "updatedAtMillis": 1735689601100,
+    "deviceId": "synthetic-device",
+    "deviceName": "Synthetic reader",
+    "locator": {
+      "href": "chapter-3.xhtml",
+      "locations": {
+        "position": 3,
+        "progression": 0.5,
+        "totalProgression": 0.625
+      }
+    }
+  }
+}
+```
+
+The conflict embeds the complete stored winner, including locator and device
+fields. Clients use `progress.readAtMillis` to advance their next write clock;
+no follow-up media-item read is required. A final browser lifecycle flush can
+use Fetch `keepalive` while retaining the same same-origin credential transport.
+
+`DELETE /api/xoboro/v1/media-items/{mediaItemId}/progress` clears the caller's
+progress idempotently. `PUT /api/xoboro/v1/series/{seriesId}/progress` marks all
+visible items in a series read, and `DELETE` on the same series route clears
+them. These are the reader's explicit item- and series-level read/unread
+controls; they do not require a fabricated page or locator.
 
 The endpoint supports the same cookie and bearer transports, including the
 same-origin requirements for cookie mutations, described in

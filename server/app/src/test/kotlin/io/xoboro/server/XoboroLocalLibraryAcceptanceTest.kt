@@ -18,27 +18,26 @@ import io.xoboro.server.api.SessionResponse
 import io.xoboro.server.api.SessionTransport
 import io.xoboro.server.api.SetupRequest
 import io.xoboro.server.api.XOBORO_API_PREFIX
-import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroLibraryAdministrationRequest
 import io.xoboro.server.api.XoboroLibraryResponse
 import io.xoboro.server.api.XoboroLibrarySourceRequest
 import io.xoboro.server.api.XoboroMediaItemResponse
 import io.xoboro.server.api.XoboroMediaPositionResponse
 import io.xoboro.server.api.XoboroMediaProgressRequest
+import io.xoboro.server.api.XoboroStaleProgressResponse
 import io.xoboro.server.api.XoboroPageResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.io.TempDir
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import org.junit.jupiter.api.io.TempDir
 
 /**
  * Drives a real library tree through the native API only, from an unclaimed server to read progress
@@ -170,7 +169,11 @@ class XoboroLocalLibraryAcceptanceTest {
         assertEquals(HttpStatusCode.Conflict, stale.status)
         // An older write is refused with a code the client can branch on, not swallowed: two devices
         // syncing out of order must not silently rewind the reader's place.
-        assertEquals("stale_progress", stale.body<XoboroApiError>().code)
+        val staleBody = stale.body<XoboroStaleProgressResponse>()
+        assertEquals("stale_progress", staleBody.code)
+        assertEquals(2, staleBody.progress.page)
+        assertEquals(true, staleBody.progress.completed)
+        assertEquals(2_000, staleBody.progress.readAtMillis)
       }
     }
 
@@ -203,6 +206,7 @@ class XoboroLocalLibraryAcceptanceTest {
           items.single { it.id == mediaItemIds[1] }.progress
             ?: error("read progress should survive a restart")
         assertEquals(2, restored.page)
+        assertNull(restored.locator, "comic progress must survive without a fabricated locator")
 
         // A rescan of an unchanged tree must not disturb the catalog. This is the deletion-safety
         // property stated positively: nothing is removed or re-created just because a scan ran again.
@@ -542,7 +546,6 @@ class XoboroLocalLibraryAcceptanceTest {
       jsonBody(
         XoboroMediaProgressRequest(
           page = page,
-          locator = JsonObject(mapOf("page" to JsonPrimitive(page))),
           deviceId = "synthetic-device",
           deviceName = "Synthetic device",
           modifiedAtMillis = modifiedAtMillis,

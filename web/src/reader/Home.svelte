@@ -13,7 +13,7 @@
    * on a 15,000-item catalog, so "ask again in five seconds and see if the numbers
    * moved" is both expensive and unrelated to when the work actually lands.
    */
-  import { onDestroy, onMount } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
   import {
     Languages,
     Layers3,
@@ -32,6 +32,7 @@
   import { eventHub } from '../lib/eventHub.js'
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
   import { createHomeRefreshCoordinator } from './homeRefreshCoordinator.js'
+  import { readHomeState, writeHomeState } from './homeState.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
@@ -166,13 +167,30 @@
   let searchField = $state(null)
 
   function openAdvanced() {
+    if (!query.trim()) catalogScrollY = window.scrollY
+    clearTimeout(searchTimer)
+    searchSerial += 1
+    searchController?.abort()
+    searchController = null
+    searching = false
+    submittedQuery = query
     advancedOpen = true
     // Focus follows the disclosure, because the control that opened it may be a screen away
     // from the field it belongs to - and the first thing a reader does next is type.
     searchField?.focus()
   }
 
+  function closeAdvanced() {
+    clearTimeout(searchTimer)
+    submittedQuery = query
+    advancedOpen = false
+    if (!query.trim()) return
+    searching = true
+    runSearch(query)
+  }
+
   async function runSearch(term) {
+    if (advancedOpen) return
     const trimmed = term.trim()
     if (!trimmed) {
       // Bumped so an in-flight request cannot deliver into an empty field.
@@ -224,10 +242,27 @@
   let seriesSerial = 0
   let seriesController = null
   let refreshCoordinator = null
+  let restoreScrollY = null
+  /** The catalog's position, kept separate while either search surface owns the document. */
+  let catalogScrollY = 0
+
+  function saveHomeState(captureDocumentScroll = true) {
+    if (captureDocumentScroll && !advancedOpen && !query.trim()) {
+      catalogScrollY = window.scrollY
+    }
+    writeHomeState(user?.id ?? null, libraryId, { page: seriesPage, scrollY: catalogScrollY })
+  }
+
+  function setScroll(scrollY) {
+    const scrolling = document.scrollingElement ?? document.documentElement
+    scrolling.scrollTop = scrollY
+    if (document.body !== scrolling) document.body.scrollTop = scrollY
+  }
 
   // A reader can navigate away mid-word or with a request in flight. Everything this
   // component owns is cancelled together, so none of it can deliver into the next screen.
   onDestroy(() => {
+    saveHomeState()
     clearTimeout(searchTimer)
     searchSerial += 1
     shelvesSerial += 1
@@ -239,19 +274,30 @@
   })
 
   function onQuery(event) {
-    query = event.target.value
+    const term = event.target.value
+    if (!advancedOpen && !query.trim() && term.trim()) catalogScrollY = window.scrollY
+    query = term
     clearTimeout(searchTimer)
-    const term = query
     // Cleared immediately rather than after the debounce: a reader who empties the field
     // is asking for their shelves back now, not in a third of a second.
     if (!term.trim()) {
       submittedQuery = ''
-      runSearch('')
+      if (!advancedOpen) runSearch('')
       return
+    }
+    if (!advancedOpen) {
+      // The live query owns validity immediately, even though its request waits for the
+      // debounce. Otherwise the preceding answer can land during these 300 ms and make
+      // the new query look finished before its request has even started.
+      searchSerial += 1
+      searchController?.abort()
+      searchController = null
+      searchError = null
+      searching = true
     }
     searchTimer = setTimeout(() => {
       submittedQuery = term
-      runSearch(term)
+      if (!advancedOpen) runSearch(term)
     }, SEARCH_DEBOUNCE_MILLIS)
   }
 
@@ -331,6 +377,10 @@
     const controller = new AbortController()
     seriesController = controller
     const requestedLibraryId = libraryId
+    // This is the page the screen owns as soon as navigation starts. An event can
+    // supersede the request before it answers; its refresh must repeat this page,
+    // not fall back to the last page that happened to finish rendering.
+    seriesPage = page
     seriesBusy = true
     try {
       const answer = await listSeries({
@@ -357,6 +407,16 @@
         allSeries = answer
       }
       error = null
+      await tick()
+      if (restoreScrollY !== null) {
+        const scrollY = restoreScrollY
+        restoreScrollY = null
+        catalogScrollY = scrollY
+        setScroll(scrollY)
+        saveHomeState(false)
+      } else {
+        saveHomeState()
+      }
     } catch (caught) {
       if (serial === seriesSerial && caught?.name !== 'AbortError') error = caught
     } finally {
@@ -418,6 +478,10 @@
     // A different library is a different set, so the page number the reader was on means
     // nothing in it - page 7 of one library is often past the end of another.
     seriesPage = 0
+    restoreScrollY = null
+    catalogScrollY = 0
+    writeHomeState(user?.id ?? null, next, { page: 0, scrollY: 0 })
+    setScroll(0)
     writePreference(user?.id ?? null, null, Preference.LIBRARY, next ?? '')
     refresh()
     if (query.trim()) {
@@ -431,12 +495,18 @@
     // null here, but only the former survives a reload as a decision.
     const remembered = readPreference(user?.id ?? null, null, Preference.LIBRARY, '')
     libraryId = remembered === '' ? null : remembered
+    const rememberedState = readHomeState(user?.id ?? null, libraryId)
+    if (rememberedState) {
+      seriesPage = rememberedState.page
+      restoreScrollY = rememberedState.scrollY
+      catalogScrollY = rememberedState.scrollY
+    }
     loadLibraries()
     refresh()
     refreshCoordinator =
       createHomeRefreshCoordinator({
         selectedLibrary: () => libraryId,
-        searchActive: () => query.trim().length > 0,
+        searchActive: () => !advancedOpen && query.trim().length > 0,
         refreshCatalog: refresh,
         refreshShelves: loadShelves,
         refreshSearch: () => runSearch(query),
@@ -538,7 +608,7 @@
     aria-controls="home-advanced"
     aria-label={$_('search.filters.show')}
     title={$_('search.filters.show')}
-    onclick={() => (advancedOpen ? (advancedOpen = false) : openAdvanced())}
+    onclick={() => (advancedOpen ? closeAdvanced() : openAdvanced())}
   >
     <SlidersHorizontal size={18} aria-hidden="true" />
   </button>
@@ -549,7 +619,7 @@
        narrows is what the field asked for, and a reader tabbing out of the field reaches the
        scopes and the facets before anything else. -->
   <div id="home-advanced" class="advanced-surface" data-testid="home-advanced">
-    <AdvancedSearch query={submittedQuery} open={true} />
+    <AdvancedSearch query={submittedQuery} open={true} {libraries} />
   </div>
 {/if}
 
@@ -557,33 +627,36 @@
   <!-- The quick results and the shelves both stand down while the scoped surface is open:
        three answers to the same question stacked down one screen is not three times the help. -->
 {:else if searchActive}
-  <ErrorNotice error={searchError} onretry={() => runSearch(query)} />
-  <!-- Works, and only works. The chapter section that used to sit under this one is gone: see
-       the note on `results` for the 777-of-789 measurement that made it a second copy of this
-       list rather than an addition to it. -->
-  {#if results}
-    {#if results.length === 0}
-      <p class="waiting" data-testid="home-search-empty" role="status">
-        {$_('search.results.noResults')}
-      </p>
-    {:else}
-      <ul class="grid" data-testid="home-search-results">
-        {#each results as found (found.id)}
-          <li>
-            <a href={`#/series/${found.id}`}>
-              <Cover src={artworkUrl('series', found.id)} />
-              <span class="label">{found.title ?? found.name}</span>
-              <span class="sub">
-                {$_('reader.items', { values: { count: found.mediaItemCount ?? 0 } })}
-              </span>
-            </a>
-          </li>
-        {/each}
-      </ul>
+  <section data-testid="home-quick-search" aria-busy={searching}>
+    <ErrorNotice error={searchError} onretry={() => runSearch(query)} />
+    {#if searching}
+      <p class="waiting" role="status">{$_('common.loading')}</p>
     {/if}
-  {:else if searching}
-    <p class="waiting" role="status">{$_('common.loading')}</p>
-  {/if}
+    <!-- Works, and only works. The chapter section that used to sit under this one is gone: see
+         the note on `results` for the 777-of-789 measurement that made it a second copy of this
+         list rather than an addition to it. -->
+    {#if results}
+      {#if results.length === 0}
+        <p class="waiting" data-testid="home-search-empty" role="status">
+          {$_('search.results.noResults')}
+        </p>
+      {:else}
+        <ul class="grid" data-testid="home-search-results">
+          {#each results as found (found.id)}
+            <li>
+              <a href={`#/series/${found.id}`}>
+                <Cover src={artworkUrl('series', found.id)} />
+                <span class="label">{found.title ?? found.name}</span>
+                <span class="sub">
+                  {$_('reader.items', { values: { count: found.mediaItemCount ?? 0 } })}
+                </span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </section>
 {:else}
 <nav class="library" aria-label={$_('catalog.navigation')}>
   <!-- The one entry here that is not a place: searching happens on this screen, so this opens

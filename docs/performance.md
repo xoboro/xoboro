@@ -67,6 +67,31 @@ total wall clock as separate numbers. A total dominated by backoff sleep measure
 the harness, not the server — see `api.first_series_read_after_scan`, which once
 reported 1,257 ms for a request whose real cost was 36.9 ms.
 
+## Reader request-count budget
+
+Reader completion work is guarded by request counts, not an unmeasured wall-clock
+claim. Reproduce the current contract with:
+
+```text
+cd web
+NODE_OPTIONS=--no-experimental-webstorage npm test -- \
+  tests/Reader.test.js tests/EpubReader.test.js \
+  tests/ReaderHome.test.js tests/ReaderSearch.test.js tests/SeriesScreen.test.js
+```
+
+The routed comic/PDF test observes exactly **one JSON GET**, to
+`/media-items/{id}/reader-context`, before the first page image URL is present. The
+routed and directly mounted EPUB tests likewise observe exactly **one JSON GET**,
+with no separate item, pages, positions, previous, or next request. Image bytes are
+the subsequent media request and are intentionally not counted as JSON context.
+
+The same focused suite asserts one active owner for a search query, cancellation of
+obsolete quick/listing/facet requests, server paging beyond item 100, and a single
+saved-page request before Home restores scroll. These are deterministic network and
+state counts; no browser navigation or page-paint timing was collected in this pass,
+so none is inferred here. Production mobile-browser timing remains release
+acceptance work.
+
 ## Decision: no cursor pagination
 
 **Measured and declined.** Cursor pagination exists to fix offset pagination's
