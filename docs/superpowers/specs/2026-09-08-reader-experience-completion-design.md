@@ -57,6 +57,11 @@ artwork, or unbounded series list is included. A missing or unauthorized item re
 404. An analyzed item whose media is not ready returns the existing delivery conflict, so
 the route-level retry affordance is useful rather than rendering an empty reader.
 
+The catalog repository returns a purpose-built projection containing one hydrated current
+item and adjacent identifiers selected with the existing stable sibling order and access
+filter. It must not implement the endpoint by hydrating the current, previous, and next
+items through three public reads.
+
 `ReaderRoute` owns this request and passes the whole context to the selected child. Comic
 and EPUB readers retain a direct-load fallback for component tests and reuse, but routed
 entry performs no item, manifest, or adjacent-item follow-up reads.
@@ -112,6 +117,13 @@ locator's in-resource `progression`, derives `totalProgression` across the spine
 completion only at the bottom of the final resource. Moving beyond either end replaces the
 route with the adjacent media item when present.
 
+An EPUB position count is not its analyzed page count: positions are generated from
+uncompressed content spans while page count is a separate publication mapping. The client
+therefore never sends raw `position` as the progress page. It resumes by locator href/
+position when present and otherwise maps position to a valid page using the same bounded
+ratio as the server protocols. Every write keeps `page` inside `1..media.pageCount` while
+the locator remains the precise EPUB location.
+
 Reader chrome is page-first like the comic reader: no permanent visual toggle or position
 pill. A tap in the frame toggles the existing bars, and the position announcement remains a
 visually hidden live region. Parent-injected style variables make font size, line height,
@@ -140,10 +152,12 @@ durable preference.
 
 ## Event-stream disconnects
 
-The production StatusPages boundary recognizes channel-close failures before the generic
-Throwable handler. It neither logs them as unhandled nor attempts a second response. The
-route still closes its subscription via `use`; authentication, capacity, replay, and
-revocation behaviour remain unchanged.
+The route recognizes `ClosedWriteChannelException` at the SSE send boundary and retains
+the engine-variant `ChannelWriteException` handling. The production StatusPages boundary
+also recognizes both narrow channel-close types before the generic Throwable handler. It
+neither logs them as unhandled nor attempts a second response. The route still closes its
+subscription via `use`; authentication, capacity, replay, and revocation behaviour remain
+unchanged.
 
 ## Testing and acceptance
 
