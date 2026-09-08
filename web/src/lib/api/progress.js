@@ -14,11 +14,9 @@ import { readMediaItem } from './catalog.js'
  * writes within the same millisecond would see the second rejected. The clock below is
  * therefore strictly increasing rather than a bare `Date.now()`.
  *
- * **A conflict is a user-facing state.** The base this UI grew from wrote progress with
- * `.catch(() => {})`, which threw away the entire point: the refusal exists so a second
- * device cannot silently rewind the reader's place. So a conflict resolves in neither
- * direction on its own — it comes back as the newer position for the reader to accept
- * or decline.
+ * **A stale write is already resolved.** The server kept the newer row, so a delayed
+ * request must not interrupt reading with a modal or retry and overwrite that row. The
+ * client only learns the stored clock, allowing the next real movement to save normally.
  */
 
 let lastStamp = 0
@@ -42,13 +40,6 @@ export function resetProgressClock() {
   lastStamp = 0
 }
 
-/** What a conflict came back with, so the reader can be asked rather than overruled. */
-export class ProgressConflict {
-  constructor(current) {
-    this.current = current
-  }
-}
-
 /**
  * Writes read progress.
  *
@@ -56,8 +47,7 @@ export class ProgressConflict {
  * @param {object} position
  * @param {number} [position.page] one-based page.
  * @param {object|null} [position.locator] an opaque Readium locator, stored as given.
- * @returns {Promise<ProgressConflict|null>} a conflict carrying the stored position, or
- *   `null` when the write applied.
+ * @returns {Promise<null>} once the write was applied or a newer stored write won.
  */
 export async function writeProgress(mediaItemId, { page = undefined, locator = null } = {}) {
   const { deviceId, deviceName } = deviceIdentity()
@@ -75,10 +65,13 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
     return null
   } catch (error) {
     if (error.treatment !== Treatment.PROGRESS_CONFLICT) throw error
-    // Re-read rather than guess. The refusal says only that something newer exists, so
-    // the position to offer has to come from the server.
+    // A stale request has already lost safely: the server kept the newer row. Learn its
+    // clock so later movement can be saved, but do not interrupt reading or retry the
+    // stale page and accidentally rewind an out-of-order write from this same reader.
     const current = await readMediaItem(mediaItemId)
-    return new ProgressConflict(current.progress ?? null)
+    const storedStamp = Number(current.progress?.readAtMillis)
+    if (Number.isFinite(storedStamp)) lastStamp = Math.max(lastStamp, storedStamp)
+    return null
   }
 }
 

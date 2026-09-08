@@ -361,10 +361,6 @@ export default {
       newest: '최신순',
       oldest: '오래된순',
     },
-    conflictTitle: '다른 기기가 더 앞까지 읽었습니다',
-    conflictBody: '{page}쪽까지 읽은 기록이 있습니다. 거기로 이동할까요?',
-    conflictJump: '거기로 이동',
-    conflictStay: '여기 계속 보기',
   },
 
   search: {

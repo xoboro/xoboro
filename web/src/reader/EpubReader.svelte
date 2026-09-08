@@ -72,7 +72,6 @@
   let settingsOpen = $state(false)
   let error = $state(null)
   let retryable = $state(false)
-  let conflict = $state(null)
   let loadedId = $state('')
 
   let saveTimer = null
@@ -91,11 +90,7 @@
     if (!pending || !loadedId) return
     const write = pending
     pending = null
-    writeProgress(loadedId, write)
-      .then((result) => {
-        if (result) conflict = result.current
-      })
-      .catch((caught) => (error = caught))
+    writeProgress(loadedId, write).catch((caught) => (error = caught))
   }
 
   function noteProgress(index) {
@@ -193,12 +188,6 @@
     loadController?.abort()
   })
 
-  function acceptConflict() {
-    const page = conflict?.page
-    conflict = null
-    if (!page) return
-    at = Math.max(0, Math.min(positions.length - 1, page - 1))
-  }
 </script>
 
 <button
@@ -335,24 +324,6 @@
           {/each}
         </div>
       </fieldset>
-    {/snippet}
-  </Dialog>
-{/if}
-
-{#if conflict}
-  <Dialog title={$_('reader.conflictTitle')} onclose={() => (conflict = null)}>
-    {#snippet children()}
-      <p data-testid="conflict-body">
-        {$_('reader.conflictBody', { values: { page: conflict.page } })}
-      </p>
-    {/snippet}
-    {#snippet footer()}
-      <button type="button" data-testid="conflict-stay" onclick={() => (conflict = null)}>
-        {$_('reader.conflictStay')}
-      </button>
-      <button class="primary" type="button" data-testid="conflict-jump" onclick={acceptConflict}>
-        {$_('reader.conflictJump')}
-      </button>
     {/snippet}
   </Dialog>
 {/if}
@@ -516,16 +487,5 @@
     background: var(--accent);
     color: var(--accent-contrast);
     font-weight: 700;
-  }
-  .primary {
-    min-height: var(--touch-target);
-    padding: 0 var(--space-4);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--accent-contrast);
-    font: inherit;
-    font-weight: 700;
-    cursor: pointer;
   }
 </style>

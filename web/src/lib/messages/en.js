@@ -361,10 +361,6 @@ export default {
       newest: 'Newest first',
       oldest: 'Oldest first',
     },
-    conflictTitle: 'Another device has read further',
-    conflictBody: 'There is progress up to page {page}. Jump there?',
-    conflictJump: 'Jump there',
-    conflictStay: 'Stay here',
   },
 
   search: {

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ProgressConflict,
   percentRead,
   progressStamp,
   resetProgressClock,
@@ -78,21 +77,33 @@ describe('writeProgress', () => {
     expect('locator' in JSON.parse(fetchImpl.mock.calls[0][1].body)).toBe(false)
   })
 
-  it('returns the newer position on a conflict instead of swallowing it', async () => {
-    // The base this UI grew from wrote progress with `.catch(() => {})`, which threw
-    // away the whole point of the refusal: it exists so a second device cannot silently
-    // rewind the reader's place.
+  it('absorbs a stale write and advances the next timestamp past the server', async () => {
+    // A stale response can be an out-of-order request from this same reader. It must
+    // not interrupt reading with a modal, and the stored timestamp still has to seed
+    // the next write so a clock correction does not make every later update stale.
+    vi.spyOn(Date, 'now').mockReturnValue(100)
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(reply({ code: 'stale_progress', message: 'stale' }, 409))
-      .mockResolvedValueOnce(reply({ id: 'm1', progress: { page: 42, completed: false } }))
+      .mockResolvedValueOnce(
+        reply({
+          id: 'm1',
+          progress: {
+            page: 42,
+            completed: false,
+            readAtMillis: 500,
+            updatedAtMillis: 500,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(reply(null, 204))
     globalThis.fetch = fetchImpl
 
-    const conflict = await writeProgress('m1', { page: 7 })
-    expect(conflict).toBeInstanceOf(ProgressConflict)
-    // Read back from the server rather than guessed: the refusal says only that
-    // something newer exists, not what it is.
-    expect(conflict.current).toEqual({ page: 42, completed: false })
+    expect(await writeProgress('m1', { page: 7 })).toBeNull()
+    expect(await writeProgress('m1', { page: 8 })).toBeNull()
+
+    const nextWrite = JSON.parse(fetchImpl.mock.calls[2][1].body)
+    expect(nextWrite.modifiedAtMillis).toBe(501)
   })
 
   it('propagates a failure that is not a conflict', async () => {

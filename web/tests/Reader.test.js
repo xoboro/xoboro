@@ -288,13 +288,10 @@ describe('Reader', () => {
     })
   })
 
-  it('asks rather than resolving a progress conflict on its own', async () => {
-    // The refusal exists so a second device cannot silently rewind this reader's place,
-    // so neither jumping nor staying happens without being chosen.
-    // The item is read twice: once to open it, and again after the refusal to find out
-    // what the newer position actually is. Only the second answer carries progress —
-    // if the first did, the reader would already be on the last page and there would be
-    // nothing to advance to.
+  it('does not interrupt reading when the server already has newer progress', async () => {
+    // A stale response can be a delayed write from this same browser. The server has
+    // already protected its newer row, so turning that transport detail into a modal
+    // asks the reader a question they did not initiate.
     let itemReads = 0
     globalThis.fetch = routes([
       ['/media-items/m1/pages', reply(PAGES)],
@@ -319,11 +316,8 @@ describe('Reader', () => {
     await fireEvent.keyDown(window, { key: 'ArrowRight' })
     await new Promise((resolve) => setTimeout(resolve, 900))
 
-    const body = await screen.findByTestId('conflict-body')
-    expect(body.textContent).toContain('3')
-    // Both choices offered, neither taken automatically.
-    expect(screen.getByTestId('conflict-jump')).toBeInTheDocument()
-    expect(screen.getByTestId('conflict-stay')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('position').textContent).toContain('2')
   })
 
   it('advances on the physical left key when reading right to left', async () => {
