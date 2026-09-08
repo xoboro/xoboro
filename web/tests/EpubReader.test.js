@@ -161,6 +161,25 @@ describe('EPUB position mapping', () => {
     })
   })
 
+  it('matches a fragmented locator to its canonical spine resource', () => {
+    const resume = epubResume(
+      {
+        page: 1,
+        locator: {
+          href: 'chapter-2.xhtml?edition=synthetic#section-3',
+          locations: { progression: 0.5 },
+        },
+      },
+      positions,
+      2,
+    )
+
+    expect(resume).toEqual({ index: 3, progression: 0.5 })
+    expect(epubProgressFor(positions, 'chapter-2.xhtml#section-3', 0.5, 2, false).locator.href).toBe(
+      'chapter-2.xhtml',
+    )
+  })
+
   it('maps the third of four positions to analyzed page two and clamps the page', () => {
     const progress = epubProgressFor(positions, 'chapter-2.xhtml', 0, 2, false)
 
@@ -249,6 +268,38 @@ describe('EPUB frame binding', () => {
     expect(onToggleChrome).toHaveBeenCalledTimes(1)
     expect(onKeydown).toHaveBeenCalledTimes(1)
     expect(onProgress).toHaveBeenCalledTimes(4)
+    frame.remove()
+  })
+
+  it('overrides conflicting publisher styles with the chosen typography and dark theme', () => {
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    const frameDocument = frame.contentDocument
+    frameDocument.head.innerHTML = `
+      <style>
+        body { background: white; color: black; }
+        p { background: white; color: black; font-size: 12px; line-height: 1.1; }
+      </style>
+    `
+    frameDocument.body.innerHTML = '<p>synthetic publisher text</p>'
+    const binding = bindEpubFrame(frame, {
+      restoreKey: 'publisher-conflict',
+      progression: 0,
+      styles: { fontSize: '130', lineHeight: '1.8', margin: '32', width: '42', theme: 'dark' },
+    })
+
+    frame.dispatchEvent(new Event('load'))
+    const bodyStyle = frame.contentWindow.getComputedStyle(frameDocument.body)
+    const paragraphStyle = frame.contentWindow.getComputedStyle(frameDocument.querySelector('p'))
+
+    expect(bodyStyle.backgroundColor).toBe('rgb(0, 0, 0)')
+    expect(bodyStyle.color).toBe('rgb(255, 255, 255)')
+    expect(paragraphStyle.backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    expect(paragraphStyle.color).toBe('rgb(255, 255, 255)')
+    expect(paragraphStyle.fontSize).toBe('130%')
+    expect(paragraphStyle.lineHeight).toBe('1.8')
+
+    binding.destroy()
     frame.remove()
   })
 })

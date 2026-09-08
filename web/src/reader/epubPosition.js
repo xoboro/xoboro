@@ -7,6 +7,12 @@ function boundedProgression(value, fallback = 0) {
   return Number.isFinite(progression) ? clamp(progression, 0, 1) : fallback
 }
 
+function resourcePath(href) {
+  const value = String(href ?? '')
+  const suffix = value.search(/[?#]/)
+  return suffix < 0 ? value : value.slice(0, suffix)
+}
+
 function indexForPage(page, positionCount, pageCount) {
   const pages = Math.max(1, Number(pageCount) || 1)
   const boundedPage = clamp(Number(page) || 1, 1, pages)
@@ -24,8 +30,12 @@ export function epubResume(progress, positions, pageCount) {
 
   if (index < 0 && locator?.href) {
     const progression = boundedProgression(locator.locations?.progression)
+    const locatorPath = resourcePath(locator.href)
     positions.forEach((entry, candidate) => {
-      if (entry.href === locator.href && boundedProgression(entry.progression) <= progression) {
+      if (
+        resourcePath(entry.href) === locatorPath &&
+        boundedProgression(entry.progression) <= progression
+      ) {
         index = candidate
       }
     })
@@ -42,16 +52,22 @@ export function epubResume(progress, positions, pageCount) {
 
 export function epubProgressFor(positions, href, progression, pageCount, atBottom) {
   const bounded = boundedProgression(progression)
-  let index = positions.findIndex((entry) => entry.href === href)
+  const currentPath = resourcePath(href)
+  let index = positions.findIndex((entry) => resourcePath(entry.href) === currentPath)
   positions.forEach((entry, candidate) => {
-    if (entry.href === href && boundedProgression(entry.progression) <= bounded) index = candidate
+    if (
+      resourcePath(entry.href) === currentPath &&
+      boundedProgression(entry.progression) <= bounded
+    ) {
+      index = candidate
+    }
   })
   if (index < 0) index = 0
 
   const entry = positions[index]
   const next = positions[index + 1]
   const start = boundedProgression(entry?.progression)
-  const end = next?.href === href ? boundedProgression(next.progression, 1) : 1
+  const end = resourcePath(next?.href) === currentPath ? boundedProgression(next.progression, 1) : 1
   const fraction = end > start ? clamp((bounded - start) / (end - start), 0, 1) : 0
   const totalProgression = positions.length
     ? clamp((index + fraction) / positions.length, 0, 1)

@@ -10,10 +10,19 @@ function stylesheet(settings = {}) {
   const width = settings.width === 'full' ? 'none' : `${bounded(settings.width, 20, 80, 42)}rem`
   const theme = settings.theme === 'light' ? 'light' : 'dark'
   return `
-:root { color-scheme: ${theme}; background: Canvas; color: CanvasText; }
-html { font-size: ${fontSize}%; line-height: ${lineHeight}; background: Canvas; color: CanvasText; }
-body { box-sizing: border-box; width: 100%; max-width: ${width}; margin: 0 auto; padding: ${margin}px; }
-body, body * { line-height: inherit; }
+:root { color-scheme: ${theme} !important; }
+html, body { background: Canvas !important; color: CanvasText !important; }
+body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: ${width};
+  margin: 0 auto;
+  padding: ${margin}px;
+  font-size: ${fontSize}% !important;
+  line-height: ${lineHeight} !important;
+}
+body * { background-color: transparent !important; color: inherit !important; line-height: inherit !important; }
+body :where(p, li, blockquote, pre, code, td, th, dd, dt, span) { font-size: inherit !important; }
 `
 }
 
