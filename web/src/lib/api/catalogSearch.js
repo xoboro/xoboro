@@ -1,5 +1,4 @@
 import { request } from '../http.js'
-import { readFacet } from './metadata.js'
 
 /**
  * The reader's search, filter and sort layer over the two catalog listings.
@@ -134,6 +133,11 @@ export function searchCatalog(scope, criteria = {}, { signal } = {}) {
   return request(definition.path, { query: definition.query(scope, criteria), signal })
 }
 
+/** Reads the library choices for a standalone advanced-search surface. */
+export function readSearchLibraries({ signal } = {}) {
+  return request('/libraries', { signal })
+}
+
 /**
  * `query`, `libraryId`, the four facet filters, `oneShot`, paging and a series sort.
  *
@@ -230,9 +234,11 @@ function sortParameter(scope, sort) {
  * @returns {Promise<{choices: Record<string, string[]>, failed: string[]}>} choices
  *   keyed by **listing parameter**, and the facet names that could not be read.
  */
-export async function readSeriesFilterChoices() {
+export async function readSeriesFilterChoices({ signal } = {}) {
   const settled = await Promise.allSettled(
-    SERIES_FACET_FILTERS.map(({ facet }) => readFacet(facet)),
+    SERIES_FACET_FILTERS.map(({ facet }) =>
+      request('/facets', { query: { facet }, signal }),
+    ),
   )
   const choices = {}
   const failed = []

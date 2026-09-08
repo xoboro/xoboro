@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { describe, expect, it, vi } from 'vitest'
 import Search from '../src/reader/Search.svelte'
+import AdvancedSearch from '../src/reader/AdvancedSearch.svelte'
 import { SCOPES } from '../src/lib/api/catalogSearch.js'
 
 /**
@@ -116,6 +117,32 @@ const parameters = (url) => new URL(url, 'http://localhost').searchParams
 const lastListing = (urls, collection) => parameters(listings(urls, collection).at(-1))
 
 describe('reader search', () => {
+  it('reuses passed libraries without requesting them again', async () => {
+    const { fetch, urls } = server()
+    globalThis.fetch = fetch
+
+    render(AdvancedSearch, { libraries: LIBRARIES })
+
+    await waitFor(() => expect(listings(urls, 'series')).toHaveLength(1))
+    expect(urls.filter((url) => url.includes('/libraries'))).toHaveLength(0)
+  })
+
+  it('aborts every outstanding facet choice request on teardown', async () => {
+    const facetSignals = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/facets')) {
+        facetSignals.push(init.signal)
+        return new Promise(() => {})
+      }
+      return Promise.resolve(reply(envelope([seriesRow('s1')])))
+    })
+    const view = render(AdvancedSearch, { libraries: LIBRARIES })
+
+    await waitFor(() => expect(facetSignals).toHaveLength(4))
+    view.unmount()
+
+    expect(facetSignals.every((signal) => signal?.aborted)).toBe(true)
+  })
   it('labels the query input, so it is reachable without seeing the placeholder', async () => {
     globalThis.fetch = server().fetch
     render(Search)
@@ -529,6 +556,35 @@ describe('reader search', () => {
     // matches plenty.
     await waitFor(() => expect(lastListing(urls, 'series').get('page')).toBe('0'))
     expect(lastListing(urls, 'series').getAll('genre')).toEqual(['gen-a'])
+  })
+
+  it('normalizes a changed query before issuing exactly one page-zero request', async () => {
+    const { fetch, urls } = server({
+      listing: (url) =>
+        envelope([seriesRow('s1')], {
+          page: Number(parameters(url).get('page')),
+          totalPages: 3,
+          totalItems: 3,
+        }),
+    })
+    globalThis.fetch = fetch
+    render(Search)
+
+    await waitFor(() => expect(screen.getByTestId('search-page-next')).toBeEnabled())
+    await fireEvent.click(screen.getByTestId('search-page-next'))
+    await waitFor(() => expect(lastListing(urls, 'series').get('page')).toBe('1'))
+    const before = listings(urls, 'series').length
+
+    await fireEvent.input(screen.getByTestId('search-query'), {
+      target: { value: 'normalized' },
+    })
+    await fireEvent.click(screen.getByTestId('search-submit'))
+
+    await waitFor(() => expect(listings(urls, 'series').length).toBeGreaterThan(before))
+    const changed = listings(urls, 'series').slice(before).map(parameters)
+    expect(changed).toHaveLength(1)
+    expect(changed[0].get('query')).toBe('normalized')
+    expect(changed[0].get('page')).toBe('0')
   })
 
   it('sends the chosen sort as the field and direction the listing accepts', async () => {

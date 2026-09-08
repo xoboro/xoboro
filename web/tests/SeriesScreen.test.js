@@ -325,6 +325,79 @@ describe('series screen refreshes', () => {
 })
 
 describe('SeriesScreen', () => {
+  it('requests the next page so every chapter beyond the first hundred is reachable', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page') ?? 0)
+        const item = page === 0 ? ITEMS[0] : { ...ITEMS[1], id: 'm101', title: 'Chapter 101' }
+        return reply({
+          ...envelope([item]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    const next = await screen.findByTestId('series-items-page-next')
+    expect(next).toBeEnabled()
+    await fireEvent.click(next)
+
+    await screen.findByText('Chapter 101')
+    const itemRequests = fetchImpl.mock.calls
+      .map(([url]) => url)
+      .filter((url) => url.includes('/series/s1/media-items'))
+    expect(itemRequests).toHaveLength(2)
+    expect(itemRequests[1]).toContain('page=1')
+  })
+
+  it('returns to page zero before requesting a different series order', async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      if (url.includes('/series/s1/media-items')) {
+        const query = new URL(url, 'http://localhost').searchParams
+        const page = Number(query.get('page') ?? 0)
+        const item = page === 0 ? ITEMS[0] : { ...ITEMS[1], id: 'm101', title: 'Chapter 101' }
+        return reply({
+          ...envelope([item]),
+          page,
+          size: 100,
+          totalItems: 101,
+          totalPages: 2,
+          hasPrevious: page > 0,
+          hasNext: page === 0,
+        })
+      }
+      if (url.includes('/series/s1/reader-context')) {
+        return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+      }
+      return reply(envelope())
+    })
+    globalThis.fetch = fetchImpl
+    render(SeriesScreen, { params: { id: 's1' } })
+
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    await screen.findByText('Chapter 101')
+    await fireEvent.click(screen.getByTestId('series-order-oldest'))
+
+    await waitFor(() => {
+      const last = fetchImpl.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.includes('/series/s1/media-items'))
+        .at(-1)
+      expect(last).toContain('page=0')
+      expect(last).toContain('sort=number%2Casc')
+    })
+  })
+
   it('shows the series cover', async () => {
     globalThis.fetch = server()
     const { container } = render(SeriesScreen, { params: { id: 's1' } })

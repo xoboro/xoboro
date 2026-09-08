@@ -37,6 +37,7 @@
   import { session } from '../lib/session.js'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
+  import Pager from '../components/Pager.svelte'
   import SeriesActions from './SeriesActions.svelte'
   import SeriesMetadataForm from '../catalog/SeriesMetadataForm.svelte'
   import SeriesMetadataPanel from '../catalog/SeriesMetadataPanel.svelte'
@@ -54,6 +55,8 @@
   let error = $state(null)
   let editing = $state(false)
   let order = $state(SeriesOrder.NEWEST)
+  let pageIndex = $state(0)
+  let loading = $state(false)
 
   /**
    * Which read is the current one.
@@ -67,19 +70,21 @@
   let loadSequence = 0
   let loadController = null
 
-  async function load() {
+  async function load(page = pageIndex) {
     const mine = ++loadSequence
     loadController?.abort()
     const controller = new AbortController()
     loadController = controller
+    loading = true
     try {
-      const [context, page] = await Promise.all([
+      const [context, itemPage] = await Promise.all([
         readSeriesReaderContext(params.id, { signal: controller.signal }),
-        listSeriesMediaItems(params.id, { sort: order, signal: controller.signal }),
+        listSeriesMediaItems(params.id, { page, sort: order, signal: controller.signal }),
       ])
       if (mine !== loadSequence) return
       series = context.series
-      items = page
+      items = itemPage
+      pageIndex = itemPage.page
       resume = context.resume
       first = context.first
       error = null
@@ -89,14 +94,18 @@
       if (mine !== loadSequence || caught?.name === 'AbortError') return
       error = caught
     } finally {
-      if (mine === loadSequence) loadController = null
+      if (mine === loadSequence) {
+        loadController = null
+        loading = false
+      }
     }
   }
 
   function choose(next) {
     order = next
+    pageIndex = 0
     writePreference(readerId, params.id, Preference.SORT, next)
-    load()
+    load(0)
   }
 
   onMount(() => {
@@ -288,7 +297,7 @@
     <h2 class="count" data-testid="item-count">
       {$_('reader.itemCount', { values: { count: items.totalItems ?? items.items.length } })}
     </h2>
-    {#if items.items.length > 1}
+    {#if (items.totalItems ?? items.items.length) > 1}
       <SeriesOrderToggle {order} onchange={choose} />
     {/if}
   </div>
@@ -338,6 +347,13 @@
       <li class="empty">{$_('reader.noItems')}</li>
     {/if}
   </ol>
+  <Pager
+    page={items}
+    busy={loading}
+    label={series?.title ?? series?.name ?? ''}
+    testIdPrefix="series-items-page"
+    onpage={(next) => load(next)}
+  />
 {:else if !error}
   <p class="waiting" role="status">{$_('common.loading')}</p>
 {/if}

@@ -6,6 +6,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Home from '../src/reader/Home.svelte'
 import { SessionStatus, session } from '../src/lib/session.js'
 
+const homeEvents = vi.hoisted(() => ({ domain: [], resync: [] }))
+
+vi.mock('../src/lib/eventHub.js', () => ({
+  eventHub: {
+    status: { subscribe: (run) => { run('open'); return () => {} } },
+    on: (names, handler) => {
+      const entry = { names: Array.isArray(names) ? names : [names], handler }
+      homeEvents.domain.push(entry)
+      return () => {
+        homeEvents.domain = homeEvents.domain.filter((each) => each !== entry)
+      }
+    },
+    onResync: (handler) => {
+      homeEvents.resync.push(handler)
+      return () => {
+        homeEvents.resync = homeEvents.resync.filter((each) => each !== handler)
+      }
+    },
+  },
+}))
+
+function emitHomeEvent(name, payload = {}) {
+  for (const { names, handler } of homeEvents.domain) {
+    if (names.includes(name)) handler({ name, ...payload })
+  }
+}
+
 /**
  * The reader's home page, and what it says when a shelf cannot be read.
  *
@@ -142,6 +169,95 @@ describe('Reader home', () => {
     expect((await screen.findByTestId('all-series-page-next')).disabled).toBe(true)
   })
 
+  it('restores the saved page before restoring scroll after that page renders', async () => {
+    session.set({
+      status: SessionStatus.AUTHENTICATED,
+      user: { id: 'reader-a', roles: [] },
+    })
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      writable: true,
+      value: 0,
+    })
+    const fetchImpl = pagedSeriesServer({ totalItems: 201 })
+    globalThis.fetch = fetchImpl
+    const first = render(Home)
+
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await screen.findByText('Synthetic series 100')
+    window.scrollY = 640
+    first.unmount()
+
+    fetchImpl.mockClear()
+    const restorations = []
+    const scrolling = document.scrollingElement ?? document.documentElement
+    const originalScrollTop = Object.getOwnPropertyDescriptor(scrolling, 'scrollTop')
+    Object.defineProperty(scrolling, 'scrollTop', {
+      configurable: true,
+      get: () => 0,
+      set: (top) => {
+        restorations.push({
+          top,
+          pageRendered: Boolean(screen.queryByText('Synthetic series 100')),
+        })
+      },
+    })
+    const restored = render(Home)
+
+    await waitFor(() => {
+      const seriesUrls = fetchImpl.mock.calls
+        .map(([url]) => url)
+        .filter((url) => url.includes('/series?'))
+      expect(seriesUrls).toHaveLength(1)
+      expect(seriesUrls[0]).toContain('page=1')
+    })
+    await waitFor(() => expect(restorations).toHaveLength(1))
+    expect(restorations[0]).toEqual({
+      top: 640,
+      pageRendered: true,
+    })
+
+    restored.unmount()
+    fetchImpl.mockClear()
+    session.set({
+      status: SessionStatus.AUTHENTICATED,
+      user: { id: 'reader-b', roles: [] },
+    })
+    render(Home)
+
+    await waitFor(() => {
+      const seriesUrl = fetchImpl.mock.calls
+        .map(([url]) => url)
+        .find((url) => url.includes('/series?'))
+      expect(seriesUrl).toContain('page=0')
+    })
+    if (originalScrollTop) Object.defineProperty(scrolling, 'scrollTop', originalScrollTop)
+    else delete scrolling.scrollTop
+  })
+
+  it('persists zero page and scroll for a newly selected library without search data', async () => {
+    session.set({
+      status: SessionStatus.AUTHENTICATED,
+      user: { id: 'reader-a', roles: [] },
+    })
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      writable: true,
+      value: 700,
+    })
+    globalThis.fetch = pagedSeriesServer({ totalItems: 201, libraries: TWO_LIBRARIES })
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await screen.findByText('Synthetic series 100')
+    await fireEvent.click(screen.getByTestId('library-lib-webtoon'))
+
+    const stored = Object.keys(sessionStorage)
+      .map((key) => JSON.parse(sessionStorage.getItem(key)))
+      .find((value) => value.libraryId === 'lib-webtoon')
+    expect(stored).toEqual({ libraryId: 'lib-webtoon', page: 0, scrollY: 0 })
+  })
+
   it('restarts at the first page when the reader narrows to a library', async () => {
     // Page 7 of one library is usually past the end of another, so carrying the page
     // number across a narrowing would ask for a page that does not exist and land the
@@ -207,6 +323,9 @@ const TWO_LIBRARIES = [
 afterEach(() => {
   session.set({ status: SessionStatus.UNKNOWN, user: null })
   globalThis.localStorage?.clear()
+  globalThis.sessionStorage?.clear()
+  homeEvents.domain = []
+  homeEvents.resync = []
 })
 
 describe('library switcher', () => {
@@ -479,6 +598,90 @@ describe('home search', () => {
     await fireEvent.input(field, { target: { value } })
     return field
   }
+
+  it('shows updating immediately and sends one quick request for a burst of typing', async () => {
+    const fetchImpl = searchServer({
+      series: [{ id: 's1', title: 'Debounced Result', mediaItemCount: 1 }],
+    })
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    const field = await screen.findByTestId('home-search')
+    for (const value of ['l', 'la', 'lantern']) {
+      await fireEvent.input(field, { target: { value } })
+    }
+
+    const surface = screen.getByTestId('home-quick-search')
+    expect(surface).toHaveAttribute('aria-busy', 'true')
+    expect(surface).toHaveTextContent(/.+/)
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('query='))).toHaveLength(0)
+
+    await screen.findByText('Debounced Result')
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('query='))).toHaveLength(1)
+  })
+
+  it('aborts an outstanding quick request when advanced search opens', async () => {
+    const pending = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
+      if (url.includes('/feeds/') || url.includes('/facets')) return Promise.resolve(reply(envelope()))
+      if (url.includes('query=')) {
+        pending.push({ url, signal: init.signal })
+        return new Promise(() => {})
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+
+    await typeQuery('lantern')
+    await waitFor(() => expect(pending).toHaveLength(1))
+    const quick = pending[0]
+
+    await fireEvent.click(screen.getByTestId('toggle-advanced'))
+
+    expect(quick.signal).toBeDefined()
+    expect(quick.signal.aborted).toBe(true)
+    await waitFor(() => expect(pending).toHaveLength(2))
+  })
+
+  it('lets only advanced search refresh a query for a catalog event while it is open', async () => {
+    const fetchImpl = searchServer({
+      series: [{ id: 's1', title: 'Owned Result', mediaItemCount: 1 }],
+    })
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await typeQuery('owned')
+    await screen.findByText('Owned Result')
+    await fireEvent.click(screen.getByTestId('toggle-advanced'))
+    await waitFor(() => {
+      expect(fetchImpl.mock.calls.filter(([url]) => url.includes('query=owned'))).toHaveLength(2)
+    })
+    const before = fetchImpl.mock.calls.filter(([url]) => url.includes('query=owned')).length
+
+    emitHomeEvent('series.changed')
+    await new Promise((resolve) => setTimeout(resolve, 350))
+
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('query=owned'))).toHaveLength(
+      before + 1,
+    )
+  })
+
+  it('transfers a pending advanced query back to quick search exactly once when closing', async () => {
+    const fetchImpl = searchServer({
+      series: [{ id: 's1', title: 'Transferred Result', mediaItemCount: 1 }],
+    })
+    globalThis.fetch = fetchImpl
+    render(Home)
+
+    await fireEvent.click(await screen.findByTestId('toggle-advanced'))
+    await typeQuery('transferred')
+    await fireEvent.click(screen.getByTestId('toggle-advanced'))
+
+    await screen.findByText('Transferred Result')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('query=transferred'))).toHaveLength(1)
+  })
 
   it('keeps the focused search input at the iOS 16px floor', async () => {
     // jsdom does not apply Svelte's injected scoped CSS, so inspect the CSS the Svelte

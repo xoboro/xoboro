@@ -33,11 +33,11 @@
   import { onMount } from 'svelte'
   import { ChevronDown } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
-  import { listLibraries } from '../lib/api/libraries.js'
   import {
     DEFAULT_PAGE_SIZE,
     SCOPES,
     SCOPE_NAMES,
+    readSearchLibraries,
     readSeriesFilterChoices,
     searchCatalog,
   } from '../lib/api/catalogSearch.js'
@@ -60,6 +60,8 @@
      * somebody expands a panel would make every search a two-step.
      */
     open = $bindable(false),
+    /** Reuses the host's library list; omitted only by the standalone deep link. */
+    libraries: providedLibraries = undefined,
   } = $props()
 
   let scope = $state('series')
@@ -75,13 +77,9 @@
   /** A filter group is missing because a choice list could not be read, not empty. */
   let filtersIncomplete = $state(false)
 
-  const criteria = $derived({
-    ...filters,
-    query,
-    page: pageIndex,
-    size: DEFAULT_PAGE_SIZE,
-    sort,
-  })
+  function criteriaFor(page = pageIndex) {
+    return { ...filters, query, page, size: DEFAULT_PAGE_SIZE, sort }
+  }
 
   /**
    * How many filters are on, for the collapsed summary.
@@ -139,31 +137,33 @@
     }
   }
 
-  $effect(() => {
-    // Reads both so every change to either re-runs the search, including a page turn.
-    const requestedScope = scope
-    const requestedCriteria = criteria
-    run(requestedScope, requestedCriteria)
-  })
-
-  /**
-   * A new query is a new search, so it starts at its first page.
-   *
-   * Untracked from the request itself: this only has to reset paging when the words change, and
-   * reading `criteria` here would make it run for a page turn as well - which would pin the
-   * reader to page one and make the pager look broken.
-   */
   let lastQuery
   $effect(() => {
     const current = query
-    // The first run establishes the baseline rather than acting on it: the host may mount this
-    // with words already typed, and treating that as a change would reset a page nobody turned.
-    if (lastQuery === undefined || current === lastQuery) {
+    const requestedScope = scope
+    const requestedPage = pageIndex
+    const requestedFilters = filters
+    const requestedSort = sort
+
+    // Normalize before criteria are constructed. Letting a separate request effect run first
+    // emitted the old nonzero page and then page zero for the same new query.
+    if (lastQuery !== undefined && current !== lastQuery && requestedPage !== 0) {
       lastQuery = current
+      pageIndex = 0
       return
     }
     lastQuery = current
-    pageIndex = 0
+    run(requestedScope, {
+      ...requestedFilters,
+      query: current,
+      page: requestedPage,
+      size: DEFAULT_PAGE_SIZE,
+      sort: requestedSort,
+    })
+  })
+
+  $effect(() => {
+    if (providedLibraries !== undefined) libraries = providedLibraries
   })
 
   /**
@@ -174,17 +174,28 @@
    * no genres" and "the genre list could not be read" look identical on screen unless the screen
    * says which it was.
    */
+  let choicesSequence = 0
+  let choicesController = null
+
   async function loadFilterChoices() {
+    const mine = ++choicesSequence
+    choicesController?.abort()
+    const controller = new AbortController()
+    choicesController = controller
     const [libraryResult, facetResult] = await Promise.allSettled([
-      listLibraries(),
-      readSeriesFilterChoices(),
+      providedLibraries === undefined
+        ? readSearchLibraries({ signal: controller.signal })
+        : Promise.resolve(providedLibraries),
+      readSeriesFilterChoices({ signal: controller.signal }),
     ])
+    if (mine !== choicesSequence || controller.signal.aborted) return
     if (libraryResult.status === 'fulfilled') libraries = libraryResult.value ?? []
     if (facetResult.status === 'fulfilled') choices = facetResult.value.choices
     filtersIncomplete =
       libraryResult.status === 'rejected' ||
       facetResult.status === 'rejected' ||
       (facetResult.status === 'fulfilled' && facetResult.value.failed.length > 0)
+    choicesController = null
   }
 
   onMount(() => {
@@ -201,20 +212,22 @@
         'media-item.changed',
         'media-item.removed',
       ],
-      () => run(scope, criteria),
+      () => run(scope, criteriaFor()),
     )
     // `onDeck` and `keepReading` are read from this reader's progress, so progress moving
     // changes what those filters answer.
     const offProgress = eventHub.on(
       ['read-progress.changed', 'series-progress.changed'],
-      () => run(scope, criteria),
+      () => run(scope, criteriaFor()),
     )
-    const offResync = eventHub.onResync(() => run(scope, criteria))
+    const offResync = eventHub.onResync(() => run(scope, criteriaFor()))
 
     return () => {
       offCatalog()
       offProgress()
       offResync()
+      choicesSequence += 1
+      choicesController?.abort()
       controller?.abort()
     }
   })
@@ -324,7 +337,7 @@
 <section class="results">
   <ActiveFilters criteria={filters} {libraries} onremove={applyFilters} />
 
-  <ErrorNotice {error} onretry={() => run(scope, criteria)} />
+  <ErrorNotice {error} onretry={() => run(scope, criteriaFor())} />
 
   {#if loading}
     <p class="waiting" role="status" data-testid="searching">{$_('search.searching')}</p>
