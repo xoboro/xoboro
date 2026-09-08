@@ -9,6 +9,7 @@ import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadProgressRepository
+import io.xoboro.core.domain.ReadProgressUpsertResult
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesReadProgress
@@ -18,6 +19,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 
 class ReadProgressLifecycleTest {
   @Test
@@ -85,6 +87,30 @@ class ReadProgressLifecycleTest {
     assertEquals(existing, assertIs<ReadProgressUpdate.Stale>(result).stored)
     assertEquals(existing, fixture.progresses.findByBookIdAndUserIdOrNull(BOOK_ID, USER_ID))
     assertEquals(emptyList<ReadProgressEvent>(), fixture.events)
+  }
+
+  @Test
+  fun `stale progression returns the winning row when it is concurrently deleted`() {
+    val existing = progress(readAtMillis = 200)
+    val fixture =
+      Fixture(
+        initialProgress = existing,
+        deleteWinningProgressAfterRejectedWrite = true,
+      )
+
+    val result =
+      fixture.lifecycle.updateBookProgression(
+        bookId = BOOK_ID,
+        userId = USER_ID,
+        page = 2,
+        modifiedAtMillis = 199,
+        deviceId = "device-new",
+        deviceName = "Synthetic reader",
+        locatorJson = null,
+      )
+
+    assertNull(fixture.progresses.findByBookIdAndUserIdOrNull(BOOK_ID, USER_ID))
+    assertEquals(existing, assertIs<ReadProgressUpdate.Stale>(result).stored)
   }
 
   @Test
@@ -240,9 +266,14 @@ class ReadProgressLifecycleTest {
   private class Fixture(
     initialProgress: ReadProgress? = null,
     book: Book = book(),
+    deleteWinningProgressAfterRejectedWrite: Boolean = false,
   ) {
     val events = mutableListOf<ReadProgressEvent>()
-    val progresses = InMemoryReadProgressRepository(initialProgress)
+    val progresses =
+      InMemoryReadProgressRepository(
+        initial = initialProgress,
+        deleteWinningProgressAfterRejectedWrite = deleteWinningProgressAfterRejectedWrite,
+      )
     val lifecycle =
       ReadProgressLifecycle(
         books = InMemoryBookRepository(book),
@@ -332,6 +363,7 @@ class ReadProgressLifecycleTest {
 
   private class InMemoryReadProgressRepository(
     initial: ReadProgress?,
+    private val deleteWinningProgressAfterRejectedWrite: Boolean,
   ) : ReadProgressRepository {
     private val values =
       initial
@@ -357,11 +389,16 @@ class ReadProgressLifecycleTest {
       values[progress.bookId to progress.userId] = progress
     }
 
-    override fun upsertIfNewer(progress: ReadProgress): Boolean {
+    override fun upsertIfNewer(progress: ReadProgress): ReadProgressUpsertResult {
       val existing = values[progress.bookId to progress.userId]
-      if (existing != null && progress.readAtMillis <= existing.readAtMillis) return false
+      if (existing != null && progress.readAtMillis <= existing.readAtMillis) {
+        if (deleteWinningProgressAfterRejectedWrite) {
+          values.remove(progress.bookId to progress.userId)
+        }
+        return ReadProgressUpsertResult(applied = false, stored = existing)
+      }
       upsert(progress)
-      return true
+      return ReadProgressUpsertResult(applied = true, stored = progress)
     }
 
     override fun upsertAll(progresses: Collection<ReadProgress>) = progresses.forEach(::upsert)

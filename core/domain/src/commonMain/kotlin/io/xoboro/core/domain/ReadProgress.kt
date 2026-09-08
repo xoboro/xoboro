@@ -45,6 +45,11 @@ data class SeriesReadProgress(
   }
 }
 
+data class ReadProgressUpsertResult(
+  val applied: Boolean,
+  val stored: ReadProgress,
+)
+
 interface ReadProgressRepository {
   fun findByBookIdAndUserIdOrNull(
     bookId: BookId,
@@ -72,12 +77,13 @@ interface ReadProgressRepository {
   /**
    * Applies [progress] when it is newer than the stored progress.
    *
-   * Implementations MUST apply the write atomically. They MUST return false without mutating
-   * stored state when
-   * [ReadProgress.readAtMillis] is less than or equal to the stored value, and MUST return true
-   * when a row was inserted or updated.
+   * Implementations MUST apply the write and capture the winning persisted row atomically. They
+   * MUST return [ReadProgressUpsertResult.applied] as false without mutating stored state when
+   * [ReadProgress.readAtMillis] is less than or equal to the stored value, and true when a row was
+   * inserted or updated. [ReadProgressUpsertResult.stored] is the row that won at that same atomic
+   * boundary, even if another operation deletes it immediately afterward.
    */
-  fun upsertIfNewer(progress: ReadProgress): Boolean
+  fun upsertIfNewer(progress: ReadProgress): ReadProgressUpsertResult
 
   fun upsertAll(progresses: Collection<ReadProgress>)
 

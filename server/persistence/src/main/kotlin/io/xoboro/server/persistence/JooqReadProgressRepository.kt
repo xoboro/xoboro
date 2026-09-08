@@ -3,6 +3,7 @@ package io.xoboro.server.persistence
 import io.xoboro.core.domain.BookId
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadProgressRepository
+import io.xoboro.core.domain.ReadProgressUpsertResult
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesReadProgress
 import io.xoboro.core.domain.UserId
@@ -16,12 +17,7 @@ class JooqReadProgressRepository(
     bookId: BookId,
     userId: UserId,
   ): ReadProgress? =
-    database.dsl
-      .fetchOne(
-        "$SELECT_PROGRESS WHERE book_id = ? AND user_id = ?",
-        bookId.value,
-        userId.value,
-      )?.toProgress()
+    database.dsl.findProgressByBookIdAndUserIdOrNull(bookId, userId)
 
   override fun findAllByBookIdsAndUserId(
     bookIds: Collection<BookId>,
@@ -89,13 +85,17 @@ class JooqReadProgressRepository(
     }
   }
 
-  override fun upsertIfNewer(progress: ReadProgress): Boolean =
+  override fun upsertIfNewer(progress: ReadProgress): ReadProgressUpsertResult =
     database.transaction { transaction ->
-      val changed = transaction.upsertProgressIfNewer(progress)
-      if (changed) {
+      val applied = transaction.upsertProgressIfNewer(progress)
+      if (applied) {
         transaction.recomputeSeriesForBooks(listOf(progress.bookId), progress.userId)
       }
-      changed
+      val stored =
+        requireNotNull(
+          transaction.findProgressByBookIdAndUserIdOrNull(progress.bookId, progress.userId),
+        ) { "Conditional progress upsert must leave a winning persisted row" }
+      ReadProgressUpsertResult(applied = applied, stored = stored)
     }
 
   override fun upsertAll(progresses: Collection<ReadProgress>) {
@@ -172,6 +172,16 @@ class JooqReadProgressRepository(
       progress.updatedAtMillis,
     )
   }
+
+  private fun DSLContext.findProgressByBookIdAndUserIdOrNull(
+    bookId: BookId,
+    userId: UserId,
+  ): ReadProgress? =
+    fetchOne(
+      "$SELECT_PROGRESS WHERE book_id = ? AND user_id = ?",
+      bookId.value,
+      userId.value,
+    )?.toProgress()
 
   private fun DSLContext.upsertProgressIfNewer(progress: ReadProgress): Boolean =
     execute(

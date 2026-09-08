@@ -6,6 +6,7 @@ import io.xoboro.core.domain.Library
 import io.xoboro.core.domain.LibraryId
 import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.ReadProgress
+import io.xoboro.core.domain.ReadProgressUpsertResult
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SourceLocation
@@ -40,9 +41,10 @@ class JooqReadProgressRepositoryTest {
           locatorJson = """{"position":"insert"}""",
         )
 
-      val changed = repository.upsertIfNewer(progress)
+      val result = repository.upsertIfNewer(progress)
 
-      assertTrue(changed)
+      assertTrue(result.applied)
+      assertEquals(progress, result.stored)
       assertEquals(
         progress,
         repository.findByBookIdAndUserIdOrNull(firstBookId, userId),
@@ -80,9 +82,10 @@ class JooqReadProgressRepositoryTest {
           updatedAtMillis = 250,
         )
 
-      val changed = repository.upsertIfNewer(newer)
+      val result = repository.upsertIfNewer(newer)
 
-      assertTrue(changed)
+      assertTrue(result.applied)
+      assertEquals(newer.copy(createdAtMillis = original.createdAtMillis), result.stored)
       assertEquals(
         newer.copy(createdAtMillis = original.createdAtMillis),
         repository.findByBookIdAndUserIdOrNull(firstBookId, userId),
@@ -120,9 +123,10 @@ class JooqReadProgressRepositoryTest {
           updatedAtMillis = 300,
         )
 
-      val changed = repository.upsertIfNewer(equal)
+      val result = repository.upsertIfNewer(equal)
 
-      assertFalse(changed)
+      assertFalse(result.applied)
+      assertEquals(original, result.stored)
       assertEquals(
         original,
         repository.findByBookIdAndUserIdOrNull(firstBookId, userId),
@@ -160,9 +164,10 @@ class JooqReadProgressRepositoryTest {
           updatedAtMillis = 300,
         )
 
-      val changed = repository.upsertIfNewer(older)
+      val result = repository.upsertIfNewer(older)
 
-      assertFalse(changed)
+      assertFalse(result.applied)
+      assertEquals(original, result.stored)
       assertEquals(
         original,
         repository.findByBookIdAndUserIdOrNull(firstBookId, userId),
@@ -193,11 +198,12 @@ class JooqReadProgressRepositoryTest {
           updatedAtMillis = 250,
         )
 
-      val changed = repository.upsertIfNewer(newer)
+      val result = repository.upsertIfNewer(newer)
       val stored =
         assertNotNull(repository.findByBookIdAndUserIdOrNull(firstBookId, userId))
 
-      assertTrue(changed)
+      assertTrue(result.applied)
+      assertEquals(stored, result.stored)
       assertEquals(10, stored.createdAtMillis)
       assertEquals(250, stored.updatedAtMillis)
       assertEquals(newer.copy(createdAtMillis = 10), stored)
@@ -216,7 +222,7 @@ class JooqReadProgressRepositoryTest {
           createdAtMillis = 10,
           updatedAtMillis = 100,
         )
-      assertTrue(repository.upsertIfNewer(first))
+      assertTrue(repository.upsertIfNewer(first).applied)
       val initialSeries =
         assertNotNull(repository.findSeriesByIdAndUserIdOrNull(seriesId, userId))
       assertEquals(0, initialSeries.booksReadCount)
@@ -240,7 +246,8 @@ class JooqReadProgressRepositoryTest {
       val acceptedSeries =
         assertNotNull(repository.findSeriesByIdAndUserIdOrNull(seriesId, userId))
 
-      assertTrue(accepted)
+      assertTrue(accepted.applied)
+      assertEquals(second, accepted.stored)
       assertEquals(second, repository.findByBookIdAndUserIdOrNull(secondBookId, userId))
       assertEquals(1, acceptedSeries.booksReadCount)
       assertEquals(1, acceptedSeries.booksInProgressCount)
@@ -264,7 +271,8 @@ class JooqReadProgressRepositoryTest {
       val rejectedSeries =
         assertNotNull(repository.findSeriesByIdAndUserIdOrNull(seriesId, userId))
 
-      assertFalse(changed)
+      assertFalse(changed.applied)
+      assertEquals(second, changed.stored)
       assertEquals(second, repository.findByBookIdAndUserIdOrNull(secondBookId, userId))
       assertEquals(1, rejectedSeries.booksReadCount)
       assertEquals(1, rejectedSeries.booksInProgressCount)
@@ -288,7 +296,7 @@ class JooqReadProgressRepositoryTest {
           createdAtMillis = 10,
           updatedAtMillis = 200,
         )
-      assertTrue(repository.upsertIfNewer(owner))
+      assertTrue(repository.upsertIfNewer(owner).applied)
       val other =
         progress(
           bookId = firstBookId,
@@ -304,7 +312,7 @@ class JooqReadProgressRepositoryTest {
 
       // An older timestamp belonging to a different user must not lose to, or overwrite, the
       // first user's row. A comparison missing the user scope would reject this write.
-      assertTrue(repository.upsertIfNewer(other))
+      assertTrue(repository.upsertIfNewer(other).applied)
 
       assertEquals(owner, repository.findByBookIdAndUserIdOrNull(firstBookId, userId))
       assertEquals(other, repository.findByBookIdAndUserIdOrNull(firstBookId, otherUserId))
@@ -349,14 +357,14 @@ class JooqReadProgressRepositoryTest {
       try {
         val results =
           progresses.map { candidate ->
-            executor.submit<Boolean> {
+            executor.submit<ReadProgressUpsertResult> {
               barrier.await(10, TimeUnit.SECONDS)
               repository.upsertIfNewer(candidate)
             }
           }.map { it.get(30, TimeUnit.SECONDS) }
         val newest = progresses.maxBy(ReadProgress::readAtMillis)
 
-        assertTrue(results[progresses.indexOf(newest)])
+        assertTrue(results[progresses.indexOf(newest)].applied)
         assertEquals(
           newest,
           repository.findByBookIdAndUserIdOrNull(firstBookId, userId),

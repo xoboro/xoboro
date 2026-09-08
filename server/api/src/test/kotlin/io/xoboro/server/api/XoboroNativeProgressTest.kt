@@ -46,6 +46,7 @@ import io.xoboro.core.domain.MediaKind
 import io.xoboro.core.domain.MediaStatus
 import io.xoboro.core.domain.ReadProgress
 import io.xoboro.core.domain.ReadProgressRepository
+import io.xoboro.core.domain.ReadProgressUpsertResult
 import io.xoboro.core.domain.Series
 import io.xoboro.core.domain.SeriesId
 import io.xoboro.core.domain.SeriesMetadata
@@ -930,12 +931,14 @@ class XoboroNativeProgressTest {
       values[progress.bookId to progress.userId] = progress
     }
 
-    override fun upsertIfNewer(progress: ReadProgress): Boolean {
+    override fun upsertIfNewer(progress: ReadProgress): ReadProgressUpsertResult {
       writeAttempts += 1
       val existing = values[progress.bookId to progress.userId]
-      if (existing != null && progress.readAtMillis <= existing.readAtMillis) return false
+      if (existing != null && progress.readAtMillis <= existing.readAtMillis) {
+        return ReadProgressUpsertResult(applied = false, stored = existing)
+      }
       upsert(progress)
-      return true
+      return ReadProgressUpsertResult(applied = true, stored = progress)
     }
 
     override fun upsertAll(progresses: Collection<ReadProgress>) = progresses.forEach(::upsert)
