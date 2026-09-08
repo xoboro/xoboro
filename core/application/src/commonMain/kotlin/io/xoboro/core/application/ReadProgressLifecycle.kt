@@ -142,6 +142,7 @@ class ReadProgressLifecycle(
     deviceId: String,
     deviceName: String,
     locatorJson: String?,
+    completed: Boolean? = null,
   ): ReadProgressUpdate {
     val book = books.findByIdOrNull(bookId) ?: return ReadProgressUpdate.MediaItemNotFound
     require(book.deletedAtMillis == null) { "Cannot update progress for a deleted book" }
@@ -160,6 +161,9 @@ class ReadProgressLifecycle(
     require(page in 1..analyzed.pageCount) {
       "Page argument ($page) must be within 1 and book page count (${analyzed.pageCount})"
     }
+    require(completed != true || page == analyzed.pageCount) {
+      "Completed progress must point to the final page (${analyzed.pageCount})"
+    }
     val existing = progresses.findByBookIdAndUserIdOrNull(book.id, userId)
     val now = now()
     val candidate =
@@ -167,7 +171,7 @@ class ReadProgressLifecycle(
         bookId = book.id,
         userId = userId,
         page = page,
-        completed = page == analyzed.pageCount,
+        completed = completed ?: (page == analyzed.pageCount),
         readAtMillis = modifiedAtMillis,
         deviceId = deviceId,
         deviceName = deviceName,

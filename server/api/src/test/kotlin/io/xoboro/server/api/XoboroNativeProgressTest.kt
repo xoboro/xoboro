@@ -61,7 +61,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 
 class XoboroNativeProgressTest {
@@ -433,6 +439,59 @@ class XoboroNativeProgressTest {
     }
 
   @Test
+  fun `explicit incomplete keeps the final page resumable`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response =
+        client.put(PROGRESS_PATH) {
+          bearerAuth(fixture.token)
+          contentType(ContentType.Application.Json)
+          setBody(validRequest(page = PAGE_COUNT, completed = false))
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(PAGE_COUNT, fixture.storedProgress()?.page)
+      assertEquals(false, fixture.storedProgress()?.completed)
+    }
+
+  @Test
+  fun `omitted completion keeps historical final page completion`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response =
+        client.put(PROGRESS_PATH) {
+          bearerAuth(fixture.token)
+          contentType(ContentType.Application.Json)
+          setBody(validRequest(page = PAGE_COUNT))
+        }
+
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals(true, fixture.storedProgress()?.completed)
+    }
+
+  @Test
+  fun `rejects explicit completion before the final page`() =
+    testApplication {
+      val fixture = Fixture.administrator()
+      installProgress(fixture)
+
+      val response =
+        client.put(PROGRESS_PATH) {
+          bearerAuth(fixture.token)
+          contentType(ContentType.Application.Json)
+          setBody(validRequest(page = PAGE_COUNT - 1, completed = true))
+        }
+
+      assertEquals(HttpStatusCode.BadRequest, response.status)
+      assertEquals("invalid_request", response.body<XoboroApiError>().code)
+      assertEquals(0, fixture.progresses.writeAttempts)
+    }
+
+  @Test
   fun `applies a page-only write from a reader that has no locator`() =
     testApplication {
       // A comic has no Readium locator - there is no spine and no `href` to point at - so the
@@ -501,7 +560,13 @@ class XoboroNativeProgressTest {
         }
 
       assertEquals(HttpStatusCode.Conflict, response.status)
-      assertEquals("stale_progress", response.body<XoboroApiError>().code)
+      val body = response.body<JsonObject>()
+      assertEquals("stale_progress", body["code"]?.jsonPrimitive?.content)
+      val stored = body["progress"]?.jsonObject
+      assertEquals(3, stored?.get("page")?.jsonPrimitive?.int)
+      assertEquals(false, stored?.get("completed")?.jsonPrimitive?.boolean)
+      assertEquals(200, stored?.get("readAtMillis")?.jsonPrimitive?.long)
+      assertEquals("stored-device", stored?.get("deviceId")?.jsonPrimitive?.content)
       assertEquals(initial, fixture.storedProgress())
     }
 
@@ -949,6 +1014,7 @@ class XoboroNativeProgressTest {
     private fun validRequest(
       page: Int = 4,
       modifiedAtMillis: Long = 200,
+      completed: Boolean? = null,
     ): XoboroMediaProgressRequest =
       XoboroMediaProgressRequest(
         page = page,
@@ -965,6 +1031,7 @@ class XoboroNativeProgressTest {
         deviceId = "device-1",
         deviceName = "Synthetic reader",
         modifiedAtMillis = modifiedAtMillis,
+        completed = completed,
       )
 
     private fun syntheticUser(

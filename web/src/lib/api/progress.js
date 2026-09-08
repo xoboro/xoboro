@@ -1,7 +1,6 @@
 import { Treatment } from '../errors.js'
 import { deviceIdentity } from '../device.js'
 import { request } from '../http.js'
-import { readMediaItem } from './catalog.js'
 
 /**
  * Read progress.
@@ -47,9 +46,14 @@ export function resetProgressClock() {
  * @param {object} position
  * @param {number} [position.page] one-based page.
  * @param {object|null} [position.locator] an opaque Readium locator, stored as given.
+ * @param {boolean} [position.completed] whether the reader reached the final logical view.
+ * @param {boolean} [position.keepalive] keep the request alive during page dismissal.
  * @returns {Promise<null>} once the write was applied or a newer stored write won.
  */
-export async function writeProgress(mediaItemId, { page = undefined, locator = null } = {}) {
+export async function writeProgress(
+  mediaItemId,
+  { page = undefined, locator = null, completed = undefined, keepalive = undefined } = {},
+) {
   const { deviceId, deviceName } = deviceIdentity()
   try {
     await request(`/media-items/${mediaItemId}/progress`, {
@@ -57,10 +61,12 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
       body: {
         ...(page === undefined ? {} : { page }),
         ...(locator ? { locator } : {}),
+        ...(completed === undefined ? {} : { completed }),
         deviceId,
         deviceName,
         modifiedAtMillis: progressStamp(),
       },
+      keepalive,
     })
     return null
   } catch (error) {
@@ -68,8 +74,7 @@ export async function writeProgress(mediaItemId, { page = undefined, locator = n
     // A stale request has already lost safely: the server kept the newer row. Learn its
     // clock so later movement can be saved, but do not interrupt reading or retry the
     // stale page and accidentally rewind an out-of-order write from this same reader.
-    const current = await readMediaItem(mediaItemId)
-    const storedStamp = Number(current.progress?.readAtMillis)
+    const storedStamp = Number(error.details?.progress?.readAtMillis)
     if (Number.isFinite(storedStamp)) lastStamp = Math.max(lastStamp, storedStamp)
     return null
   }

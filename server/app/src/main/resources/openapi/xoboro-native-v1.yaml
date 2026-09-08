@@ -2449,12 +2449,18 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/XoboroMediaProgressRequest" }
+            example:
+              page: 10
+              completed: false
+              deviceId: synthetic-device
+              deviceName: Synthetic reader
+              modifiedAtMillis: 1735689600000
       responses:
         "200":
           description: >-
             Applied. The body is the stored progress, not an echo of the request:
-            `completed` is derived from the page and the analyzed page count, and
-            `updatedAtMillis` is the server's write time rather than the client clock.
+            explicit completion is preserved, and `updatedAtMillis` is the server's
+            write time rather than the client clock.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/XoboroMediaProgressResponse" }
@@ -2466,7 +2472,17 @@ paths:
             silently rewind a reader's place.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/XoboroApiError" }
+              schema: { $ref: "#/components/schemas/XoboroStaleProgressResponse" }
+              example:
+                code: stale_progress
+                message: Read progress is not newer than the stored progress
+                progress:
+                  page: 7
+                  completed: false
+                  readAtMillis: 1735689601000
+                  updatedAtMillis: 1735689601100
+                  deviceId: synthetic-device
+                  deviceName: Synthetic reader
         "400":
           description: Invalid request body or query parameter.
           content:
@@ -4345,6 +4361,12 @@ components:
             One-based page, within the analyzed page count. A value outside that range is
             `400` rather than being clamped, so a client cannot quietly store a position
             the item does not have.
+        completed:
+          type: boolean
+          description: >-
+            Optional explicit completion state. `false` keeps the final page resumable;
+            `true` is accepted only with the final page. When omitted, the historical
+            `page == pageCount` completion rule is retained.
         locator:
           type: object
           additionalProperties: true
@@ -4379,8 +4401,8 @@ components:
         completed:
           type: boolean
           description: >-
-            Derived from the page and the analyzed page count rather than sent by the
-            client, so it cannot disagree with the position it accompanies.
+            The caller's explicit value when supplied; otherwise derived from the page
+            and analyzed page count. `true` can accompany only the final page.
         readAtMillis:
           type: integer
           format: int64
@@ -4400,6 +4422,20 @@ components:
           additionalProperties: true
           nullable: true
           description: Absent when the reader that wrote this had no locator.
+    XoboroStaleProgressResponse:
+      type: object
+      required: [code, message, progress]
+      description: >-
+        A stale-progress error carrying the row that won conflict ordering, so a client
+        can advance its local clock without a follow-up media-item request.
+      properties:
+        code:
+          type: string
+          enum: [stale_progress]
+        message:
+          type: string
+        progress:
+          $ref: "#/components/schemas/XoboroMediaProgressResponse"
     XoboroMediaPosition:
       type: object
       required: [position, href, mediaType, progression, totalProgression]

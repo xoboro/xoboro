@@ -125,17 +125,29 @@ async function readError(response, nowMillis) {
   const retryAfterSeconds = parseRetryAfter(response.headers.get('Retry-After'), nowMillis)
   let code = ''
   let serverMessage = ''
+  let details = {}
   try {
     const body = await response.json()
     if (body && typeof body.code === 'string') code = body.code
     if (body && typeof body.message === 'string') serverMessage = body.message
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      details = Object.fromEntries(
+        Object.entries(body).filter(([key]) => key !== 'code' && key !== 'message'),
+      )
+    }
   } catch {
     // A non-JSON body means something between the client and the route answered
     // — a reverse proxy, or the dev server. It is a real failure, so it must not
     // be swallowed, but it carries no native code to branch on.
   }
   if (!code) code = `http_${response.status}`
-  return new XoboroApiError({ status: response.status, code, serverMessage, retryAfterSeconds })
+  return new XoboroApiError({
+    status: response.status,
+    code,
+    serverMessage,
+    retryAfterSeconds,
+    details,
+  })
 }
 
 /**
@@ -151,6 +163,7 @@ async function readError(response, nowMillis) {
  * @param {Record<string, unknown>} [options.query]
  * @param {unknown} [options.body] serialised as JSON when present.
  * @param {AbortSignal} [options.signal]
+ * @param {boolean} [options.keepalive]
  * @param {typeof fetch} [options.fetchImpl] injected for tests.
  * @param {() => number} [options.now] injected for tests.
  * @returns {Promise<unknown>} parsed JSON, or `null` for an empty body.
@@ -161,6 +174,7 @@ export async function request(path, options = {}) {
     query,
     body,
     signal,
+    keepalive,
     fetchImpl = globalThis.fetch,
     now = () => Date.now(),
   } = options
@@ -173,6 +187,7 @@ export async function request(path, options = {}) {
     response = await fetchImpl(url, {
       method,
       signal,
+      ...(keepalive === undefined ? {} : { keepalive }),
       // Sends the HttpOnly session cookie. There is no Authorization header on
       // this surface: the token is never in JavaScript, by design.
       credentials: 'same-origin',

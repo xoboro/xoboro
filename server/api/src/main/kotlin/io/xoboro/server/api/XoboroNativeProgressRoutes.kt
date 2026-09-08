@@ -51,6 +51,7 @@ fun Route.xoboroNativeProgressRoutes(
               // this reader not having one.
               locatorJson =
                 request.locator?.let { Json.encodeToString(JsonObject.serializer(), it) },
+              completed = request.completed,
             )
           } catch (_: IllegalArgumentException) {
             call.respond(
@@ -64,9 +65,10 @@ fun Route.xoboroNativeProgressRoutes(
           is ReadProgressUpdate.Stale ->
             call.respond(
               HttpStatusCode.Conflict,
-              XoboroApiError(
-                "stale_progress",
-                "Read progress is not newer than the stored progress",
+              XoboroStaleProgressResponse(
+                code = "stale_progress",
+                message = "Read progress is not newer than the stored progress",
+                progress = result.stored.toNativeProgressResponse(),
               ),
             )
           ReadProgressUpdate.MediaItemNotFound ->

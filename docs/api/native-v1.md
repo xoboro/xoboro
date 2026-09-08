@@ -24,7 +24,8 @@ Clients must branch on `code`, not the human-readable `message`. Malformed JSON
 returns `400 invalid_request`, missing or invalid authentication returns
 `401 authentication_required`, and login throttling returns
 `429 rate_limit_exceeded` with a `Retry-After` header.
-Read progress conflicts return `409 stale_progress`.
+Read progress conflicts return `409 stale_progress` with the stored native
+progress embedded as `progress`.
 
 ## Session transports
 
@@ -594,6 +595,7 @@ that same identifier.
 ```json
 {
   "page": 4,
+  "completed": false,
   "locator": {
     "href": "chapter-2.xhtml",
     "locations": {
@@ -607,10 +609,34 @@ that same identifier.
 ```
 
 `locator` is an opaque JSON object stored with the page position.
+`completed` is optional. An explicit `false` is authoritative even on the final
+page, allowing a split spread or scrolling view to remain resumable until its
+final logical view is reached. An explicit `true` is accepted only with the
+final page. Omitting the field preserves the historical behaviour where
+`page == pageCount` marks the item complete.
 `modifiedAtMillis` is the client's own clock and is the sole conflict-ordering
 key; the server does not substitute its own clock. A value older than or equal
 to the currently stored progress returns `409 stale_progress` without applying
-the write.
+the write. The conflict body is self-contained:
+
+```json
+{
+  "code": "stale_progress",
+  "message": "Read progress is not newer than the stored progress",
+  "progress": {
+    "page": 7,
+    "completed": false,
+    "readAtMillis": 1735689601000,
+    "updatedAtMillis": 1735689601100,
+    "deviceId": "synthetic-device",
+    "deviceName": "Synthetic reader"
+  }
+}
+```
+
+Clients use `progress.readAtMillis` to advance their next write clock; no
+follow-up media-item read is required. A final browser lifecycle flush can use
+Fetch `keepalive` while retaining the same same-origin credential transport.
 
 The endpoint supports the same cookie and bearer transports, including the
 same-origin requirements for cookie mutations, described in

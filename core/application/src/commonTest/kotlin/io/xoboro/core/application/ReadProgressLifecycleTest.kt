@@ -106,6 +106,80 @@ class ReadProgressLifecycleTest {
   }
 
   @Test
+  fun `explicit incomplete keeps the final page resumable`() {
+    val fixture = Fixture()
+
+    val result =
+      fixture.lifecycle.updateBookProgression(
+        bookId = BOOK_ID,
+        userId = USER_ID,
+        page = 3,
+        modifiedAtMillis = 200,
+        deviceId = "device-1",
+        deviceName = "Synthetic reader",
+        locatorJson = null,
+        completed = false,
+      )
+
+    assertEquals(false, assertIs<ReadProgressUpdate.Applied>(result).progress.completed)
+  }
+
+  @Test
+  fun `explicit complete marks the final page complete`() {
+    val fixture = Fixture()
+
+    val result =
+      fixture.lifecycle.updateBookProgression(
+        bookId = BOOK_ID,
+        userId = USER_ID,
+        page = 3,
+        modifiedAtMillis = 200,
+        deviceId = "device-1",
+        deviceName = "Synthetic reader",
+        locatorJson = null,
+        completed = true,
+      )
+
+    assertEquals(true, assertIs<ReadProgressUpdate.Applied>(result).progress.completed)
+  }
+
+  @Test
+  fun `omitted completion retains final page completion`() {
+    val fixture = Fixture()
+
+    val result =
+      fixture.lifecycle.updateBookProgression(
+        bookId = BOOK_ID,
+        userId = USER_ID,
+        page = 3,
+        modifiedAtMillis = 200,
+        deviceId = "device-1",
+        deviceName = "Synthetic reader",
+        locatorJson = null,
+      )
+
+    assertEquals(true, assertIs<ReadProgressUpdate.Applied>(result).progress.completed)
+  }
+
+  @Test
+  fun `rejects explicit completion before the final page`() {
+    val fixture = Fixture()
+
+    assertFailsWith<IllegalArgumentException> {
+      fixture.lifecycle.updateBookProgression(
+        bookId = BOOK_ID,
+        userId = USER_ID,
+        page = 2,
+        modifiedAtMillis = 200,
+        deviceId = "device-1",
+        deviceName = "Synthetic reader",
+        locatorJson = null,
+        completed = true,
+      )
+    }
+  }
+
+  @Test
   fun `rejects progression updates for a deleted book`() {
     val fixture = Fixture(book = book().copy(deletedAtMillis = 20))
 

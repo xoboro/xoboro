@@ -18,13 +18,13 @@ import io.xoboro.server.api.SessionResponse
 import io.xoboro.server.api.SessionTransport
 import io.xoboro.server.api.SetupRequest
 import io.xoboro.server.api.XOBORO_API_PREFIX
-import io.xoboro.server.api.XoboroApiError
 import io.xoboro.server.api.XoboroLibraryAdministrationRequest
 import io.xoboro.server.api.XoboroLibraryResponse
 import io.xoboro.server.api.XoboroLibrarySourceRequest
 import io.xoboro.server.api.XoboroMediaItemResponse
 import io.xoboro.server.api.XoboroMediaPositionResponse
 import io.xoboro.server.api.XoboroMediaProgressRequest
+import io.xoboro.server.api.XoboroStaleProgressResponse
 import io.xoboro.server.api.XoboroPageResponse
 import java.nio.file.Files
 import java.nio.file.Path
@@ -170,7 +170,11 @@ class XoboroLocalLibraryAcceptanceTest {
         assertEquals(HttpStatusCode.Conflict, stale.status)
         // An older write is refused with a code the client can branch on, not swallowed: two devices
         // syncing out of order must not silently rewind the reader's place.
-        assertEquals("stale_progress", stale.body<XoboroApiError>().code)
+        val staleBody = stale.body<XoboroStaleProgressResponse>()
+        assertEquals("stale_progress", staleBody.code)
+        assertEquals(2, staleBody.progress.page)
+        assertEquals(true, staleBody.progress.completed)
+        assertEquals(2_000, staleBody.progress.readAtMillis)
       }
     }
 
