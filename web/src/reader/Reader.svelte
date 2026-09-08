@@ -16,7 +16,8 @@
    * - Page images carried `alt="p12"` — a position, not a description, and noise for a
    *   screen reader. They are decorative now, and the position is announced once as
    *   live text where it is actually useful.
-   * - Progress was written with `.catch(() => {})`. A conflict now asks.
+   * - Progress write failures surface without interrupting reading for a stale write
+   *   the server has already resolved safely.
    */
   import { onDestroy, onMount, untrack } from 'svelte'
   import { ChevronLeft, ChevronRight, List, Settings } from '@lucide/svelte'
@@ -138,7 +139,6 @@
   let chrome = $state(false)
   let settingsOpen = $state(false)
   let error = $state(null)
-  let conflict = $state(null)
   let previousId = $state(null)
   let nextId = $state(null)
   let loadedId = $state('')
@@ -167,13 +167,7 @@
     if (pendingPage === null || !loadedId) return
     const page = pendingPage
     pendingPage = null
-    writeProgress(loadedId, { page })
-      .then((result) => {
-        // Not swallowed. The refusal exists so another device cannot silently rewind
-        // this reader's place, so it is surfaced as a choice.
-        if (result) conflict = result.current
-      })
-      .catch((caught) => (error = caught))
+    writeProgress(loadedId, { page }).catch((caught) => (error = caught))
   }
 
   function noteProgress(page) {
@@ -334,17 +328,6 @@
     openController?.abort()
     loader.reset()
   })
-
-  function acceptConflict() {
-    const page = conflict?.page
-    conflict = null
-    if (!page) return
-    // Adopting the other device's position, so it must not be written straight back as
-    // a newer value — that would start the same argument from this side.
-    current = page
-    index = indexOfPage(views, page)
-    if (isScroll) requestAnimationFrame(() => scrollTo(page))
-  }
 
   const TAP_SLOP = 10
   const SWIPE_DISTANCE = 40
@@ -631,26 +614,6 @@
   </Dialog>
 {/if}
 
-{#if conflict}
-  <Dialog title={$_('reader.conflictTitle')} onclose={() => (conflict = null)}>
-    {#snippet children()}
-      <p data-testid="conflict-body">
-        {$_('reader.conflictBody', { values: { page: conflict.page } })}
-      </p>
-    {/snippet}
-    {#snippet footer()}
-      <!-- Both choices are equally available. Resolving it either way without asking is
-           what the server's refusal exists to prevent. -->
-      <button type="button" data-testid="conflict-stay" onclick={() => (conflict = null)}>
-        {$_('reader.conflictStay')}
-      </button>
-      <button class="primary" type="button" data-testid="conflict-jump" onclick={acceptConflict}>
-        {$_('reader.conflictJump')}
-      </button>
-    {/snippet}
-  </Dialog>
-{/if}
-
 <style>
   .topbar,
   .bottombar {
@@ -785,16 +748,5 @@
     background: var(--accent);
     color: var(--accent-contrast);
     font-weight: 700;
-  }
-  .primary {
-    min-height: var(--touch-target);
-    padding: 0 var(--space-4);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--accent-contrast);
-    font: inherit;
-    font-weight: 700;
-    cursor: pointer;
   }
 </style>
