@@ -1308,12 +1308,12 @@ class JooqCatalogReadRepository(
    * The terms are ANDed inside a single subquery rather than split into one subquery each, and that
    * is what keeps the short ones affordable. `MATCH` is a lookup and reduces the rows before any
    * title is read, so a query pairing a long term with a short one - the ordinary case, since a
-   * reader who types two words rarely types two of two characters - never scans at all. Only a query
-   * whose every term is two characters reaches the whole index, and that is measured rather than
-   * assumed: **15-36 ms** across the real catalogue's 123,748 indexed titles (52 MiB), against
-   * sub-millisecond for the trigram lookup it falls back from. Fast enough to answer a reader, and
-   * the alternative - a second index of two-character windows - costs another ~50 MiB, its own
-   * triggers and a migration to buy back 30 ms.
+   * reader who types two words rarely types two of two characters - never scans at all.
+   *
+   * Without a trigram, `entity_type` cannot narrow the scan: it is UNINDEXED in FTS5, so looking for
+   * series would read every book title too. The key table indexes entity type and addresses title
+   * documents by rowid, so a short series query seeks only series documents before testing LIKE.
+   * Queries with a trigram keep its selective lookup, and short book queries keep their scan.
    */
   private fun interiorClause(
     idColumn: String,
@@ -1321,6 +1321,14 @@ class JooqCatalogReadRepository(
     interior: InteriorSearch,
   ): String {
     val conditions = mutableListOf("entity_type = '$entityType'")
+    if (entityType == "SERIES" && interior.match == null) {
+      conditions +=
+        """
+        rowid IN (
+          SELECT index_rowid FROM catalog_search_key WHERE entity_type = 'SERIES'
+        )
+        """.trimIndent()
+    }
     if (interior.match != null) conditions += "catalog_title_substring MATCH ?"
     interior.contains.forEach { _ -> conditions += "title LIKE ?" }
     return """

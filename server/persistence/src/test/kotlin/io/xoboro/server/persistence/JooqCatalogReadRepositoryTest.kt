@@ -34,11 +34,15 @@ import io.xoboro.core.domain.SourceLocation
 import io.xoboro.core.domain.User
 import io.xoboro.core.domain.UserId
 import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.jooq.ExecuteListener
+import org.jooq.ExecuteListenerProvider
+import org.jooq.conf.ParamType
 import org.junit.jupiter.api.io.TempDir
 
 class JooqCatalogReadRepositoryTest {
@@ -1554,6 +1558,60 @@ class JooqCatalogReadRepositoryTest {
           ).content
           .map { it.series.id.value },
       )
+    }
+  }
+
+  @Test
+  fun `series search seeks short title terms by rowid and longer terms by trigram`() {
+    withCatalog("substring-series-plan") { database ->
+      database.retitleSeriesA("새싹숲길")
+      val searches = CopyOnWriteArrayList<String>()
+      database.dsl.configuration().set(
+        ExecuteListenerProvider {
+          ExecuteListener.onExecuteEnd { context ->
+            val sql = context.query()?.getSQL(ParamType.INLINED).orEmpty()
+            if (sql.trimStart().startsWith("SELECT", ignoreCase = true) &&
+              sql.contains("catalog_title_substring")
+            ) {
+              searches += sql
+            }
+          }
+        },
+      )
+
+      val catalog = JooqCatalogReadRepository(database)
+      val queries =
+        listOf("숲길" to "=", "새싹 숲길" to "=", "싹숲" to "=", "새싹숲" to "M", "싹숲길 새싹" to "M")
+      queries.forEach { (query, indexConstraint) ->
+        searches.clear()
+        val page =
+          catalog.findSeries(
+            SeriesCatalogQuery(fullTextSearch = query),
+            CatalogAccess(),
+            CatalogPageRequest(),
+          )
+
+        assertEquals(listOf("series-a"), page.content.map { it.series.id.value }, query)
+        assertEquals(1L, page.totalElements, query)
+        assertEquals(2, searches.size, "capture both the page and its total for $query")
+        searches.forEach { sql ->
+          val titlePlans =
+            database.dsl.fetch("EXPLAIN QUERY PLAN $sql")
+              .map { it.get("detail", String::class.java).orEmpty() }
+              .filter { it.contains("catalog_title_substring VIRTUAL TABLE INDEX") }
+          assertTrue(titlePlans.isNotEmpty(), "expected title lookups for $query")
+          titlePlans.forEach { titlePlan ->
+            val constraints = titlePlan.substringAfter("INDEX")
+            assertTrue(
+              constraints.contains(indexConstraint),
+              "$query must use $indexConstraint rather than scan unrelated titles: $titlePlans",
+            )
+            if (indexConstraint == "M") {
+              assertFalse(constraints.contains("="), "keep the trigram lookup for $query: $titlePlans")
+            }
+          }
+        }
+      }
     }
   }
 
