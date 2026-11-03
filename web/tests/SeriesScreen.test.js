@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SeriesScreen from '../src/reader/SeriesScreen.svelte'
+const readerLoads = vi.hoisted(() => ({ load: vi.fn(() => Promise.resolve({})) }))
+vi.mock('../src/lib/readerScreens.js', () => ({ loadReaderScreen: readerLoads.load }))
 
 /**
  * A hub the test can publish into.
@@ -149,6 +151,14 @@ beforeEach(() => {
  * catalogue of 3,339 series, that is thousands of requests for one page nobody touched.
  */
 describe('series screen refreshes', () => {
+  it('prepares the reader module without blocking the chapter list', async () => {
+    readerLoads.load.mockImplementationOnce(() => new Promise(() => {}))
+    globalThis.fetch = server()
+    render(SeriesScreen, { params: { id: 's1' } })
+    await waitFor(() => expect(screen.getByTestId('reading-order')).toBeInTheDocument())
+    expect(readerLoads.load).toHaveBeenCalled()
+  })
+
   it('ignores a change to a different series', async () => {
     const fetchImpl = server()
     globalThis.fetch = fetchImpl

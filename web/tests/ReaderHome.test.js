@@ -7,6 +7,9 @@ import Home from '../src/reader/Home.svelte'
 import { SessionStatus, session } from '../src/lib/session.js'
 
 const homeEvents = vi.hoisted(() => ({ domain: [], resync: [] }))
+const screenLoads = vi.hoisted(() => ({ series: vi.fn(() => Promise.resolve({})) }))
+
+vi.mock('../src/lib/readerScreens.js', () => ({ loadSeriesScreen: screenLoads.series }))
 
 vi.mock('../src/lib/eventHub.js', () => ({
   eventHub: {
@@ -112,6 +115,53 @@ function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {
 }
 
 describe('Reader home', () => {
+  it('releases hidden browsing requests for search and resumes them when the query clears', async () => {
+    const pending = []
+    let allowBrowsing = false
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (url.includes('/libraries')) return Promise.resolve(reply([]))
+      if (url.includes('query=')) {
+        return Promise.resolve(reply(envelope([{ id: 'synthetic-result', title: 'Synthetic match' }])))
+      }
+      if (!allowBrowsing) {
+        pending.push(init.signal)
+        return new Promise((resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        })
+      }
+      return Promise.resolve(reply(envelope()))
+    })
+    render(Home)
+    await waitFor(() => expect(pending).toHaveLength(5))
+
+    await fireEvent.input(await screen.findByTestId('home-search'), { target: { value: 'synthetic' } })
+    expect(pending.every((signal) => signal.aborted)).toBe(true)
+    await screen.findByText('Synthetic match')
+    expect(screen.queryByTestId('shelves-failed')).toBeNull()
+
+    allowBrowsing = true
+    await fireEvent.input(screen.getByTestId('home-search'), { target: { value: '' } })
+    await waitFor(() => {
+      expect(globalThis.fetch.mock.calls.filter(([url]) => url.includes('/feeds/'))).toHaveLength(8)
+      expect(globalThis.fetch.mock.calls.filter(([url]) => url.includes('/series?') && !url.includes('query='))).toHaveLength(2)
+    })
+    expect(screen.queryByTestId('home-search-results')).toBeNull()
+  })
+
+  it('shows search results without waiting for the next screen module', async () => {
+    screenLoads.series.mockImplementationOnce(() => new Promise(() => {}))
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('/libraries')) return reply([])
+      return reply(envelope(url.includes('query=')
+        ? [{ id: 'synthetic-module', title: 'Synthetic module result' }]
+        : []))
+    })
+    render(Home)
+    await fireEvent.input(await screen.findByTestId('home-search'), { target: { value: 'synthetic-module' } })
+    await screen.findByText('Synthetic module result')
+    expect(screenLoads.series).toHaveBeenCalled()
+  })
+
   it('renders a completed shelf without waiting for the slowest feed', async () => {
     let finishSlowFeed
     globalThis.fetch = vi.fn(async (url) => {

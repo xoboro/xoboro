@@ -11,12 +11,13 @@
    */
   import Router from 'svelte-spa-router'
   import { wrap } from 'svelte-spa-router/wrap'
+  import { loadReaderScreen, loadSeriesScreen } from './lib/readerScreens.js'
 
   const routes = {
     '/': wrap({ asyncComponent: () => import('./reader/Home.svelte') }),
     '/search': wrap({ asyncComponent: () => import('./reader/Search.svelte') }),
-    '/series/:id': wrap({ asyncComponent: () => import('./reader/SeriesScreen.svelte') }),
-    '/read/:id': wrap({ asyncComponent: () => import('./reader/ReaderRoute.svelte') }),
+    '/series/:id': wrap({ asyncComponent: loadSeriesScreen }),
+    '/read/:id': wrap({ asyncComponent: loadReaderScreen }),
     // Reader-side, not console: reading a collection is open to any authenticated
     // caller, and only its mutations are administrator-only.
     '/collections': wrap({

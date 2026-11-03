@@ -40,6 +40,44 @@ afterEach(() => {
  * reader shows a placeholder immediately and fades the image in over it.
  */
 describe('Cover', () => {
+  it('does not request a distant cover until it is near the viewport', async () => {
+    const observers = []
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(notify, options) {
+        this.notify = notify
+        this.options = options
+        this.disconnect = vi.fn()
+        observers.push(this)
+      }
+      observe() {}
+    })
+    const { container, rerender } = render(Cover, { src: '/artwork/synthetic-a' })
+    const image = container.querySelector('img')
+    const nearby = observers.find((observer) => observer.options?.rootMargin === '256px')
+    expect(image.getAttribute('src')).toBeNull()
+
+    nearby.notify([{ isIntersecting: false }])
+    await tick()
+    expect(image.getAttribute('src')).toBeNull()
+
+    nearby.notify([{ isIntersecting: true }])
+    await tick()
+    expect(image.getAttribute('src')).toBe('/artwork/synthetic-a')
+    expect(nearby.disconnect).toHaveBeenCalled()
+
+    nearby.notify([{ isIntersecting: false }])
+    await tick()
+    expect(image.getAttribute('src')).toBe('/artwork/synthetic-a')
+    await rerender({ src: '/artwork/synthetic-b' })
+    expect(image.getAttribute('src')).toBe('/artwork/synthetic-b')
+  })
+
+  it('requests artwork without an observer when the browser has no observer support', () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const { container } = render(Cover, { src: '/artwork/synthetic-fallback' })
+    expect(container.querySelector('img').getAttribute('src')).toBe('/artwork/synthetic-fallback')
+  })
+
   it('starts shimmer only after a visible cover has waited 250ms', async () => {
     vi.useFakeTimers()
     const visibility = coverVisibility()
