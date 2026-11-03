@@ -35,6 +35,7 @@
   } from '../lib/api/progress.js'
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
+  import { loadReaderScreen } from '../lib/readerScreens.js'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Pager from '../components/Pager.svelte'
@@ -144,6 +145,9 @@
   })
 
   onMount(() => {
+    // Let the module arrive while the series data and covers are being read, rather than
+    // adding another network round trip after the reader chooses a chapter.
+    loadReaderScreen().catch(() => {})
     const offCatalog = eventHub.on(
       ['series.changed', 'media-item.added', 'media-item.changed'],
       (message) => {

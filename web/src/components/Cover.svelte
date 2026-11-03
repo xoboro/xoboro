@@ -37,6 +37,7 @@
   } = $props()
 
   let ready = $state(false)
+  let requested = $state(false)
   let failed = $state(false)
   /** Bumped per retry and appended to the URL, because the browser caches the 404. */
   let attempt = $state(0)
@@ -70,7 +71,20 @@
   })
 
   onMount(() => {
-    if (typeof IntersectionObserver === 'undefined') return
+    if (typeof IntersectionObserver === 'undefined') {
+      requested = true
+      return
+    }
+
+    // Native lazy images may load several thousand pixels ahead. On a chapter list
+    // that lets dozens of small covers compete with the chapter the reader opens.
+    // Keep a bounded lead, and keep the source once requested so scrolling never reloads it.
+    const nearby = new IntersectionObserver(([entry]) => {
+      if (disposed || !entry?.isIntersecting) return
+      requested = true
+      nearby.disconnect()
+    }, { rootMargin: '256px' })
+    nearby.observe(coverElement)
 
     const observer = new IntersectionObserver(([entry]) => {
       if (disposed) return
@@ -79,7 +93,10 @@
     })
     observer.observe(coverElement)
 
-    return () => observer.disconnect()
+    return () => {
+      nearby.disconnect()
+      observer.disconnect()
+    }
   })
 
   onDestroy(() => {
@@ -131,7 +148,7 @@
   {/if}
   {#if !failed}
     <img
-      src={url}
+      src={requested ? url : undefined}
       alt=""
       class:ready
       role="presentation"

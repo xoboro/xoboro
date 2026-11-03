@@ -33,6 +33,7 @@
   import { Preference, readPreference, writePreference } from '../lib/preferences.js'
   import { createHomeRefreshCoordinator } from './homeRefreshCoordinator.js'
   import { readHomeState, writeHomeState } from './homeState.js'
+  import { loadSeriesScreen } from '../lib/readerScreens.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
@@ -167,6 +168,7 @@
   let searchField = $state(null)
 
   function openAdvanced() {
+    pauseBrowsing()
     if (!query.trim()) catalogScrollY = window.scrollY
     clearTimeout(searchTimer)
     searchSerial += 1
@@ -184,7 +186,10 @@
     clearTimeout(searchTimer)
     submittedQuery = query
     advancedOpen = false
-    if (!query.trim()) return
+    if (!query.trim()) {
+      resumeBrowsing()
+      return
+    }
     searching = true
     runSearch(query)
   }
@@ -223,6 +228,7 @@
       }, { signal: controller.signal })
       if (serial !== searchSerial) return
       results = found.items ?? []
+      if (results.length > 0) loadSeriesScreen().catch(() => {})
       // Deliberately not clearing `error`. It may belong to the grid or the shelves, which
       // this request knows nothing about - clearing it would hide a failure and leave the
       // screen it belongs to stranded on "Loading…" with no notice and no retry.
@@ -241,10 +247,29 @@
   let shelvesController = null
   let seriesSerial = 0
   let seriesController = null
+  let browsingPaused = false
   let refreshCoordinator = null
   let restoreScrollY = null
   /** The catalog's position, kept separate while either search surface owns the document. */
   let catalogScrollY = 0
+
+  function pauseBrowsing() {
+    if (!shelvesController && !seriesController) return
+    browsingPaused = true
+    shelvesSerial += 1
+    seriesSerial += 1
+    shelvesController?.abort()
+    seriesController?.abort()
+    shelvesController = null
+    seriesController = null
+    seriesBusy = false
+  }
+
+  function resumeBrowsing() {
+    if (!browsingPaused) return
+    browsingPaused = false
+    refresh()
+  }
 
   function saveHomeState(captureDocumentScroll = true) {
     if (captureDocumentScroll && !advancedOpen && !query.trim()) {
@@ -282,9 +307,13 @@
     // is asking for their shelves back now, not in a third of a second.
     if (!term.trim()) {
       submittedQuery = ''
-      if (!advancedOpen) runSearch('')
+      if (!advancedOpen) {
+        runSearch('')
+        resumeBrowsing()
+      }
       return
     }
+    pauseBrowsing()
     if (!advancedOpen) {
       // The live query owns validity immediately, even though its request waits for the
       // debounce. Otherwise the preceding answer can land during these 300 ms and make
@@ -428,6 +457,10 @@
   }
 
   async function refresh() {
+    if (searchActive || advancedOpen) {
+      browsingPaused = true
+      return
+    }
     await Promise.all([loadShelves(), loadSeries()])
   }
 

@@ -27,11 +27,18 @@ describe('shell split', () => {
   })
 
   it('loads each reader screen as a route chunk', () => {
-    for (const component of ['Home', 'Search', 'SeriesScreen', 'ReaderRoute']) {
+    for (const component of ['Home', 'Search']) {
       expect(shell).toMatch(
         new RegExp(`import\\(['\"]\\.\\/reader\\/${component}\\.svelte['\"]\\)`),
       )
     }
+    const loaders = readFileSync(join(SOURCE_ROOT, 'lib/readerScreens.js'), 'utf8')
+    for (const component of ['SeriesScreen', 'ReaderRoute']) {
+      expect(loaders).toContain(`import('../reader/${component}.svelte')`)
+    }
+    expect(shell).toContain('asyncComponent: loadSeriesScreen')
+    expect(shell).toContain('asyncComponent: loadReaderScreen')
+    expect(loaders).not.toMatch(/^\s*import\s+.*from\s+['"]\.\.\/reader\//m)
     expect(shell).not.toMatch(/^\s*import\s+\w+\s+from\s+['"]\.\/reader\//m)
   })
 
