@@ -268,6 +268,7 @@ fun Application.xoboroModule(runtime: XoboroRuntime) {
     libraryRepository = runtime.libraryRepository,
     contextPath = runtime.effectiveServerContextPath,
     webDirectory = runtime.webDirectory,
+    webAssetArchiveDirectory = runtime.webAssetArchiveDirectory,
     corsAllowedOrigins = runtime.corsAllowedOrigins,
     trustedProxyHosts = runtime.trustedProxyHosts,
     metricsToken = runtime.metricsToken,
@@ -325,6 +326,7 @@ fun Application.xoboroModule(
   libraryRepository: LibraryRepository? = null,
   contextPath: String? = null,
   webDirectory: Path? = null,
+  webAssetArchiveDirectory: Path? = null,
   corsAllowedOrigins: Set<String> = emptySet(),
   trustedProxyHosts: Set<String> = emptySet(),
   metricsToken: String? = null,
@@ -812,7 +814,7 @@ fun Application.xoboroModule(
       }
       // Last on purpose. This is the only wildcard in the tree, and registering it
       // before the API routes would let it answer for paths they own.
-      webDirectory?.let(::xoboroWebAssetRoutes)
+      webDirectory?.let { xoboroWebAssetRoutes(it, assetArchiveDirectory = webAssetArchiveDirectory) }
     }
     if (contextPath == null) {
       routes()

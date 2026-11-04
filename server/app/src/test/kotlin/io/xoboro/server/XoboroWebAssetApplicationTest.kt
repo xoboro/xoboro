@@ -89,6 +89,56 @@ class XoboroWebAssetApplicationTest {
   }
 
   @Test
+  fun `missing asset files answer non-cacheable 404 rather than an HTML module`() {
+    val web = webDirectory()
+    testApplication {
+      application { xoboroModule(openRuntime(web)) }
+      for (path in listOf("/assets/Reader-missing123.js", "/assets/Reader-missing123.css")) {
+        val response = client.get(path)
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertFalse("xoboro-shell" in response.bodyAsText())
+        assertTrue(response.headers[HttpHeaders.CacheControl].orEmpty().contains("no-store"))
+      }
+    }
+  }
+
+  @Test
+  fun `serves archived immutable chunks while keeping the current shell`() {
+    val web = webDirectory()
+    val archive = Files.createDirectories(tempDirectory.resolve("archive"))
+    Files.writeString(archive.resolve("Reader-previous1.js"), "export const previous = true")
+    testApplication {
+      application { xoboroModule(openRuntime(web, archive)) }
+      val response = client.get("/assets/Reader-previous1.js")
+      assertEquals(HttpStatusCode.OK, response.status)
+      assertEquals("export const previous = true", response.bodyAsText())
+      assertTrue(response.headers[HttpHeaders.ContentType].orEmpty().contains("javascript"))
+      assertTrue(response.headers[HttpHeaders.CacheControl].orEmpty().contains("max-age="))
+      assertTrue("xoboro-shell" in client.get("/").bodyAsText())
+    }
+  }
+
+  @Test
+  fun `archive does not expose arbitrary files or links outside the archive`() {
+    val web = webDirectory()
+    val archive = Files.createDirectories(tempDirectory.resolve("archive"))
+    val privateFile = Files.writeString(tempDirectory.resolve("private.txt"), "synthetic-private")
+    Files.writeString(archive.resolve("database.sqlite"), "synthetic-private")
+    Files.createSymbolicLink(archive.resolve("Reader-external1.js"), privateFile)
+    val outside = Files.createDirectories(tempDirectory.resolve("outside"))
+    Files.writeString(outside.resolve("Reader-external2.js"), "synthetic-private")
+    Files.createSymbolicLink(archive.resolve("linked"), outside)
+    testApplication {
+      application { xoboroModule(openRuntime(web, archive)) }
+      for (path in listOf("/assets/database.sqlite", "/assets/Reader-external1.js", "/assets/linked/Reader-external2.js")) {
+        val response = client.get(path)
+        assertEquals(HttpStatusCode.NotFound, response.status)
+        assertFalse("synthetic-private" in response.bodyAsText())
+      }
+    }
+  }
+
+  @Test
   fun `caches hashed assets but never the shell`() {
     // The shell names asset files that carry a content hash. Caching the shell
     // serves the previous deployment's HTML, which then requests asset names that
@@ -416,7 +466,7 @@ class XoboroWebAssetApplicationTest {
    * directory straight to the module, so the wiring under test includes the
    * start-up check that decides whether a directory is worth serving at all.
    */
-  private fun openRuntime(web: Path): XoboroRuntime =
+  private fun openRuntime(web: Path, archive: Path? = null): XoboroRuntime =
     XoboroRuntime.open(
       ServerConfig(
         port = 25_600,
@@ -428,6 +478,7 @@ class XoboroWebAssetApplicationTest {
         shutdownTimeoutMillis = 2_000,
         backupsDirectory = tempDirectory.resolve("backups"),
         webDirectory = web,
+        webAssetArchiveDirectory = archive,
       ),
     )
 

@@ -29,6 +29,7 @@ data class ServerConfig(
    * the API unusable for anyone who only wants the API.
    */
   val webDirectory: Path = Path.of("web"),
+  val webAssetArchiveDirectory: Path? = null,
   val corsAllowedOrigins: Set<String> = emptySet(),
   val trustedProxyHosts: Set<String> = emptySet(),
   val metricsToken: String? = null,
@@ -158,6 +159,11 @@ data class ServerConfig(
             ?.let(Path::of)
             ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() }
             ?: normalizedWorkingDirectory.resolve("web"),
+        webAssetArchiveDirectory =
+          environment["XOBORO_WEB_ASSET_ARCHIVE_PATH"]
+            ?.takeIf(String::isNotBlank)
+            ?.let(Path::of)
+            ?.let { if (it.isAbsolute) it.normalize() else normalizedWorkingDirectory.resolve(it).normalize() },
         corsAllowedOrigins =
           environment["KOMGA_CORS_ALLOWEDORIGINS"]
             ?.split(',')

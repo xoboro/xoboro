@@ -27,6 +27,7 @@ class ServerConfigTest {
     assertEquals(4, config.workerCount)
     assertEquals(emptySet(), config.trustedProxyHosts)
     assertEquals(null, config.metricsToken)
+    assertEquals(null, config.webAssetArchiveDirectory)
   }
 
   @Test
@@ -47,6 +48,7 @@ class ServerConfigTest {
             "XOBORO_SHUTDOWN_TIMEOUT_MILLIS" to "2000",
             "XOBORO_FONTS_PATH" to "assets/fonts",
             "XOBORO_BACKUPS_PATH" to "state/backups",
+            "XOBORO_WEB_ASSET_ARCHIVE_PATH" to "state/web-assets",
             "KOMGA_CORS_ALLOWEDORIGINS" to
               "https://reader.example.invalid, http://localhost:1234,https://reader.example.invalid",
             "XOBORO_TRUSTED_PROXIES" to "127.0.0.1, proxy.internal,127.0.0.1",
@@ -66,6 +68,7 @@ class ServerConfigTest {
     assertEquals(2_000L, config.shutdownTimeoutMillis)
     assertEquals(workingDirectory.resolve("assets/fonts"), config.fontsDirectory)
     assertEquals(workingDirectory.resolve("state/backups"), config.backupsDirectory)
+    assertEquals(workingDirectory.resolve("state/web-assets"), config.webAssetArchiveDirectory)
     assertEquals(
       setOf("https://reader.example.invalid", "http://localhost:1234"),
       config.corsAllowedOrigins,

@@ -28,9 +28,11 @@ import java.nio.file.Path
 internal fun Route.xoboroWebAssetRoutes(
   directory: Path,
   reservedPrefixes: List<String> = RESERVED_PREFIXES,
+  assetArchiveDirectory: Path? = null,
 ) {
   val root = directory.toAbsolutePath().normalize()
   val index = root.resolve(INDEX_FILE)
+  val archive = assetArchiveDirectory?.let(::WebAssetArchive)?.also { it.capture(root) }
 
   get("/{path...}") {
     val segments = call.parameters.getAll("path").orEmpty().filter(String::isNotEmpty)
@@ -83,8 +85,14 @@ internal fun Route.xoboroWebAssetRoutes(
       return@get
     }
 
-    val file = if (Files.isRegularFile(requested)) requested else index
-    if (!Files.isRegularFile(file)) {
+    val file =
+      when {
+        Files.isRegularFile(requested) -> requested
+        segments.firstOrNull() == "assets" -> archive?.find(segments.drop(1))
+        else -> index
+      }
+    if (file == null || !Files.isRegularFile(file)) {
+      call.response.headers.append("Cache-Control", "no-store")
       call.respond(HttpStatusCode.NotFound)
       return@get
     }
