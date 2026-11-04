@@ -74,6 +74,7 @@
   let error = $state(null)
   /** How many of the four shelves failed to load. Zero renders nothing. */
   let shelvesFailed = $state(0)
+  let progressShelvesBusy = $state(false)
   /**
    * Libraries this reader can see, and which one the shelf is narrowed to.
    *
@@ -291,6 +292,7 @@
     shelvesController?.abort()
     seriesController?.abort()
     shelvesController = null
+    progressShelvesBusy = false
     seriesController = null
     seriesBusy = false
   }
@@ -383,6 +385,7 @@
   async function loadShelves() {
     const version = navigation?.version()
     const serial = ++shelvesSerial
+    progressShelvesBusy = true
     shelvesController?.abort()
     const controller = new AbortController()
     shelvesController = controller
@@ -439,6 +442,7 @@
     // A shelf that could not be read is not a shelf with nothing on it.
     shelvesFailed = outcomes.filter((outcome) => outcome.status === 'rejected').length
     shelvesVersion = shelvesFailed === 0 ? version : null
+    progressShelvesBusy = false
     shelvesController = null
   }
 
@@ -804,8 +808,8 @@
   </p>
 {/if}
 
-<MediaShelf title={$_('reader.keepReading')} items={keepReading} kind="mediaItem" />
-<MediaShelf title={$_('reader.onDeck')} items={onDeck} kind="mediaItem" />
+<MediaShelf title={$_('reader.keepReading')} items={keepReading} kind="mediaItem" busy={progressShelvesBusy} />
+<MediaShelf title={$_('reader.onDeck')} items={onDeck} kind="mediaItem" busy={progressShelvesBusy} />
 <MediaShelf title={$_('reader.recentlyAdded')} items={recent} />
 <MediaShelf title={$_('reader.recentlyUpdated')} items={updated} />
 

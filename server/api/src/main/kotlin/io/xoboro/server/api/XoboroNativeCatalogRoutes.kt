@@ -122,10 +122,10 @@ fun Route.xoboroNativeCatalogRoutes(
               .firstOrNull()
           val resume =
             sequenceOf(
-              BookCatalogQuery(seriesId = seriesId, keepReading = true),
-              BookCatalogQuery(seriesId = seriesId, onDeck = true),
-            ).mapNotNull { query ->
-              catalog.findBooks(query, access, oldest).content.firstOrNull()
+              BookCatalogQuery(seriesId = seriesId, keepReading = true) to CatalogPageRequest(size = 1),
+              BookCatalogQuery(seriesId = seriesId, onDeck = true) to oldest,
+            ).mapNotNull { (query, page) ->
+              catalog.findBooks(query, access, page).content.firstOrNull()
             }.firstOrNull()
           call.respond(
             XoboroSeriesReaderContextResponse(

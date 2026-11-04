@@ -10,6 +10,7 @@ import {
   resourceUrlFor,
 } from '../src/lib/api/catalog.js'
 import { resetProgressClock } from '../src/lib/api/progress.js'
+import { progressWrites } from '../src/lib/progressWrites.js'
 import { bindEpubFrame } from '../src/reader/epubFrame.js'
 import { epubNavigationFor, epubProgressFor, epubResume } from '../src/reader/epubPosition.js'
 
@@ -92,6 +93,7 @@ function novelRoutes(extra = []) {
 }
 
 beforeEach(() => {
+  progressWrites.clear()
   resetProgressClock()
   router.replace.mockReset()
   router.push.mockReset()
@@ -109,6 +111,20 @@ describe('resourceUrlFor', () => {
 })
 
 describe('delivery failures', () => {
+  it('restarts EPUB routes at the first resource and leaves ordinary resume intact', async () => {
+    const progress = { page: 2, completed: false, locator: {
+      href: POSITIONS[1].href, locations: { position: 2, progression: 0.6 },
+    } }
+    globalThis.fetch = novelRoutes([
+      ['/media-items/n1/reader-context', reply({ item: { ...NOVEL, progress }, pages: [], positions: POSITIONS })],
+    ])
+    const restarted = render(ReaderRoute, { params: { id: 'n1' }, startAtBeginning: true })
+    expect(await screen.findByTestId('chapter-frame')).toHaveAttribute('src', resourceUrlFor('n1', POSITIONS[0].href))
+    restarted.unmount()
+    render(ReaderRoute, { params: { id: 'n1' } })
+    expect(await screen.findByTestId('chapter-frame')).toHaveAttribute('src', resourceUrlFor('n1', POSITIONS[1].href))
+  })
+
   it('treats only an unready item as worth retrying', () => {
     // media_unsupported means the file can never be delivered as it stands, and
     // page_not_decodable means this page is broken. A retry button on either is a button

@@ -276,7 +276,7 @@
 </script>
 
 <button
-  class="visually-hidden"
+  class="visually-hidden keyboard-controls"
   type="button"
   data-testid="keyboard-chrome-toggle"
   aria-expanded={chrome}
@@ -462,6 +462,11 @@
 {/if}
 
 <style>
+  .keyboard-controls {
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
   .topbar,
   .bottombar {
     position: fixed;

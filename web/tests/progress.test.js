@@ -10,6 +10,7 @@ import {
 } from '../src/lib/api/progress.js'
 import { deviceIdentity } from '../src/lib/device.js'
 import { readerNavigationState } from '../src/lib/readerNavigationState.js'
+import { readMediaItemReaderContext, readSeriesReaderContext, listSeriesMediaItems, readFeed } from '../src/lib/api/catalog.js'
 
 function reply(body, status = 200) {
   const text = body === null ? '' : JSON.stringify(body)
@@ -55,6 +56,28 @@ describe('progressStamp', () => {
 })
 
 describe('writeProgress', () => {
+  it('does not read an older resume position before a pending save finishes', async () => {
+    let finishSave
+    let storedPage = 2
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (init.method === 'PUT') return new Promise((resolve) => {
+        finishSave = () => { storedPage = JSON.parse(init.body).page; resolve(reply(null, 204)) }
+      })
+      return Promise.resolve(reply({ item: { id: 'm1', progress: { page: storedPage } } }))
+    })
+    const save = writeProgress('m1', { page: 8 })
+    const resume = readMediaItemReaderContext('m1')
+    const series = readSeriesReaderContext('s1')
+    const chapters = listSeriesMediaItems('s1')
+    const shelf = readFeed('media-items', 'keep-reading')
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    finishSave()
+    await save
+    expect((await resume).item.progress.page).toBe(8)
+    await Promise.all([series, chapters, shelf])
+    expect(globalThis.fetch).toHaveBeenCalledTimes(5)
+  })
+
   it('invalidates cached lists before and after a delayed write without waiting for SSE', async () => {
     readerNavigationState.setSession('reader-a')
     const view = readerNavigationState.open('reader-a', 'series:s1')

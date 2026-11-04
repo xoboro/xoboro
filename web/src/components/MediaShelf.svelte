@@ -17,18 +17,19 @@
     items,
     /** `'series'` or `'mediaItem'`, which decides both the artwork route and the link. */
     kind = 'series',
+    busy = false,
   } = $props()
 
   const href = (item) => (kind === 'series' ? `#/series/${item.id}` : `#/read/${item.id}`)
 </script>
 
 {#if items?.length}
-  <section>
+  <section aria-busy={busy}>
     <h2>{title}</h2>
     <ul>
       {#each items as item (item.id)}
         <li>
-          <a href={href(item)}>
+          <a href={busy ? undefined : href(item)} role={busy ? 'link' : undefined} aria-disabled={busy}>
             <Cover src={artworkUrl(kind === 'series' ? 'series' : 'mediaItem', item.id)} />
             <!-- Only for an item a reader has started. A shelf of full-width empty tracks
                  would read as "nothing read" rather than as "no bar drawn". -->

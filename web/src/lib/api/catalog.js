@@ -1,4 +1,11 @@
 import { request, resourceUrl } from '../http.js'
+import { progressWrites } from '../progressWrites.js'
+
+async function readAfterProgress(path, options, itemId = null) {
+  const pending = progressWrites.wait(itemId, { signal: options.signal })
+  if (pending) await pending
+  return request(path, options)
+}
 
 /**
  * Catalog reading: series, media items, and the named discovery feeds.
@@ -42,7 +49,8 @@ export function readFeed(collection, feed, { size = 20, libraryId = null, signal
   // A feed refuses `sort` — its ordering is part of its definition — but it does take
   // the library filter, and it has to: a reader who has narrowed the shelf to one
   // library would otherwise still be offered chapters from the other one.
-  return request(`/${collection}/feeds/${feed}`, { query: { size, libraryId }, signal })
+  const read = ['keep-reading', 'on-deck', 'recently-read'].includes(feed) ? readAfterProgress : request
+  return read(`/${collection}/feeds/${feed}`, { query: { size, libraryId }, signal })
 }
 
 export function listSeries({ page = 0, size = 50, libraryId = null, query = null, signal } = {}) {
@@ -54,7 +62,7 @@ export function readSeries(seriesId) {
 }
 
 export function readSeriesReaderContext(seriesId, { signal } = {}) {
-  return request(`/series/${seriesId}/reader-context`, { signal })
+  return readAfterProgress(`/series/${seriesId}/reader-context`, { signal })
 }
 
 /** Series listing orders, as the `sort` parameter spells them. */
@@ -78,7 +86,7 @@ export function listSeriesMediaItems(
   seriesId,
   { page = 0, size = 100, sort = SeriesOrder.NEWEST, signal } = {},
 ) {
-  return request(`/series/${seriesId}/media-items`, { query: { page, size, sort }, signal })
+  return readAfterProgress(`/series/${seriesId}/media-items`, { query: { page, size, sort }, signal })
 }
 
 export function readMediaItem(mediaItemId, { signal } = {}) {
@@ -86,7 +94,7 @@ export function readMediaItem(mediaItemId, { signal } = {}) {
 }
 
 export function readMediaItemReaderContext(mediaItemId, { signal } = {}) {
-  return request(`/media-items/${mediaItemId}/reader-context`, { signal })
+  return readAfterProgress(`/media-items/${mediaItemId}/reader-context`, { signal }, mediaItemId)
 }
 
 /**

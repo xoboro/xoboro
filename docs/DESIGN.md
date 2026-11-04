@@ -271,6 +271,25 @@ write is in flight. Hiding, dismissing, changing item, or destroying the reader 
 that snapshot (with Fetch `keepalive` for browser lifecycle exits), so navigation does
 not silently discard the last position.
 
+Resume-sensitive context, chapter-list, and feed reads wait for this tab's pending
+progress mutations. A replacement reader unmounts its predecessor before requesting
+context so its last debounced save joins that ordering. Cancelling a read cancels
+the wait without cancelling the save; session changes discard the old session's wait
+scope. Cached catalogue views stay visible while these background reads wait.
+Their progress-dependent Continue and shelf links stay unavailable until the new
+target is known, so a quick tap cannot follow the old cached chapter.
+
+Comic locators store the physical spread half and a viewport-centre fraction within
+the image. Scrolling inside the same long image updates that fraction; restoration
+uses the current rendered dimensions before recording any new progress. Older
+page-only records retain their page-based fallback. Keyboard controls remain fixed
+to the viewport so focusing them cannot scroll a long chapter to the beginning.
+
+A partly read first chapter has a Continue action. From Start uses the explicit
+`#/read/:id/start` route and ignores stored progress for comic/PDF and EPUB entry;
+ordinary `#/read/:id` entry resumes normally. Series Continue chooses the most
+recently read unfinished item, then the next unread item when none is unfinished.
+
 ### Progress conflict is silently reconciled
 
 `simple-komga` writes progress with `.catch(() => {})`. Xoboro answers

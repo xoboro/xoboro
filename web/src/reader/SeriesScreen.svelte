@@ -356,7 +356,7 @@
   </section>
 {/if}
 
-<SeriesActions {first} {resume} />
+<SeriesActions {first} {resume} busy={loading} />
 
 {#if items && items.items.length > 0}
   <div class="progress-actions">

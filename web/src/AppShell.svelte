@@ -17,7 +17,8 @@
     '/': wrap({ asyncComponent: () => import('./reader/Home.svelte') }),
     '/search': wrap({ asyncComponent: () => import('./reader/Search.svelte') }),
     '/series/:id': wrap({ asyncComponent: loadSeriesScreen }),
-    '/read/:id': wrap({ asyncComponent: loadReaderScreen }),
+    '/read/:id/start': wrap({ asyncComponent: loadReaderScreen, props: { startAtBeginning: true } }),
+    '/read/:id': wrap({ asyncComponent: loadReaderScreen, props: { startAtBeginning: false } }),
     // Reader-side, not console: reading a collection is open to any authenticated
     // caller, and only its mutations are administrator-only.
     '/collections': wrap({

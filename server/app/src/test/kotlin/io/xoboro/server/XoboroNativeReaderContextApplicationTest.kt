@@ -57,9 +57,82 @@ class XoboroNativeReaderContextApplicationTest {
   lateinit var tempDirectory: Path
 
   @Test
+  fun `series resumes the most recently read unfinished item before choosing the next unread item`() {
+    val databasePath = tempDirectory.resolve("series-resume.sqlite")
+    createReaderCatalog(databasePath, itemCount = 4)
+    val runtime =
+      XoboroRuntime.open(
+        ServerConfig(
+          port = 25_602,
+          databasePath = databasePath,
+          workerCount = 1,
+          taskPollMillis = 10,
+          taskFailurePollMillis = 10,
+          taskLeaseMillis = 1_000,
+          shutdownTimeoutMillis = 2_000,
+        ),
+      )
+
+    testApplication {
+      application { xoboroModule(runtime) }
+      val client = createClient { install(ContentNegotiation) { json() } }
+      val setup =
+        client.post("$XOBORO_API_PREFIX/setup") {
+          header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+          setBody(
+            SetupRequest(
+              email = "series-resume@example.invalid",
+              password = "synthetic-password",
+              transport = SessionTransport.BEARER,
+            ),
+          )
+        }
+      val token = requireNotNull(Json.decodeFromString<SessionResponse>(setup.bodyAsText()).accessToken)
+
+      suspend fun write(number: Int, stamp: Long, completed: Boolean) {
+        val response =
+          client.put("$XOBORO_API_PREFIX/media-items/media-$number/progress") {
+            bearerAuth(token)
+            header(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            setBody(
+              XoboroMediaProgressRequest(
+                page = 1,
+                completed = completed,
+                modifiedAtMillis = stamp,
+                deviceId = "resume-device",
+                deviceName = "Synthetic handset",
+              ),
+            )
+          }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+      }
+
+      suspend fun resume(): String {
+        val response =
+          client.get("$XOBORO_API_PREFIX/series/series-1/reader-context") { bearerAuth(token) }
+        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        val context = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+        assertEquals("media-1", context.getValue("first").jsonObject.getValue("id").jsonPrimitive.content)
+        return context.getValue("resume").jsonObject.getValue("id").jsonPrimitive.content
+      }
+
+      write(1, 1_000, completed = false)
+      write(2, 3_000, completed = false)
+      write(3, 5_000, completed = true)
+      assertEquals("media-2", resume())
+      write(2, 6_000, completed = true)
+      assertEquals("media-1", resume())
+      write(1, 7_000, completed = true)
+      assertEquals("media-4", resume())
+    }
+
+    assertFalse(runtime.isReady())
+  }
+
+  @Test
   fun `boundary reader context omits unavailable adjacent ids in production serialization`() {
     val databasePath = tempDirectory.resolve("reader-context.sqlite")
-    createSingleItemCatalog(databasePath)
+    createReaderCatalog(databasePath)
     val runtime =
       XoboroRuntime.open(
         ServerConfig(
@@ -110,7 +183,7 @@ class XoboroNativeReaderContextApplicationTest {
   @Test
   fun `reader context round trips locator and device progress through the running app`() {
     val databasePath = tempDirectory.resolve("reader-context-progress.sqlite")
-    createSingleItemCatalog(databasePath)
+    createReaderCatalog(databasePath)
     val runtime =
       XoboroRuntime.open(
         ServerConfig(
@@ -186,10 +259,9 @@ class XoboroNativeReaderContextApplicationTest {
     assertFalse(runtime.isReady())
   }
 
-  private fun createSingleItemCatalog(databasePath: Path) {
+  private fun createReaderCatalog(databasePath: Path, itemCount: Int = 1) {
     val libraryId = LibraryId("library-1")
     val seriesId = SeriesId("series-1")
-    val bookId = BookId("media-1")
     XoboroDatabase.open(DatabaseConfig(databasePath)).use { database ->
       JooqLibraryRepository(database).insert(
         Library(
@@ -207,7 +279,7 @@ class XoboroNativeReaderContextApplicationTest {
           relativePath = "Synthetic reader-context series",
           sourceItemId = "file:///synthetic/series",
           fileModifiedAtMillis = 2,
-          bookCount = 1,
+          bookCount = itemCount,
           createdAtMillis = 1,
         ),
       )
@@ -218,41 +290,44 @@ class XoboroNativeReaderContextApplicationTest {
           createdAtMillis = 1,
         ),
       )
-      JooqBookRepository(database).insert(
-        Book(
-          id = bookId,
-          libraryId = libraryId,
-          seriesId = seriesId,
-          name = "Synthetic reader-context issue.cbz",
-          relativePath = "Synthetic reader-context series/issue.cbz",
-          sourceItemId = "file:///synthetic/series/issue.cbz",
-          mediaKind = MediaKind.COMIC_ARCHIVE,
-          fileModifiedAtMillis = 2,
-          fileSize = 100,
-          number = 1,
-          createdAtMillis = 1,
-        ),
-      )
-      JooqBookMetadataRepository(database).upsert(
-        BookMetadata(
-          bookId = bookId,
-          title = "Synthetic reader-context issue",
-          number = "1",
-          numberSort = 1F,
-          createdAtMillis = 1,
-        ),
-      )
-      JooqBookMediaRepository(database).upsert(
-        BookMedia(
-          bookId = bookId,
-          status = MediaStatus.READY,
-          mediaType = "application/zip",
-          profile = MediaProfile.DIVINA,
-          pages = listOf(BookPage(1, "001.jpg", "image/jpeg")),
-          pageCount = 1,
-          createdAtMillis = 1,
-        ),
-      )
+      for (number in 1..itemCount) {
+        val bookId = BookId("media-$number")
+        JooqBookRepository(database).insert(
+          Book(
+            id = bookId,
+            libraryId = libraryId,
+            seriesId = seriesId,
+            name = "Synthetic reader-context issue $number.cbz",
+            relativePath = "Synthetic reader-context series/issue-$number.cbz",
+            sourceItemId = "file:///synthetic/series/issue-$number.cbz",
+            mediaKind = MediaKind.COMIC_ARCHIVE,
+            fileModifiedAtMillis = 2,
+            fileSize = 100,
+            number = number,
+            createdAtMillis = 1,
+          ),
+        )
+        JooqBookMetadataRepository(database).upsert(
+          BookMetadata(
+            bookId = bookId,
+            title = "Synthetic reader-context issue",
+            number = number.toString(),
+            numberSort = number.toFloat(),
+            createdAtMillis = 1,
+          ),
+        )
+        JooqBookMediaRepository(database).upsert(
+          BookMedia(
+            bookId = bookId,
+            status = MediaStatus.READY,
+            mediaType = "application/zip",
+            profile = MediaProfile.DIVINA,
+            pages = listOf(BookPage(1, "001.jpg", "image/jpeg")),
+            pageCount = 1,
+            createdAtMillis = 1,
+          ),
+        )
+      }
     }
   }
 }
