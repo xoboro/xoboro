@@ -13,7 +13,7 @@ vi.mock('../src/lib/readerScreens.js', () => ({ loadSeriesScreen: screenLoads.se
 
 vi.mock('../src/lib/eventHub.js', () => ({
   eventHub: {
-    status: { subscribe: (run) => { run('open'); return () => {} } },
+    status: { subscribe: (run) => { run('LIVE'); return () => {} } },
     on: (names, handler) => {
       const entry = { names: Array.isArray(names) ? names : [names], handler }
       homeEvents.domain.push(entry)
@@ -115,6 +115,49 @@ function pagedSeriesServer({ totalItems = 3339, size = 100, libraries = [] } = {
 }
 
 describe('Reader home', () => {
+  it('keeps cached results visible during revalidation and clears them across sessions', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: { id: 'reader-cache', roles: [] } })
+    globalThis.fetch = vi.fn(async (url) => url.includes('/libraries') ? reply([]) :
+      reply(envelope(url.includes('query=') ? [{ id: 's1', title: 'Synthetic cached match' }] : [])))
+    const first = render(Home)
+    await fireEvent.input(await screen.findByTestId('home-search'), { target: { value: 'synthetic' } })
+    await screen.findByText('Synthetic cached match')
+    first.unmount()
+    emitHomeEvent('series.changed', { ids: ['s1'] })
+    let completeSearch
+    globalThis.fetch = vi.fn((url) => url.includes('query=')
+      ? new Promise((resolve) => (completeSearch = () => resolve(reply(envelope([{ id: 's1', title: 'Synthetic updated match' }])))))
+      : Promise.resolve(reply([])))
+    const second = render(Home)
+    expect(screen.getByText('Synthetic cached match')).toBeInTheDocument()
+    expect(screen.getByTestId('home-search')).toHaveValue('synthetic')
+    expect(globalThis.fetch.mock.calls.some(([url]) => url.includes('query=synthetic'))).toBe(true)
+    completeSearch()
+    await screen.findByText('Synthetic updated match')
+    second.unmount()
+    session.set({ status: SessionStatus.AUTHENTICATED, user: { id: 'different-reader', roles: [] } })
+    globalThis.fetch = server()
+    render(Home)
+    expect(screen.getByTestId('home-search')).toHaveValue('')
+    expect(screen.queryByText('Synthetic updated match')).toBeNull()
+  })
+
+  it('refreshes progress shelves behind the cached grid without reloading the catalog', async () => {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: { id: 'reader-progress', roles: [] } })
+    const fetchImpl = pagedSeriesServer({ totalItems: 201 })
+    globalThis.fetch = fetchImpl
+    const first = render(Home)
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await screen.findByText('Synthetic series 100')
+    first.unmount()
+    emitHomeEvent('read-progress.changed', { ids: ['m1'] })
+    fetchImpl.mockClear()
+    render(Home)
+    expect(screen.getByText('Synthetic series 100')).toBeInTheDocument()
+    expect(fetchImpl.mock.calls.filter(([url]) => url.includes('/feeds/'))).toHaveLength(4)
+    expect(fetchImpl.mock.calls.some(([url]) => url.includes('/series?'))).toBe(false)
+  })
+
   it('releases hidden browsing requests for search and resumes them when the query clears', async () => {
     const pending = []
     let allowBrowsing = false
@@ -281,6 +324,7 @@ describe('Reader home', () => {
     await fireEvent.click(await screen.findByTestId('all-series-page-next'))
     await screen.findByText('Synthetic series 100')
     window.scrollY = 640
+    window.dispatchEvent(new Event('scroll'))
     first.unmount()
 
     fetchImpl.mockClear()
@@ -299,13 +343,8 @@ describe('Reader home', () => {
     })
     const restored = render(Home)
 
-    await waitFor(() => {
-      const seriesUrls = fetchImpl.mock.calls
-        .map(([url]) => url)
-        .filter((url) => url.includes('/series?'))
-      expect(seriesUrls).toHaveLength(1)
-      expect(seriesUrls[0]).toContain('page=1')
-    })
+    expect(screen.getByText('Synthetic series 100')).toBeInTheDocument()
+    expect(fetchImpl).not.toHaveBeenCalled()
     await waitFor(() => expect(restorations).toHaveLength(1))
     expect(restorations[0]).toEqual({
       top: 640,
@@ -351,6 +390,24 @@ describe('Reader home', () => {
       .map((key) => JSON.parse(sessionStorage.getItem(key)))
       .find((value) => value.libraryId === 'lib-webtoon')
     expect(stored).toEqual({ libraryId: 'lib-webtoon', page: 0, scrollY: 0 })
+  })
+
+  it('uses the navigation-only storage fallback when the in-memory session is reloaded', async () => {
+    const authenticated = { status: SessionStatus.AUTHENTICATED, user: { id: 'reader-reload', roles: [] } }
+    session.set(authenticated)
+    globalThis.fetch = pagedSeriesServer({ totalItems: 201 })
+    const first = render(Home)
+    await fireEvent.click(await screen.findByTestId('all-series-page-next'))
+    await screen.findByText('Synthetic series 100')
+    first.unmount()
+    session.set(authenticated)
+    globalThis.fetch.mockClear()
+    render(Home)
+    await screen.findByText('Synthetic series 100')
+    const catalog = globalThis.fetch.mock.calls.filter(([url]) => url.includes('/series?'))
+    expect(catalog).toHaveLength(1)
+    expect(catalog[0][0]).toContain('page=1')
+    expect(screen.getByTestId('home-search')).toHaveValue('')
   })
 
   it('restarts at the first page when the reader narrows to a library', async () => {
@@ -424,8 +481,6 @@ afterEach(() => {
   session.set({ status: SessionStatus.UNKNOWN, user: null })
   globalThis.localStorage?.clear()
   globalThis.sessionStorage?.clear()
-  homeEvents.domain = []
-  homeEvents.resync = []
 })
 
 describe('library switcher', () => {
@@ -941,6 +996,7 @@ describe('home search', () => {
     await typeQuery('navigation')
     await screen.findByText('Found for navigation')
     window.scrollY = 1_300
+    window.dispatchEvent(new Event('scroll'))
     searching.unmount()
 
     const stored = Object.keys(sessionStorage)
@@ -962,9 +1018,16 @@ describe('home search', () => {
       },
     })
     render(Home)
-
+    expect(screen.getByTestId('home-search')).toHaveValue('navigation')
+    expect(screen.getByText('Found for navigation')).toBeInTheDocument()
     await waitFor(() => expect(restorations).toHaveLength(1))
-    expect(restorations[0]).toEqual({ top: 540, catalogRendered: true })
+    expect(restorations[0]).toEqual({ top: 1300, catalogRendered: false })
+    restorations.length = 0
+    await fireEvent.input(screen.getByTestId('home-search'), { target: { value: '' } })
+    // The catalog's scroll is kept apart from the search results' position.
+    // Clearing search restores the existing grid without a network wait.
+    await screen.findByTestId('all-series-page-next')
+    await waitFor(() => expect(restorations).toContainEqual({ top: 540, catalogRendered: true }))
     if (originalScrollTop) Object.defineProperty(scrolling, 'scrollTop', originalScrollTop)
     else delete scrolling.scrollTop
   })

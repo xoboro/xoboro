@@ -293,10 +293,17 @@ advanced search is then the sole owner and cancels superseded result and facet
 requests. Criteria changes normalize the page to zero before the next request.
 
 Series detail sends its selected zero-based page and keeps the shared pager and
-ordering control available through the final page. Home stores only catalogue page
-and scroll offset, scoped by session user and library; it restores the page before
-loading and the scroll offset only after that page renders. Search text and results
-are not persisted.
+ordering control available through the final page. Returning from a chapter restores
+the rendered chapter page, order, and scroll immediately. Home restores its rendered
+catalogue or quick-search query, results, and position in the same way. At most eight
+view snapshots stay in tab memory, scoped to the session user and series/library.
+Session changes clear them and invalidate outstanding writers. Catalogue/progress
+events, local progress writes, and resync frames mark data stale, including while its
+screen is unmounted; stale snapshots remain visible during background revalidation.
+A disconnected or superseded event stream always requires revalidation on return.
+Only catalogue page and scroll offset enter session storage for reload restoration;
+search text, results, and catalogue data never enter persistent storage. Advanced
+filter state is not restored by these snapshots.
 
 ### Browser acceptance remains a release gate
 

@@ -5,8 +5,11 @@ import {
   resetProgressClock,
   resumePage,
   writeProgress,
+  clearProgress,
+  writeSeriesProgress,
 } from '../src/lib/api/progress.js'
 import { deviceIdentity } from '../src/lib/device.js'
+import { readerNavigationState } from '../src/lib/readerNavigationState.js'
 
 function reply(body, status = 200) {
   const text = body === null ? '' : JSON.stringify(body)
@@ -52,6 +55,25 @@ describe('progressStamp', () => {
 })
 
 describe('writeProgress', () => {
+  it('invalidates cached lists before and after a delayed write without waiting for SSE', async () => {
+    readerNavigationState.setSession('reader-a')
+    const view = readerNavigationState.open('reader-a', 'series:s1')
+    let complete
+    globalThis.fetch = vi.fn(() => new Promise((resolve) => (complete = () => resolve(reply(null, 204)))))
+    const before = view.version().progress
+    const write = writeProgress('m1', { page: 4 })
+    expect(view.version().progress).toBeGreaterThan(before)
+    const pending = view.version().progress
+    complete()
+    await write
+    expect(view.version().progress).toBeGreaterThan(pending)
+    globalThis.fetch = vi.fn().mockResolvedValue(reply(null, 204))
+    const completed = view.version().progress
+    await clearProgress('m1')
+    await writeSeriesProgress('s1', { read: true })
+    expect(view.version().progress).toBeGreaterThan(completed)
+  })
+
   it('sends the position with a device identity and a client clock', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(reply(null, 204))
     globalThis.fetch = fetchImpl
