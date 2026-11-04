@@ -2,6 +2,7 @@ import { Treatment } from '../errors.js'
 import { deviceIdentity } from '../device.js'
 import { request } from '../http.js'
 import { readerNavigationState } from '../readerNavigationState.js'
+import { progressWrites } from '../progressWrites.js'
 
 /**
  * Read progress.
@@ -51,7 +52,11 @@ export function resetProgressClock() {
  * @param {boolean} [position.keepalive] keep the request alive during page dismissal.
  * @returns {Promise<null>} once the write was applied or a newer stored write won.
  */
-export async function writeProgress(
+export function writeProgress(mediaItemId, position = {}) {
+  return progressWrites.track(mediaItemId, sendProgress(mediaItemId, position))
+}
+
+async function sendProgress(
   mediaItemId,
   { page = undefined, locator = null, completed = undefined, keepalive = undefined } = {},
 ) {
@@ -92,14 +97,22 @@ export async function writeProgress(
  * client could ask for: a chapter opened by accident could only be undone by reading it
  * to the end. Idempotent on the server, so this needs no "was it started" check first.
  */
-export async function clearProgress(mediaItemId) {
+export function clearProgress(mediaItemId) {
+  return progressWrites.track(mediaItemId, sendClearProgress(mediaItemId))
+}
+
+async function sendClearProgress(mediaItemId) {
   readerNavigationState.invalidate('progress')
   await request(`/media-items/${mediaItemId}/progress`, { method: 'DELETE' })
   readerNavigationState.invalidate('progress')
 }
 
 /** Marks every item in a series read, or clears every one of them. */
-export async function writeSeriesProgress(seriesId, { read }) {
+export function writeSeriesProgress(seriesId, position) {
+  return progressWrites.track(null, sendSeriesProgress(seriesId, position))
+}
+
+async function sendSeriesProgress(seriesId, { read }) {
   readerNavigationState.invalidate('progress')
   await request(`/series/${seriesId}/progress`, { method: read ? 'PUT' : 'DELETE' })
   readerNavigationState.invalidate('progress')

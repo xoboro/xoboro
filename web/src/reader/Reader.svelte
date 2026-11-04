@@ -29,6 +29,7 @@
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import { createPriorityLoader } from './priorityLoader.js'
   import { maximumPageWidth } from './imageRequest.js'
+  import { imageLocator, imageResumeView, imageScrollProgression } from './imagePosition.js'
   import {
     DIRECTIONS,
     aspectRatio,
@@ -159,6 +160,8 @@
   let progressRevision = 0
   let confirmedProgressRevision = 0
   let initialProgressPending = false
+  let initialRenderedKey = null
+  let lastNotedPosition = null
   let viewportWidth = $state(window.innerWidth)
   let viewportHeight = $state(window.innerHeight)
   let viewportDensity = $state(window.devicePixelRatio)
@@ -184,6 +187,7 @@
     const token = ++progressWriteToken
     writeProgress(mediaItemId, {
       page: progress.page,
+      locator: progress.locator,
       completed: progress.completed,
       keepalive,
     })
@@ -213,8 +217,9 @@
    * Browsers emit popstate before restoring that entry's document scroll, so the reader
    * otherwise sees the later scroll-to-zero as a genuine return to page one.
   */
-  function freezeProgressTracking() {
+  function freezeProgressTracking({ capture = true } = {}) {
     if (leaving) return
+    if (capture && !restoring && isScroll) trackVisiblePosition()
     leaving = true
     if (trackingFrame !== null) {
       cancelAnimationFrame(trackingFrame)
@@ -235,10 +240,18 @@
     }
     current = page
     if (!loadedId) return
+    const view = views[index]
+    const node = isScroll && scrollNode?.querySelector(`[data-view="${index}"]`)
+    const progression = node ? imageScrollProgression(node.getBoundingClientRect(), viewportCentre()) : null
+    const locator = view ? imageLocator(view, progression) : null
+    const position = JSON.stringify({ page, completed, locator })
+    if (position === lastNotedPosition) return
+    lastNotedPosition = position
     clearTimeout(saveTimer)
     pendingProgress = {
       mediaItemId: loadedId,
       page,
+      locator,
       completed,
       revision: ++progressRevision,
     }
@@ -264,6 +277,8 @@
     trackedViews.clear()
     loadedId = ''
     initialProgressPending = false
+    initialRenderedKey = null
+    lastNotedPosition = null
     pages = []
     failedViews = []
     item = null
@@ -295,7 +310,8 @@
       const start = resumePage(detail.progress, detail.media?.pageCount ?? manifest.length)
       current = start
       loadedId = id
-      index = indexOfPage(buildViews(manifest, isSplit, direction), start)
+      const resume = imageResumeView(detail.progress, buildViews(manifest, isSplit, direction), start)
+      index = resume.index
       initialProgressPending = true
 
       previousId = context.previousId ?? null
@@ -305,10 +321,13 @@
       // page before the observer is allowed to report a position.
       requestAnimationFrame(() => {
         if (token !== loadToken) return
-        if (isScroll) scrollTo(start)
+        if (isScroll) scrollTo(start, resume)
         requestAnimationFrame(() => {
           if (token === loadToken) {
             restoring = false
+            if (views[index] && initialRenderedKey === viewKey(views[index])) {
+              noteInitialViewRendered(views[index], index)
+            }
             scheduleVisibleTrack()
           }
         })
@@ -332,8 +351,20 @@
     untrack(() => open(id))
   })
 
-  function scrollTo(page) {
-    scrollNode?.querySelector(`[data-page="${page}"]`)?.scrollIntoView({ block: 'start' })
+  function viewportCentre() {
+    return (window.visualViewport?.offsetTop ?? 0) + (window.visualViewport?.height ?? viewportHeight) / 2
+  }
+
+  function scrollTo(page, position = null) {
+    const at = position?.index ?? indexOfPage(views, page)
+    const node = scrollNode?.querySelector(`[data-view="${at}"]`)
+    if (!node) return
+    if (position?.progression !== null && position?.progression !== undefined) {
+      const rect = node.getBoundingClientRect()
+      const scrolling = document.scrollingElement ?? document.documentElement
+      scrolling.scrollTop = Math.max(0, scrolling.scrollTop + rect.top +
+        rect.height * position.progression - viewportCentre())
+    } else node.scrollIntoView({ block: 'start' })
   }
 
   function go(delta) {
@@ -386,10 +417,13 @@
   }
 
   onMount(() => {
-    const onPageHide = () => flushProgress({ keepalive: true })
+    const onPageHide = () => {
+      if (!leaving && !restoring && isScroll) trackVisiblePosition()
+      flushProgress({ keepalive: true })
+    }
     const onPopState = () => freezeProgressTracking()
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') flushProgress({ keepalive: true })
+      if (document.visibilityState === 'hidden') onPageHide()
     }
     const onResize = () => {
       const visualViewport = window.visualViewport
@@ -424,7 +458,7 @@
   onDestroy(() => {
     // Flushed rather than dropped: leaving the reader is exactly when the last position
     // matters, and a debounce timer would otherwise be discarded with the component.
-    freezeProgressTracking()
+    freezeProgressTracking({ capture: false })
     openController?.abort()
     loader.destroy()
     trackedViews.clear()
@@ -444,6 +478,8 @@
   /** Records an opened view once it has pixels, including a final view with no page-turn. */
   function noteInitialViewRendered(view, at) {
     if (!initialProgressPending || !loadedId || at !== index) return
+    initialRenderedKey = viewKey(view)
+    if (restoring && isScroll) return
     initialProgressPending = false
     noteProgress(view.page, !isScroll && at === views.length - 1)
   }
@@ -509,39 +545,50 @@
     if (leaving || trackingFrame !== null) return
     trackingFrame = requestAnimationFrame(() => {
       trackingFrame = null
-      if (leaving || restoring || !isScroll || trackedViews.size === 0) return
-      // The physical end wins over the centre. A short final slot can leave the
-      // viewport centre inside the preceding page even though the reader reached bottom.
-      if (isAtDocumentBottom()) return
-      const visualViewport = window.visualViewport
-      const centre =
-        (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? viewportHeight) / 2
-      let chosen = null
-      let chosenContainsCentre = false
-      let chosenDistance = Number.POSITIVE_INFINITY
-      for (const [node, at] of trackedViews) {
-        const rect = node.getBoundingClientRect()
-        if (!Number.isFinite(rect.top) || !Number.isFinite(rect.bottom) || rect.bottom <= rect.top) {
-          continue
-        }
-        const containsCentre = centre >= rect.top && centre < rect.bottom
-        const distance = containsCentre
-          ? 0
-          : Math.min(Math.abs(centre - rect.top), Math.abs(centre - rect.bottom))
-        if (
-          chosen === null ||
-          (containsCentre && !chosenContainsCentre) ||
-          (containsCentre === chosenContainsCentre && distance < chosenDistance)
-        ) {
-          chosen = at
-          chosenContainsCentre = containsCentre
-          chosenDistance = distance
-        }
-      }
-      if (chosen === null || chosen.index === index) return
-      index = chosen.index
-      noteProgress(chosen.page, false)
+      trackVisiblePosition()
     })
+  }
+
+  function trackVisiblePosition() {
+    if (leaving || restoring || !isScroll || trackedViews.size === 0) return
+    // The physical end wins over the centre. A short final slot can leave the
+    // viewport centre inside the preceding page even though the reader reached bottom.
+    if (isAtDocumentBottom()) {
+      const last = views.length - 1
+      if (last < 0 || (last === index && initialProgressPending && lastNotedPosition === null &&
+        initialRenderedKey !== viewKey(views[last]))) return
+      index = last
+      noteProgress(views[last].page)
+      return
+    }
+    const centre = viewportCentre()
+    let chosen = null
+    let chosenContainsCentre = false
+    let chosenDistance = Number.POSITIVE_INFINITY
+    for (const [node, at] of trackedViews) {
+      const rect = node.getBoundingClientRect()
+      if (!Number.isFinite(rect.top) || !Number.isFinite(rect.bottom) || rect.bottom <= rect.top) {
+        continue
+      }
+      const containsCentre = centre >= rect.top && centre < rect.bottom
+      const distance = containsCentre
+        ? 0
+        : Math.min(Math.abs(centre - rect.top), Math.abs(centre - rect.bottom))
+      if (
+        chosen === null ||
+        (containsCentre && !chosenContainsCentre) ||
+        (containsCentre === chosenContainsCentre && distance < chosenDistance)
+      ) {
+        chosen = at
+        chosenContainsCentre = containsCentre
+        chosenDistance = distance
+      }
+    }
+    if (chosen === null) return
+    const changed = chosen.index !== index
+    index = chosen.index
+    if (!changed && initialProgressPending && initialRenderedKey !== viewKey(views[index])) return
+    noteProgress(chosen.page, false)
   }
 
   /** Registers a rendered slot with the single viewport-centre tracker. */
@@ -570,8 +617,7 @@
     if (leaving || restoring || !isScroll || views.length === 0) return
     scheduleVisibleTrack()
     if (!isAtDocumentBottom()) return
-    index = views.length - 1
-    noteProgress(views[index].page)
+    trackVisiblePosition()
   }
 
   function displayWidth(view) {
@@ -611,7 +657,7 @@
 </script>
 
 <button
-  class="visually-hidden"
+  class="visually-hidden keyboard-controls"
   type="button"
   data-testid="keyboard-chrome-toggle"
   aria-expanded={chrome}
@@ -886,6 +932,12 @@
 {/if}
 
 <style>
+  /* Focusing the keyboard control must not scroll a long chapter back to its start. */
+  .keyboard-controls {
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
   .topbar,
   .bottombar {
     position: fixed;

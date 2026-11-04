@@ -5,6 +5,7 @@ import { compile } from 'svelte/compiler'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Reader from '../src/reader/Reader.svelte'
 import { resetProgressClock } from '../src/lib/api/progress.js'
+import { progressWrites } from '../src/lib/progressWrites.js'
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
 vi.mock('svelte-spa-router', () => router)
@@ -70,6 +71,7 @@ function standardRoutes(extra = []) {
 }
 
 beforeEach(() => {
+  progressWrites.clear()
   resetProgressClock()
   router.replace.mockReset()
   router.push.mockReset()
@@ -79,7 +81,7 @@ beforeEach(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 })
   Object.defineProperties(document.documentElement, {
-    scrollTop: { configurable: true, value: 0 },
+    scrollTop: { configurable: true, writable: true, value: 0 },
     clientHeight: { configurable: true, value: 1000 },
     scrollHeight: { configurable: true, value: 3000 },
   })
@@ -100,6 +102,134 @@ function place(node, { top, bottom }) {
 }
 
 describe('Reader', () => {
+  it('captures document bottom on dismissal before a queued scroll event can run', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' }, initialContext: CONTEXT })
+    await screen.findByTestId('position')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const slots = container.querySelectorAll('.slot')
+    place(slots[0], { top: -900, bottom: 0 })
+    place(slots[1], { top: 0, bottom: 1500 })
+    place(slots[2], { top: 1500, bottom: 2400 })
+    await fireEvent.scroll(window)
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toContain('2'))
+    document.documentElement.scrollTop = 2000
+    window.dispatchEvent(new Event('pagehide'))
+    const writes = globalThis.fetch.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({ page: 3, completed: true })
+  })
+
+  it('flushes the preceding reader before a replacement route reads its context', async () => {
+    localStorage.setItem('xoboro.reader.mode', 'paged')
+    const { default: ReaderRoute } = await import('../src/reader/ReaderRoute.svelte')
+    const operations = []
+    const finishSaves = []
+    globalThis.fetch = vi.fn((url, init = {}) => {
+      if (init.method === 'PUT') {
+        operations.push('save')
+        return new Promise((resolve) => finishSaves.push(() => resolve(reply(null, 204))))
+      }
+      operations.push('read')
+      return Promise.resolve(reply(CONTEXT))
+    })
+    const view = render(ReaderRoute, { params: { id: 'm1' } })
+    await screen.findByTestId('position')
+    await fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await view.rerender({ params: { id: 'm1' }, startAtBeginning: true })
+    await waitFor(() => expect(finishSaves.length).toBeGreaterThan(0))
+    expect(operations.filter((operation) => operation === 'read')).toHaveLength(1)
+    finishSaves.forEach((finish) => finish())
+    await screen.findByTestId('position')
+    expect(operations.filter((operation) => operation === 'read')).toHaveLength(2)
+    expect(operations.at(-1)).toBe('read')
+  })
+
+  it('persists movement within one long image instead of only a page change', async () => {
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, { params: { id: 'm1' }, initialContext: CONTEXT })
+    await screen.findByTestId('position')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const slots = container.querySelectorAll('.slot')
+    place(slots[0], { top: -5000, bottom: 3000 })
+    place(slots[1], { top: 3000, bottom: 4000 })
+    place(slots[2], { top: 4000, bottom: 5000 })
+    await fireEvent.load(container.querySelector('img[src]'))
+    await fireEvent.scroll(window)
+    window.dispatchEvent(new Event('pagehide'))
+    const writes = globalThis.fetch.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({
+      page: 1, locator: { locations: { position: 1, progression: 0.673 }, xoboro: { anchor: 'viewport-centre' } },
+    })
+    place(slots[0], { top: -5600, bottom: 2400 })
+    await fireEvent.scroll(window)
+    window.dispatchEvent(new Event('pagehide'))
+    const newest = globalThis.fetch.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(newest.at(-1)[1].body).locator.locations.progression).toBe(0.748)
+  })
+
+  it('resumes on the saved second half of a spread', async () => {
+    localStorage.setItem('xoboro.reader.mode', 'split')
+    localStorage.setItem('xoboro.reader.direction', 'rtl')
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' }, initialContext: { ...CONTEXT, item: { ...ITEM,
+        progress: { page: 2, completed: false, locator: {
+          href: 'pages/2', locations: { position: 2 }, xoboro: { reader: 'image', half: 'L' },
+        } },
+      } },
+    })
+    await waitFor(() => expect(container.querySelector('.stage img')?.getAttribute('src')).toContain('/pages/2'))
+    expect(container.querySelector('.stage .slot')).toHaveClass('half')
+    expect(container.querySelector('.stage .slot')).not.toHaveClass('right')
+  })
+
+  it('restores the saved viewport anchor inside a long image before recording progress', async () => {
+    Object.defineProperty(document.documentElement, 'scrollHeight', { configurable: true, value: 12000 })
+    const original = Element.prototype.getBoundingClientRect
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      const page = Number(this.getAttribute('data-page'))
+      if (!page) return original.call(this)
+      const top = [0, 0, 2000, 10000][page] - document.documentElement.scrollTop
+      const height = page === 2 ? 8000 : 2000
+      return { top, bottom: top + height, height, left: 0, right: 400, width: 400 }
+    })
+    globalThis.fetch = standardRoutes()
+    const { container } = render(Reader, {
+      params: { id: 'm1' }, initialContext: { ...CONTEXT, item: { ...ITEM,
+        progress: { page: 2, completed: false, locator: {
+          href: 'pages/2', locations: { position: 2, progression: 0.75 },
+          xoboro: { reader: 'image', half: null, anchor: 'viewport-centre' },
+        } },
+      } },
+    })
+    await waitFor(() => expect(document.documentElement.scrollTop).toBe(7616))
+    const image = await waitFor(() => {
+      const node = container.querySelector('img[src*="/pages/2"]')
+      expect(node).toBeTruthy()
+      return node
+    })
+    await fireEvent.load(image)
+    window.dispatchEvent(new Event('pagehide'))
+    const writes = globalThis.fetch.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(writes.at(-1)[1].body)).toMatchObject({
+      page: 2, locator: { locations: { progression: 0.75 } },
+    })
+  })
+
+  it('starts explicitly restarted routes on page one while ordinary entry still resumes', async () => {
+    const { default: ReaderRoute } = await import('../src/reader/ReaderRoute.svelte')
+    globalThis.fetch = standardRoutes([
+      ['/media-items/m1/reader-context', reply({
+        ...CONTEXT, item: { ...ITEM, progress: { page: 2, completed: false } },
+      })],
+    ])
+    const restarted = render(ReaderRoute, { params: { id: 'm1' }, startAtBeginning: true })
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toMatch(/3.*1/))
+    restarted.unmount()
+    render(ReaderRoute, { params: { id: 'm1' } })
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toMatch(/3.*2/))
+  })
+
   it('uses one bounded context request when entered through the route', async () => {
     const { default: ReaderRoute } = await import('../src/reader/ReaderRoute.svelte')
     const fetchImpl = standardRoutes()

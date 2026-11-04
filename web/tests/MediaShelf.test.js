@@ -29,6 +29,15 @@ describe('MediaShelf progress', () => {
     expect(bar.getAttribute('aria-label')).toContain('50')
   })
 
+  it('keeps cached cards visible without exposing stale destinations while revalidating', async () => {
+    const view = render(MediaShelf, { title: 'Keep reading', items: [started], kind: 'mediaItem', busy: true })
+    expect(screen.getByText('Synthetic Chapter')).toBeInTheDocument()
+    expect(screen.getByRole('link')).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('link')).not.toHaveAttribute('href')
+    await view.rerender({ title: 'Keep reading', items: [started], kind: 'mediaItem', busy: false })
+    expect(screen.getByRole('link')).toHaveAttribute('href', '#/read/m1')
+  })
+
   it('draws no bar for an item nobody has opened', () => {
     render(MediaShelf, {
       title: 'New',

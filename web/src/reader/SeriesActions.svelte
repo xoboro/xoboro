@@ -2,9 +2,8 @@
   /**
    * The two ways into a series: carry on, or start over.
    *
-   * "Continue" is shown only when it would go somewhere else. For a series the reader
-   * has never opened, the item to resume *is* the first one, and offering both buttons
-   * pointing at the same chapter is two decisions for one outcome.
+   * A partly read first chapter still needs Continue: restarting that chapter is a
+   * different action. Only an unstarted first chapter has no separate resume action.
    *
    * Rendered as links, not buttons: they navigate, so a reader can open a chapter in a
    * new tab and the browser's own affordances work. Their appearance is the difference
@@ -19,9 +18,12 @@
     first,
     /** The item a reader would resume, or null when they have not started. */
     resume,
+    busy = false,
   } = $props()
 
-  const showResume = $derived(Boolean(resume) && resume.id !== first?.id)
+  const showResume = $derived(Boolean(resume) && (
+    resume.id !== first?.id || Boolean(resume.progress && !resume.progress.completed)
+  ))
   const resumeLabel = $derived(
     resume?.title ?? resume?.name ?? '',
   )
@@ -30,15 +32,17 @@
 {#if first}
   <div class="actions">
     {#if showResume}
-      <a class="primary" href={`#/read/${resume.id}`} data-testid="series-continue">
+      <a class="primary" href={busy ? undefined : `#/read/${resume.id}`}
+        role={busy ? 'link' : undefined} aria-disabled={busy} aria-busy={busy}
+        data-testid="series-continue">
         <Play size={16} aria-hidden="true" />
         <span class="text">
-          {$_('reader.continue')}
-          {#if resumeLabel}<span class="where">{resumeLabel}</span>{/if}
+          {busy ? $_('common.loading') : $_('reader.continue')}
+          {#if !busy && resumeLabel}<span class="where">{resumeLabel}</span>{/if}
         </span>
       </a>
     {/if}
-    <a class="secondary" href={`#/read/${first.id}`} data-testid="series-from-start">
+    <a class="secondary" href={`#/read/${first.id}/start`} data-testid="series-from-start">
       <BookOpen size={16} aria-hidden="true" />
       <span class="text">{$_('reader.fromStart')}</span>
     </a>

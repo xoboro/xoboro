@@ -10,6 +10,7 @@
    * The item loaded here is passed to the chosen reader. Each reader can still load
    * itself when mounted directly, but route entry must not request the same item twice.
    */
+  import { tick } from 'svelte'
   import { _ } from '../lib/i18n.js'
   import {
     isRetryableDeliveryFailure,
@@ -19,7 +20,7 @@
   import Reader from './Reader.svelte'
   import EpubReader from './EpubReader.svelte'
 
-  let { params } = $props()
+  let { params, startAtBeginning = false } = $props()
 
   let kind = $state(null)
   let context = $state(null)
@@ -27,7 +28,7 @@
   let retryable = $state(false)
   let controller = null
 
-  async function load(id) {
+  async function load(id, restart = startAtBeginning) {
     controller?.abort()
     const requestController = new AbortController()
     controller = requestController
@@ -36,8 +37,13 @@
     error = null
     retryable = false
     try {
-      context = await readMediaItemReaderContext(id, { signal: requestController.signal })
+      // Destroy the previous reader first: its final debounced save must enter the
+      // write barrier before a replacement route asks for its resume context.
+      await tick()
       if (requestController.signal.aborted) return
+      const loaded = await readMediaItemReaderContext(id, { signal: requestController.signal })
+      if (requestController.signal.aborted) return
+      context = restart ? { ...loaded, item: { ...loaded.item, progress: null } } : loaded
       // `type` is the field the production Xoboro DTO actually serializes. Keep the
       // older aliases behind it for fixtures/older servers, but never let their absence
       // send a production NOVEL through the image reader.
@@ -55,7 +61,7 @@
     // Re-read when the identifier changes: walking to the next item in a series can
     // cross from a comic to a novel, and the wrong reader would render nothing.
     const id = params.id
-    load(id)
+    load(id, startAtBeginning)
     return () => controller?.abort()
   })
 </script>
