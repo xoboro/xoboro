@@ -1,6 +1,7 @@
 import { Treatment } from '../errors.js'
 import { deviceIdentity } from '../device.js'
 import { request } from '../http.js'
+import { readerNavigationState } from '../readerNavigationState.js'
 
 /**
  * Read progress.
@@ -54,6 +55,8 @@ export async function writeProgress(
   mediaItemId,
   { page = undefined, locator = null, completed = undefined, keepalive = undefined } = {},
 ) {
+  // Returning to a list can precede the stream's echo of this write.
+  readerNavigationState.invalidate('progress')
   const { deviceId, deviceName } = deviceIdentity()
   try {
     await request(`/media-items/${mediaItemId}/progress`, {
@@ -77,6 +80,8 @@ export async function writeProgress(
     const storedStamp = Number(error.details?.progress?.readAtMillis)
     if (Number.isFinite(storedStamp)) lastStamp = Math.max(lastStamp, storedStamp)
     return null
+  } finally {
+    readerNavigationState.invalidate('progress')
   }
 }
 
@@ -88,12 +93,16 @@ export async function writeProgress(
  * to the end. Idempotent on the server, so this needs no "was it started" check first.
  */
 export async function clearProgress(mediaItemId) {
+  readerNavigationState.invalidate('progress')
   await request(`/media-items/${mediaItemId}/progress`, { method: 'DELETE' })
+  readerNavigationState.invalidate('progress')
 }
 
 /** Marks every item in a series read, or clears every one of them. */
 export async function writeSeriesProgress(seriesId, { read }) {
+  readerNavigationState.invalidate('progress')
   await request(`/series/${seriesId}/progress`, { method: read ? 'PUT' : 'DELETE' })
+  readerNavigationState.invalidate('progress')
 }
 
 /**

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SeriesScreen from '../src/reader/SeriesScreen.svelte'
+import { session, SessionStatus } from '../src/lib/session.js'
 const readerLoads = vi.hoisted(() => ({ load: vi.fn(() => Promise.resolve({})) }))
 vi.mock('../src/lib/readerScreens.js', () => ({ loadReaderScreen: readerLoads.load }))
 
@@ -11,10 +12,10 @@ vi.mock('../src/lib/readerScreens.js', () => ({ loadReaderScreen: readerLoads.lo
  * make it speak. Doubling it here is what lets these tests state which events reach the screen —
  * the property under test is precisely *which* events it reacts to.
  */
-const listeners = { domain: [], resync: [] }
+const listeners = vi.hoisted(() => ({ domain: [], resync: [] }))
 vi.mock('../src/lib/eventHub.js', () => ({
   eventHub: {
-    status: { subscribe: (run) => { run('open'); return () => {} } },
+    status: { subscribe: (run) => { run('LIVE'); return () => {} } },
     on: (names, handler) => {
       const entry = { names: Array.isArray(names) ? names : [names], handler }
       listeners.domain.push(entry)
@@ -139,8 +140,88 @@ function server(overrides = []) {
 
 beforeEach(() => {
   localStorage.clear()
-  listeners.domain = []
-  listeners.resync = []
+  session.set({ status: SessionStatus.UNKNOWN, user: null })
+  window.location.hash = ''
+})
+
+describe('returning from the reader', () => {
+  function signIn(id = 'reader-a') {
+    session.set({ status: SessionStatus.AUTHENTICATED, user: { id, roles: [] } })
+  }
+
+  it('restores the chapter page and scroll immediately without refetching a fresh view', async () => {
+    signIn()
+    globalThis.fetch = vi.fn(async (url) => {
+      if (url.includes('/media-items')) {
+        const page = Number(new URL(url, 'http://localhost').searchParams.get('page'))
+        return reply({ ...envelope([{ ...ITEMS[0], title: `Synthetic page ${page}` }]),
+          page, totalPages: 2, hasNext: page === 0, hasPrevious: page === 1 })
+      }
+      return reply({ series: SERIES, first: ITEMS[1], resume: ITEMS[1] })
+    })
+    const view = render(SeriesScreen, { params: { id: 's1' } })
+    await fireEvent.click(await screen.findByTestId('series-items-page-next'))
+    await screen.findByText('Synthetic page 1')
+    window.location.hash = '#/series/s1'
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 1200 })
+    window.dispatchEvent(new Event('scroll'))
+    // The reader can have a completely different scroll by the time teardown runs.
+    window.location.hash = '#/read/m2'
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+    window.dispatchEvent(new Event('scroll'))
+    view.unmount()
+    globalThis.fetch.mockClear()
+    render(SeriesScreen, { params: { id: 's1' } })
+    expect(screen.getByText('Synthetic page 1')).toBeInTheDocument()
+    await waitFor(() => expect((document.scrollingElement ?? document.documentElement).scrollTop).toBe(1200))
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('shows cached chapters during a delayed progress refresh after a hidden-route event', async () => {
+    signIn()
+    globalThis.fetch = server()
+    const view = render(SeriesScreen, { params: { id: 's1' } })
+    await screen.findByTestId('reading-order')
+    view.unmount()
+    emit('read-progress.changed', { ids: ['m2'] })
+    const complete = []
+    globalThis.fetch = vi.fn((url) => new Promise((resolve) => complete.push(() => resolve(
+      url.includes('/media-items') ? reply(envelope([
+        { ...ITEMS[0], progress: { page: 10, completed: true } }, ITEMS[1],
+      ])) : reply({ series: SERIES, first: ITEMS[1], resume: null }),
+    ))))
+    render(SeriesScreen, { params: { id: 's1' } })
+    expect(screen.getByTestId('reading-order')).toBeInTheDocument()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+    complete.forEach((finish) => finish())
+    await waitFor(() => expect(screen.getByTestId('toggle-read-m2')).toHaveAttribute('aria-pressed', 'true'))
+  })
+
+  it('does not restore another session', async () => {
+    signIn()
+    globalThis.fetch = server()
+    const view = render(SeriesScreen, { params: { id: 's1' } })
+    await screen.findByTestId('reading-order')
+    view.unmount()
+    signIn('reader-b')
+    globalThis.fetch = vi.fn(() => new Promise(() => {}))
+    render(SeriesScreen, { params: { id: 's1' } })
+    expect(screen.queryByTestId('reading-order')).toBeNull()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not label cached chapters with a newly selected sort order', async () => {
+    signIn()
+    globalThis.fetch = server()
+    const first = render(SeriesScreen, { params: { id: 's1' } })
+    await screen.findByTestId('reading-order')
+    first.unmount()
+    localStorage.setItem('xoboro.pref.reader-a.s1.sort', 'number,asc')
+    globalThis.fetch = vi.fn(() => new Promise(() => {}))
+    render(SeriesScreen, { params: { id: 's1' } })
+    expect(screen.queryByTestId('reading-order')).toBeNull()
+    expect(globalThis.fetch.mock.calls.find(([url]) => url.includes('/media-items'))[0]).toContain('sort=number%2Casc')
+  })
 })
 
 /**

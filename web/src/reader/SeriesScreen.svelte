@@ -17,7 +17,7 @@
    * not gate it behind an administrator: it authorizes by what the caller can already
    * see.
    */
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { Check, CheckCheck, ChevronLeft, PencilLine, RotateCcw } from '@lucide/svelte'
   import { _ } from '../lib/i18n.js'
   import {
@@ -36,6 +36,7 @@
   import { Preference, oneOf, readPreference, writePreference } from '../lib/preferences.js'
   import { session } from '../lib/session.js'
   import { loadReaderScreen } from '../lib/readerScreens.js'
+  import { readerNavigationState } from '../lib/readerNavigationState.js'
   import Cover from '../components/Cover.svelte'
   import ErrorNotice from '../components/ErrorNotice.svelte'
   import Pager from '../components/Pager.svelte'
@@ -59,6 +60,29 @@
   let pageIndex = $state(0)
   let loading = $state(false)
   let activeSeriesId = $state(null)
+  let navigation = null
+  let validatedVersion = null
+  let loadedOrder = null
+  let lastScrollY = 0
+
+  function rememberView() {
+    if (!series || !items || !navigation) return
+    navigation.write($state.snapshot({
+      series, items, first, resume, order: loadedOrder, pageIndex: items.page,
+      scrollY: lastScrollY,
+      version: loading ? null : validatedVersion,
+    }))
+  }
+
+  async function restorePosition(scrollY, id) {
+    await tick()
+    requestAnimationFrame(() => {
+      if (id !== activeSeriesId || !navigation?.current()) return
+      const scrolling = document.scrollingElement ?? document.documentElement
+      scrolling.scrollTop = scrollY
+      if (document.body !== scrolling) document.body.scrollTop = scrollY
+    })
+  }
 
   /**
    * Which read is the current one.
@@ -75,6 +99,8 @@
   async function load(page = pageIndex) {
     const requestedSeriesId = activeSeriesId
     if (!requestedSeriesId) return
+    const version = navigation?.version()
+    const requestedOrder = order
     const mine = ++loadSequence
     loadController?.abort()
     const controller = new AbortController()
@@ -86,7 +112,7 @@
     try {
       const [context, itemPage] = await Promise.all([
         readSeriesReaderContext(requestedSeriesId, { signal: controller.signal }),
-        listSeriesMediaItems(requestedSeriesId, { page, sort: order, signal: controller.signal }),
+        listSeriesMediaItems(requestedSeriesId, { page, sort: requestedOrder, signal: controller.signal }),
       ])
       if (mine !== loadSequence || requestedSeriesId !== activeSeriesId) return
       series = context.series
@@ -94,6 +120,8 @@
       pageIndex = itemPage.page
       resume = context.resume
       first = context.first
+      validatedVersion = version
+      loadedOrder = requestedOrder
       error = null
     } catch (caught) {
       // A superseded read's failure is not this screen's state either. Reporting it would put an
@@ -117,10 +145,12 @@
 
   function openSeries(id) {
     if (!id || id === activeSeriesId) return
+    rememberView()
     loadSequence += 1
     loadController?.abort()
     clearTimeout(reloadTimer)
     activeSeriesId = id
+    navigation = readerNavigationState.open(readerId, `series:${id}`)
     series = null
     items = null
     first = null
@@ -136,7 +166,26 @@
       ORDERS,
       SeriesOrder.NEWEST,
     )
-    load(0)
+    const saved = navigation.read()
+    if (saved && saved.order === order) {
+      series = saved.series
+      items = saved.items
+      first = saved.first
+      resume = saved.resume
+      pageIndex = saved.pageIndex
+      lastScrollY = saved.scrollY
+      validatedVersion = saved.version
+      loadedOrder = saved.order
+      restorePosition(saved.scrollY, id)
+      const version = navigation.version()
+      if (saved.version?.catalog !== version.catalog || saved.version?.progress !== version.progress) {
+        load(pageIndex)
+      }
+    } else {
+      lastScrollY = 0
+      validatedVersion = null
+      load(0)
+    }
   }
 
   $effect(() => {
@@ -148,6 +197,10 @@
     // Let the module arrive while the series data and covers are being read, rather than
     // adding another network round trip after the reader chooses a chapter.
     loadReaderScreen().catch(() => {})
+    const rememberScroll = () => {
+      if (window.location.hash === `#/series/${activeSeriesId}`) lastScrollY = window.scrollY
+    }
+    window.addEventListener('scroll', rememberScroll, { passive: true })
     const offCatalog = eventHub.on(
       ['series.changed', 'media-item.added', 'media-item.changed'],
       (message) => {
@@ -159,6 +212,8 @@
     // sitting on a series page kept whatever it had loaded for as long as they stayed.
     const offResync = eventHub.onResync(() => reloadSoon())
     return () => {
+      rememberView()
+      window.removeEventListener('scroll', rememberScroll)
       loadSequence += 1
       loadController?.abort()
       activeSeriesId = null

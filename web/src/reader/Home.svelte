@@ -34,6 +34,7 @@
   import { createHomeRefreshCoordinator } from './homeRefreshCoordinator.js'
   import { readHomeState, writeHomeState } from './homeState.js'
   import { loadSeriesScreen } from '../lib/readerScreens.js'
+  import { readerNavigationState } from '../lib/readerNavigationState.js'
   import AdvancedSearch from './AdvancedSearch.svelte'
   import LibrarySwitcher from './LibrarySwitcher.svelte'
   import Cover from '../components/Cover.svelte'
@@ -133,6 +134,7 @@
    */
   let searchSerial = 0
   let searchController = null
+  let searchVersion = null
   /**
    * Held apart from `error`.
    *
@@ -212,6 +214,7 @@
     const controller = new AbortController()
     searchController = controller
     const requestedLibraryId = libraryId
+    const version = navigation?.version().catalog
     searching = true
     // Cleared as the new request goes out, not when it comes back. Left until then, a
     // failed search's alert sits beside "Loading…" for the whole of the next attempt and
@@ -228,6 +231,7 @@
       }, { signal: controller.signal })
       if (serial !== searchSerial) return
       results = found.items ?? []
+      searchVersion = version
       if (results.length > 0) loadSeriesScreen().catch(() => {})
       // Deliberately not clearing `error`. It may belong to the grid or the shelves, which
       // this request knows nothing about - clearing it would hide a failure and leave the
@@ -252,6 +256,32 @@
   let restoreScrollY = null
   /** The catalog's position, kept separate while either search surface owns the document. */
   let catalogScrollY = 0
+  let navigation = null
+  let lastScrollY = 0
+  let librariesVersion = null
+  let seriesVersion = null
+  let shelvesVersion = null
+
+  function rememberView() {
+    if (!navigation) return
+    navigation.write($state.snapshot({
+      libraries, keepReading, onDeck, recent, updated, allSeries, seriesPage,
+      query: advancedOpen ? '' : query,
+      results: searching ? null : results,
+      searchVersion: searching ? null : searchVersion,
+      librariesVersion, seriesVersion, shelvesVersion,
+      browsingPaused, catalogScrollY, scrollY: advancedOpen ? catalogScrollY : lastScrollY,
+    }))
+  }
+
+  async function restorePosition(scrollY) {
+    const target = navigation
+    await tick()
+    requestAnimationFrame(() => {
+      if (navigation !== target || !target?.current()) return
+      setScroll(scrollY)
+    })
+  }
 
   function pauseBrowsing() {
     if (!shelvesController && !seriesController) return
@@ -287,7 +317,10 @@
   // A reader can navigate away mid-word or with a request in flight. Everything this
   // component owns is cancelled together, so none of it can deliver into the next screen.
   onDestroy(() => {
-    saveHomeState()
+    // On route destruction the document may already have the destination's scroll.
+    saveHomeState(false)
+    rememberView()
+    navigation = null
     clearTimeout(searchTimer)
     searchSerial += 1
     shelvesSerial += 1
@@ -310,6 +343,7 @@
       if (!advancedOpen) {
         runSearch('')
         resumeBrowsing()
+        restorePosition(catalogScrollY)
       }
       return
     }
@@ -323,6 +357,7 @@
       searchController = null
       searchError = null
       searching = true
+      searchVersion = null
     }
     searchTimer = setTimeout(() => {
       submittedQuery = term
@@ -331,16 +366,22 @@
   }
 
   async function loadLibraries() {
+    const target = navigation
+    const version = target?.version().catalog
     // Settled with the rest: the switcher not loading must not blank the shelf, it
     // just leaves the reader unable to narrow it.
     try {
-      libraries = await listLibraries()
+      const found = await listLibraries()
+      if (target !== navigation) return
+      libraries = found
+      librariesVersion = version
     } catch {
       libraries = []
     }
   }
 
   async function loadShelves() {
+    const version = navigation?.version()
     const serial = ++shelvesSerial
     shelvesController?.abort()
     const controller = new AbortController()
@@ -397,10 +438,13 @@
     // symptom was four permanently empty shelves - which reads as an empty library.
     // A shelf that could not be read is not a shelf with nothing on it.
     shelvesFailed = outcomes.filter((outcome) => outcome.status === 'rejected').length
+    shelvesVersion = shelvesFailed === 0 ? version : null
     shelvesController = null
   }
 
   async function loadSeries(page = seriesPage) {
+    const version = navigation?.version().catalog
+    seriesVersion = null
     const serial = ++seriesSerial
     seriesController?.abort()
     const controller = new AbortController()
@@ -436,6 +480,7 @@
         allSeries = answer
       }
       error = null
+      seriesVersion = version
       await tick()
       if (restoreScrollY !== null) {
         const scrollY = restoreScrollY
@@ -505,6 +550,8 @@
     if (next === libraryId) return
     clearTimeout(searchTimer)
     libraryId = next
+    navigation = readerNavigationState.open(user?.id, `home:${next ?? ''}`)
+    librariesVersion = seriesVersion = shelvesVersion = searchVersion = null
     syncError = null
     syncNotice = null
     retryTargets = []
@@ -528,14 +575,53 @@
     // null here, but only the former survives a reload as a decision.
     const remembered = readPreference(user?.id ?? null, null, Preference.LIBRARY, '')
     libraryId = remembered === '' ? null : remembered
+    navigation = readerNavigationState.open(user?.id, `home:${libraryId ?? ''}`)
     const rememberedState = readHomeState(user?.id ?? null, libraryId)
     if (rememberedState) {
       seriesPage = rememberedState.page
       restoreScrollY = rememberedState.scrollY
       catalogScrollY = rememberedState.scrollY
     }
-    loadLibraries()
-    refresh()
+    const saved = navigation.read()
+    const version = navigation.version()
+    if (saved) {
+      libraries = saved.libraries
+      keepReading = saved.keepReading
+      onDeck = saved.onDeck
+      recent = saved.recent
+      updated = saved.updated
+      allSeries = saved.allSeries
+      seriesPage = saved.seriesPage
+      query = saved.query
+      submittedQuery = saved.query
+      results = saved.results
+      searchVersion = saved.searchVersion
+      librariesVersion = saved.librariesVersion
+      seriesVersion = saved.seriesVersion
+      shelvesVersion = saved.shelvesVersion
+      browsingPaused = saved.browsingPaused
+      catalogScrollY = saved.catalogScrollY
+      lastScrollY = saved.scrollY
+      restoreScrollY = null
+      restorePosition(saved.scrollY)
+    }
+    if (librariesVersion !== version.catalog) loadLibraries()
+    if (query.trim()) {
+      browsingPaused ||= seriesVersion !== version.catalog ||
+        shelvesVersion?.catalog !== version.catalog || shelvesVersion?.progress !== version.progress
+      if (searchVersion !== version.catalog || !results) runSearch(query)
+    } else {
+      browsingPaused = false
+      if (seriesVersion !== version.catalog) loadSeries()
+      if (shelvesVersion?.catalog !== version.catalog || shelvesVersion?.progress !== version.progress) loadShelves()
+    }
+    const rememberScroll = () => {
+      if (window.location.hash && window.location.hash !== '#/' && window.location.hash !== '#') return
+      lastScrollY = window.scrollY
+      if (!advancedOpen && !query.trim()) catalogScrollY = lastScrollY
+    }
+    if (!saved) rememberScroll()
+    window.addEventListener('scroll', rememberScroll, { passive: true })
     refreshCoordinator =
       createHomeRefreshCoordinator({
         selectedLibrary: () => libraryId,
@@ -556,6 +642,7 @@
     // The only trustworthy staleness signal.
     const offResync = eventHub.onResync(refreshCoordinator.onResync)
     return () => {
+      window.removeEventListener('scroll', rememberScroll)
       offCatalog()
       offProgress()
       offResync()
