@@ -42,7 +42,7 @@
         </span>
       </a>
     {/if}
-    <a class="secondary" href={`#/read/${first.id}/start`} data-testid="series-from-start">
+    <a class="secondary" href={`#/read/${first.id}?start=1`} data-testid="series-from-start">
       <BookOpen size={16} aria-hidden="true" />
       <span class="text">{$_('reader.fromStart')}</span>
     </a>

@@ -14,7 +14,9 @@ import { progressWrites } from '../src/lib/progressWrites.js'
 import { bindEpubFrame } from '../src/reader/epubFrame.js'
 import { epubNavigationFor, epubProgressFor, epubResume } from '../src/reader/epubPosition.js'
 
-const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
+const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(),
+  router: { querystring: '' },
+}))
 vi.mock('svelte-spa-router', () => router)
 
 function reply(body, status = 200) {

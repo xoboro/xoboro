@@ -9,13 +9,13 @@ describe('series entry actions', () => {
     const started = { ...first, progress: { page: 6, completed: false } }
     render(SeriesActions, { first: started, resume: started })
     expect(screen.getByTestId('series-continue')).toHaveAttribute('href', '#/read/chapter-1')
-    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1/start')
+    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1?start=1')
   })
 
   it('keeps restart distinct from continuing a later chapter', () => {
     render(SeriesActions, { first, resume: { id: 'chapter-2', title: 'Synthetic next chapter' } })
     expect(screen.getByTestId('series-continue')).toHaveAttribute('href', '#/read/chapter-2')
-    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1/start')
+    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1?start=1')
   })
 
   it('does not offer duplicate continue for a chapter with no progress', () => {
@@ -35,6 +35,6 @@ describe('series entry actions', () => {
     render(SeriesActions, { first: started, resume: started, busy: true })
     expect(screen.getByTestId('series-continue')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByTestId('series-continue')).not.toHaveAttribute('href')
-    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1/start')
+    expect(screen.getByTestId('series-from-start')).toHaveAttribute('href', '#/read/chapter-1?start=1')
   })
 })

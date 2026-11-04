@@ -10,7 +10,8 @@
    * The item loaded here is passed to the chosen reader. Each reader can still load
    * itself when mounted directly, but route entry must not request the same item twice.
    */
-  import { tick } from 'svelte'
+  import { tick, untrack } from 'svelte'
+  import { replace, router as routeState } from 'svelte-spa-router'
   import { _ } from '../lib/i18n.js'
   import {
     isRetryableDeliveryFailure,
@@ -24,11 +25,16 @@
 
   let kind = $state(null)
   let context = $state(null)
+  let readerParams = $state(null)
   let error = $state(null)
   let retryable = $state(false)
   let controller = null
+  let normalizedRestartId = null
+  const restartRequested = $derived(startAtBeginning ||
+    new URLSearchParams(routeState.querystring ?? '').get('start') === '1')
 
-  async function load(id, restart = startAtBeginning) {
+  async function load(id, restart = restartRequested) {
+    normalizedRestartId = null
     controller?.abort()
     const requestController = new AbortController()
     controller = requestController
@@ -44,6 +50,16 @@
       const loaded = await readMediaItemReaderContext(id, { signal: requestController.signal })
       if (requestController.signal.aborted) return
       context = restart ? { ...loaded, item: { ...loaded.item, progress: null } } : loaded
+      readerParams = { id }
+      const query = new URLSearchParams(routeState.querystring ?? '')
+      if (restart && query.get('start') === '1') {
+        query.delete('start')
+        normalizedRestartId = id
+        const suffix = query.toString()
+        // Consume the instruction without reloading this already prepared reader.
+        // A later refresh or sign-in then follows an ordinary resume URL.
+        replace(`/read/${id}${suffix ? `?${suffix}` : ''}`)
+      }
       // `type` is the field the production Xoboro DTO actually serializes. Keep the
       // older aliases behind it for fixtures/older servers, but never let their absence
       // send a production NOVEL through the image reader.
@@ -61,7 +77,11 @@
     // Re-read when the identifier changes: walking to the next item in a series can
     // cross from a comic to a novel, and the wrong reader would render nothing.
     const id = params.id
-    load(id, startAtBeginning)
+    const restart = restartRequested
+    untrack(() => {
+      if (normalizedRestartId === id && !restart && context) return
+      load(id, restart)
+    })
     return () => controller?.abort()
   })
 </script>
@@ -71,9 +91,9 @@
     <ErrorNotice {error} onretry={retryable ? () => load(params.id) : null} />
   </div>
 {:else if kind === 'NOVEL'}
-  <EpubReader {params} initialItem={context.item} initialContext={context} />
+  <EpubReader params={readerParams} initialItem={context.item} initialContext={context} />
 {:else if kind}
-  <Reader {params} initialContext={context} />
+  <Reader params={readerParams} initialContext={context} />
 {:else}
   <p class="waiting" role="status">{$_('common.loading')}</p>
 {/if}

@@ -7,7 +7,9 @@ import Reader from '../src/reader/Reader.svelte'
 import { resetProgressClock } from '../src/lib/api/progress.js'
 import { progressWrites } from '../src/lib/progressWrites.js'
 
-const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn() }))
+const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(),
+  router: { querystring: '' },
+}))
 vi.mock('svelte-spa-router', () => router)
 
 function reply(body, status = 200) {
@@ -71,6 +73,7 @@ function standardRoutes(extra = []) {
 }
 
 beforeEach(() => {
+  router.router.querystring = ''
   progressWrites.clear()
   resetProgressClock()
   router.replace.mockReset()
@@ -102,6 +105,32 @@ function place(node, { top, bottom }) {
 }
 
 describe('Reader', () => {
+  it('consumes a restart URL so refreshing resumes the subsequent saved position', async () => {
+    localStorage.setItem('xoboro.reader.mode', 'paged')
+    const { default: ReaderRoute } = await import('../src/reader/ReaderRoute.svelte')
+    globalThis.fetch = standardRoutes([
+      ['/media-items/m1/reader-context', reply({ ...CONTEXT, item: {
+        ...ITEM, progress: { page: 2, completed: false },
+      } })],
+    ])
+    history.replaceState(null, '', '#/read/m1?start=1')
+    router.router.querystring = 'start=1'
+    router.replace.mockImplementation(async (path) => {
+      history.replaceState(null, '', `#${path}`)
+      router.router.querystring = ''
+    })
+    const first = render(ReaderRoute, { params: { id: 'm1' }, startAtBeginning: true })
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toMatch(/3.*1/))
+    expect(location.hash).toBe('#/read/m1')
+    await fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await first.rerender({ params: { id: 'm1' }, startAtBeginning: false })
+    expect(screen.getByTestId('position').textContent).toMatch(/3.*2/)
+    expect(globalThis.fetch.mock.calls.filter(([url]) => url.includes('/reader-context'))).toHaveLength(1)
+    first.unmount()
+    render(ReaderRoute, { params: { id: 'm1' } })
+    await waitFor(() => expect(screen.getByTestId('position').textContent).toMatch(/3.*2/))
+  })
+
   it('captures document bottom on dismissal before a queued scroll event can run', async () => {
     globalThis.fetch = standardRoutes()
     const { container } = render(Reader, { params: { id: 'm1' }, initialContext: CONTEXT })

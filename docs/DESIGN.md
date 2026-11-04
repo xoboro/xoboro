@@ -286,8 +286,10 @@ page-only records retain their page-based fallback. Keyboard controls remain fix
 to the viewport so focusing them cannot scroll a long chapter to the beginning.
 
 A partly read first chapter has a Continue action. From Start uses the explicit
-`#/read/:id/start` route and ignores stored progress for comic/PDF and EPUB entry;
-ordinary `#/read/:id` entry resumes normally. Series Continue chooses the most
+`#/read/:id?start=1` instruction and ignores stored progress for comic/PDF and EPUB
+entry. It consumes that instruction immediately after preparing the context, keeping
+the active reader in place; subsequent refresh and sign-in resume normally at
+`#/read/:id`. Series Continue chooses the most
 recently read unfinished item, then the next unread item when none is unfinished.
 
 ### Progress conflict is silently reconciled
