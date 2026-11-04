@@ -328,6 +328,20 @@ filter state is not restored by these snapshots.
 
 ### Browser acceptance remains a release gate
 
+Installed or suspended documents can outlive a deployment. Container deployments
+retain only fingerprinted public bundles under `/config/web-assets`; the current
+shell always comes from the running image. Native deployments can opt into the
+same behavior with `XOBORO_WEB_ASSET_ARCHIVE_PATH`. Missing `/assets` requests return
+a non-cacheable 404, never the HTML shell. Archive lookups cannot escape their root
+or publish arbitrary configuration files.
+
+A small inline bootstrap handles boot-module and Vite preload failures before
+application imports are available. It performs at most one recovery navigation per
+entry bundle in the tab, preserves the deployment path and reader hash, and removes
+its cache-busting marker on the recovered document. A URL marker also prevents loops
+when session storage is unavailable. Ordinary runtime, cover, and analytics errors
+do not reload the application.
+
 Automated tests cover request ownership and DOM behavior, but they do not replace a
 real mobile browser. Release acceptance still verifies history replacement, series
 and Home restoration, safe areas, no horizontal page scrolling, minimum touch
@@ -615,7 +629,8 @@ Applied to both shells:
 The server originally had no `staticFiles`, `staticResources`, or
 `singlePageApplication` route. The serving layer now reads the packaged
 `XOBORO_WEB_PATH`, serves hashed assets with immutable caching, keeps the shell
-uncached, and falls back to it only outside reserved API/protocol routes.
+uncached, and falls back to it only outside reserved API/protocol routes and missing
+`/assets` requests.
 
 ### The base path is real, and it is an application concern
 

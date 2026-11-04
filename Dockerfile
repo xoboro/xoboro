@@ -59,6 +59,8 @@ ENV XOBORO_PORT=25600 \
     XOBORO_DATABASE_PATH=/config/xoboro.sqlite \
     XOBORO_FONTS_PATH=/config/fonts \
     XOBORO_WEB_PATH=/opt/xoboro/web
+# Retain hashed bundles for suspended documents; never retain an old HTML shell.
+ENV XOBORO_WEB_ASSET_ARCHIVE_PATH=/config/web-assets
 
 USER 10001:10001
 

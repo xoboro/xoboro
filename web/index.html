@@ -35,6 +35,52 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Xoboro" />
     <title>Xoboro</title>
+    <script id="xoboro-asset-recovery">
+      // Run before the module entry: a stale installed document may be unable to
+      // import even main.js. Recover once per entry bundle, preserving the route.
+      (() => {
+        const marker = '_xoboro_recover'
+        const initial = new URL(window.location.href)
+        const previous = initial.searchParams.get(marker)
+        if (previous) {
+          initial.searchParams.delete(marker)
+          window.history.replaceState(window.history.state, '', initial.href)
+        }
+        let recovering = false
+        const recover = () => {
+          if (recovering) return false
+          const entry = document.querySelector('script[type="module"][src]')
+          if (!entry) return false
+          const url = new URL(entry.src, window.location.href)
+          if (url.origin !== new URL(window.location.href).origin || !url.pathname.includes('/assets/')) return false
+          const key = `xoboro.asset-recovery:${url.pathname}`
+          let consumed = previous === url.pathname
+          try {
+            consumed = consumed || sessionStorage.getItem(key) === '1'
+            if (!consumed) sessionStorage.setItem(key, '1')
+          } catch {
+            // The navigation marker also bounds retries when storage is unavailable.
+          }
+          if (consumed) return false
+          recovering = true
+          const destination = new URL(window.location.href)
+          destination.searchParams.set(marker, url.pathname)
+          window.location.replace(destination.href)
+          return true
+        }
+        window.addEventListener('vite:preloadError', (event) => {
+          if (recover()) event.preventDefault()
+        })
+        window.addEventListener('error', (event) => {
+          const element = event.target
+          const source = element?.tagName === 'SCRIPT' ? element.src
+            : element?.tagName === 'LINK' && ['stylesheet', 'modulepreload'].includes(element.rel) ? element.href : null
+          if (!source) return
+          const url = new URL(source, window.location.href)
+          if (url.origin === new URL(window.location.href).origin && url.pathname.includes('/assets/')) recover()
+        }, true)
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

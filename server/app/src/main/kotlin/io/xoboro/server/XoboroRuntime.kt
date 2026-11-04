@@ -245,6 +245,7 @@ class XoboroRuntime private constructor(
   val effectiveServerContextPath: String?,
   /** Directory holding the built web UI, or `null` when none is deployed. */
   val webDirectory: Path?,
+  val webAssetArchiveDirectory: Path?,
   val corsAllowedOrigins: Set<String>,
   val trustedProxyHosts: Set<String>,
   val metricsToken: String?,
@@ -1169,6 +1170,7 @@ class XoboroRuntime private constructor(
           // appears while the server runs is not a case worth supporting, and a
           // per-request stat on every unmatched path would be.
           webDirectory = config.webDirectory.takeIf(::isServableWebDirectory),
+          webAssetArchiveDirectory = config.webAssetArchiveDirectory,
           corsAllowedOrigins = config.corsAllowedOrigins,
           trustedProxyHosts = config.trustedProxyHosts,
           metricsToken = config.metricsToken,
