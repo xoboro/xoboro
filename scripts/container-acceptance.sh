@@ -63,6 +63,7 @@ start_container() {
     --read-only \
     --cap-drop ALL \
     --security-opt no-new-privileges:true \
+    --env SQLITE_TMPDIR=/config \
     --tmpfs /tmp:rw,exec,size=1g,mode=1777 \
     --tmpfs /config:rw,size=256m,mode=0755,uid=10001,gid=10001 \
     --publish "127.0.0.1:$port:25600" \

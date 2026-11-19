@@ -20,6 +20,8 @@ branch merge.
   `/media` read-only, and provide bounded temporary storage. The `/tmp` tmpfs is
   executable because SQLite JDBC extracts its architecture-specific native
   library there at startup.
+- Set `SQLITE_TMPDIR=/config` so large SQLite statement journals use persistent
+  disk space rather than exhausting the bounded `/tmp` tmpfs during deletion.
 - Publish port 25600 by default and make both the host port and optional reverse
   proxy context path configurable.
 - Use `/ready` as the context-aware container health check and allow 35 seconds

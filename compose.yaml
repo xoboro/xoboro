@@ -13,6 +13,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
+      SQLITE_TMPDIR: /config
       XOBORO_PORT: "25600"
       XOBORO_DATABASE_PATH: /config/xoboro.sqlite
       XOBORO_FONTS_PATH: /config/fonts
